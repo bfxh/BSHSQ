@@ -530,7 +530,12 @@ impl Rope {
         // 钳位后：体不会被推得超过"刚好不再接近"，穿透量本身不强行愈合（不再增长即可）。
         let v_p = (self.pos[i] - self.prev[i]) * inv_h;
         let v_b = b.linvel + self.body_dv[j];
-        let approach = (v_b - v_p).dot(n);
+        // **接触点速度**（§8.4.30 / 计划 2c-2）：体在转时，**材料点**的速度是 `v + ω × r`
+        // （`r = q − vpos`），不是体心速度。**法向的 `approach` 与摩擦的滑移量共用这一个口径** ——
+        // §8.4.19 与 §8.4.25 两次都栽在"两支用了不同的相对速度"上（法向用新值、摩擦用旧值），
+        // 所以这里**一次改齐**。`ω = 0` ⇒ `v_point == v_b` ⇒ 与既有行为逐位一致（零换代门）。
+        let v_point = v_b + b.angvel.cross(q - vpos);
+        let approach = (v_point - v_p).dot(n);
         let lam_geom = depth / (w_p + w_b + self.contact_compliance / (h * h));
         let lam_vel = if approach > 0.0 {
             approach * h / (w_p + w_b)
@@ -557,7 +562,7 @@ impl Rope {
             // （见上面的 `approach`），摩擦这里原来只用 `b.linvel` ⇒ 子步内 `body_dv` 一涨，
             // 滑移估计就**过期** ⇒ 系统性切向偏置（实测：`μ=0` 时盒子 3 维下托得住，
             // `μ` 越大横向蠕变越猛 ⇒ ~1 mm/tick、400 tick 滑出绳端）。
-            let dp = self.pos[i] - self.prev[i] - v_b * h;
+            let dp = self.pos[i] - self.prev[i] - v_point * h;
             let t = dp - n * dp.dot(n);
             let slip = t.length();
             if slip > 0.0 {
