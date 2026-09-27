@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""RUST-WL 门禁统一入口（单一来源）。
+"""BSHSQ 门禁统一入口（单一来源）。
 
 CI 的 ratchet 作业只调本文件；本文件列出全部门禁步骤。改门禁 = 改这里 + 对应脚本 +
 基线，三处同源（gate_selftest 的 S1 校验 ci.yml 是否调用本文件）。

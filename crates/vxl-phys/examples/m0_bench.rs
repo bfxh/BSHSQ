@@ -45,7 +45,7 @@ fn main() {
     }
 
     println!(
-        "RUST WL / vxl_phys M0 基准：{n_static} 静态 + {n_dynamic} 动态，60Hz 固定步，240 tick"
+        "BSHSQ / vxl_phys M0 基准：{n_static} 静态 + {n_dynamic} 动态，60Hz 固定步，240 tick"
     );
 
     // 预热 10 tick。

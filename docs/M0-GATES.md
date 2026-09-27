@@ -80,7 +80,7 @@ bash scripts/vocab_scan.sh .
 
 ## 待用户动作
 
-1. `git push origin feat/m0-gates` 并确认 Actions 启用（仓库 `bfxh/RUST-WL`，不要删）；
+1. `git push origin feat/m0-gates` 并确认 Actions 启用（仓库 `bfxh/BSHSQ`，不要删）；
 2. 词汇禁令待裁项（上 §4；点头即维持现状，或裁改名）；
 3. 门槛数字注环境：本机 = Windows x86_64（rustc 1.97.1，release，LTO thin）；
    T0 目标机（GTX 1070 / 4C8T）与 T2 机的数字以 CI 产物为准。

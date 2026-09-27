@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""RUST-WL 门禁共用件（零依赖纯 stdlib）。
+"""BSHSQ 门禁共用件（零依赖纯 stdlib）。
 
 提供：Rust 感知掩码、函数体遍历（算 args / 嵌套深度 / 圈复杂度 / 行数）、
 git-tracked 文件列举、基线读写、棘轮判定，以及两个统一入口

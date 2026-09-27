@@ -1,11 +1,11 @@
-# RUST WL —— vxl_phys 自研 Rust 物理引擎
+# BSHSQ —— vxl_phys 自研 Rust 物理引擎
 
 > 依据：[`docs/SPEC.md`](docs/SPEC.md)（引擎权威规格，V1.3）+ 上游总架构
 > `VoxelForge-V3/docs/PHYS-ENGINE-VXLPHYS-V2.md`（v2 权威，Rust 路线；施工分解见
 > `VoxelForge-V3/docs/SPEC-VXLPHYS-M0-V1.md`）；M0 实测记录见
 > [`docs/M0-GATES.md`](docs/M0-GATES.md)。
 > 定位：**独立商业级 Rust 物理引擎**，纯 Rust、确定性优先、模块化 crate DAG，
-> 与任何消费工程零关联；仓库目录名「RUST WL」= **Rust 物理（WuLi）**。
+> 与任何消费工程零关联；仓库目录名「BSHSQ」= **Rust 物理（WuLi）**。
 
 ## 状态：M0 骨架续建（T1–T4 已交付，待 CI 绿）
 

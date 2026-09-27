@@ -1,4 +1,4 @@
-# cargo-deny 配置（RUST-WL / vxl_phys）
+# cargo-deny 配置（BSHSQ / vxl_phys）
 # 目标：§0/§11「许可 MIT OR Apache-2.0；依赖审计禁 GPL 传染」+ §11 依赖漏洞审计（RUSTSEC）。
 # 本文件只管依赖审计（独立 CI 作业 `cargo-deny`），不碰既有的轻量 ratchet 层。
 # CI 跑 `cargo deny check`（licenses + advisories + bans 全量）。

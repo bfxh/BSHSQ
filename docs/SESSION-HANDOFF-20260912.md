@@ -1,6 +1,6 @@
 # 会话交接与工作整理（2026-09-12）
 
-> 本文整理会话 `sess_e5a7713f`（"根据VXLPHYS文档开搞RUST WL项目"）的全部有效产出，
+> 本文整理会话 `sess_e5a7713f`（"根据VXLPHYS文档开搞BSHSQ项目"）的全部有效产出，
 > 供该会话回档后作为唯一参考。主线工作后续在本文件所在仓库直接推进。
 > 原始材料：`C:\Users\lbx13\.zcode\cli\log\zcode-2026-09-12.jsonl`（事件流）、
 > `C:\Users\lbx13\.zcode\cli\artifacts\sess_e5a7713f-*/`（214 个工具结果溢出文件）。
@@ -8,7 +8,7 @@
 
 ## 1. 项目根本约束（回档也不会变）
 
-- 仓库 `bfxh/RUST-WL`（private，gh 已登录 bfxh）——**用户明确要求：不要删**。
+- 仓库 `bfxh/BSHSQ`（private，gh 已登录 bfxh）——**用户明确要求：不要删**。
 - 与 `D:\开发\VoxelForge-V3` **零关联**：文档/注释/Cargo 元数据/术语全部清除。
   措辞映射：宿主客户代号 → 消费方/集成方；游戏侧 → 集成方；旧规格书
   PHYS-ENGINE-VXLPHYS-V1 → `docs/SPEC.md`（V1.2 起）。
