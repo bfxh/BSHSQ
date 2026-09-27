@@ -14,3 +14,12 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    ignore:
+      # ci.yml 里 dtolnay/rust-toolchain 用**两次**、ref 不同：stable 一个 sha、nightly 一个 sha。
+      # dependabot 把同一 action 的两个 ref 当成一条依赖，会提议把 nightly 那行也改成 stable 的 sha
+      # （PR #12：注释还写着 nightly，实际拿到 stable → miri / TSan 拿不到 nightly 工具链直接红）。
+      # 两条 ref 需要人工按用途分别定，不交给自动 bump。
+      - dependency-name: "dtolnay/rust-toolchain"
+        update-types: ["version-update:semver-patch",
+                       "version-update:semver-minor",
+                       "version-update:semver-major"]
