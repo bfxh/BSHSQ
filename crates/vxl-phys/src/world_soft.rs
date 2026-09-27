@@ -123,9 +123,21 @@ impl World {
             // （单点接触、力臂 ≈ 0.3 m、`I_zz ≈ 0.031`）⇒ `|ω|` 一 tick 就到 **5~8 rad/s**
             // ⇒ 接触立刻丢失（`hit = 0`）⇒ 盒子被甩下去（门面 1800 tick y = −2420）。
             // **自扮引擎侧一直不读 `reactions`**（只吃 `body_dv`）⇒ 它托得住（y@1800 = +0.995），
-            // 这正是两侧差异的最后一块。**要恢复本行**必须先做"转动感知的代理"（见 §8.4.10）：
-            // ⚠️ 恢复时口径要一并修：`integrate_velocities` 每**子步**消费并清零 `force/torque`，
-            // 而这里在所有子步**之后**才注入 ⇒ 实收角冲量 = `τ/substeps`（默认 2 ⇒ **差 2×**）。
+            // 这正是两侧差异的最后一块。**要恢复本行**必须先做"转动感知的代理"（见 §8.4.10）。
+            //
+            // ⚠️ **恢复时口径必须用下面这一行**（已由 `crates/vxl-phys/tests/angular_impulse_contract.rs`
+            // 钉住，2026-09-28 §8.4.28）：`torque` 是**每子步消费并清零**的累加器
+            // （`Integrate`：`ω += I⁻¹·τ·dt_sub` 之后清零），而本处注入发生在**所有子步之后**
+            // ⇒ 只被**一个**子步消费 ⇒ 想交付"整 tick 的角冲量 `r.torque`"就必须 `÷ dt_sub`
+            // （= `× substeps / dt`）；写成 `÷ dt` 只会交付 `1/substeps`（默认 2 ⇒ **差 2×**，
+            // 那条判据的金丝雀里实测比值正好 `0.500000`）。
+            // for r in &rope.reactions {
+            //     let b = r.body as usize;
+            //     if b < self.bodies.len() {
+            //         let substeps = self.config.substeps.max(1) as f32;
+            //         self.bodies.torque[b] += r.torque * (substeps / dt);
+            //     }
+            // }
             let _ = &rope.reactions;
         }
         self.rope_proxies = proxies;
