@@ -24,6 +24,9 @@ pub struct RigidProxy {
     pub angvel: Vec3,
     /// `0` = 静态（仍参与接触，但不接收反作用）。
     pub inv_mass: f32,
+    /// **本体系逆惯量**（主轴）：开角反作用（`Rope::angular_reaction`）时用来推进"虚拟角速度"
+    /// （与 `body_dv` 对平移的作用对称）。静态/睡眠体填 0。
+    pub local_inv_inertia: Vec3,
 }
 
 /// 反作用（**冲量**口径，每 tick 累加；门面 `÷dt` 后作为力施加）。

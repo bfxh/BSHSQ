@@ -272,7 +272,8 @@ fn rope_couples_with_rigid_bodies() {
         pos: Vec3::new(0.0, -0.5, 0.0),
         rot: Quat::IDENTITY,
         linvel: Vec3::ZERO,
-        angvel: Vec3::ZERO, // 2c-1
+        angvel: Vec3::ZERO,            // 2c-1
+        local_inv_inertia: Vec3::ZERO, // 静态/未用（角反作用开关默认关）
         inv_mass: 0.0,
     };
     let mut r = Rope::line(
@@ -335,6 +336,7 @@ fn rope_couples_with_rigid_bodies() {
                 rot: Quat::IDENTITY,
                 linvel: vel,
                 angvel: Vec3::ZERO, // 2c-1：本判据场景里体不转（ω = 0 ⇒ 转动项恒等）
+                local_inv_inertia: Vec3::ZERO, // 静态/未用（角反作用开关默认关）
                 inv_mass: 1.0 / m,
             };
             let bodies: &[RigidProxy] = if couple {

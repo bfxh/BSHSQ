@@ -54,6 +54,7 @@ fn run(c: &Cfg) -> (f32, f32, f32) {
             rot: Quat::IDENTITY,
             linvel: vel,
             angvel: Vec3::ZERO, // 2c-1：本判据场景里体不转（ω = 0 ⇒ 转动项恒等）
+            local_inv_inertia: Vec3::ZERO, // 静态/未用（角反作用开关默认关）
             inv_mass: 1.0 / c.mass,
         };
         r.step(DT, G, &NoProviders, 0, std::slice::from_ref(&proxy));

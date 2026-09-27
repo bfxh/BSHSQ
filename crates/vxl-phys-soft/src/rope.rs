@@ -22,6 +22,20 @@ use vxl_phys_core::{interop::ProviderColliders, Mat3, Quat, Shape, Vec3};
 /// 入口面缓存里的"无"（见 `Rope::entry`）。
 const FACE_NONE: u8 = 255;
 
+/// **虚拟转动状态**（与 `bodies` 同序，每 tick 重置；计划 2c-1 / 2c-3 引入）。
+///
+/// **为什么收成一个结构**：`Rope` 受 god 门**成员棘轮**（只增即红，阈值 24 成员）—— 这两步一上来就加了三个
+/// 字段（25 > 24）⇒ 按先例（`world_soft.rs` 的 `FluidBoundary`：把散字段收起来腾成员位）合并成一个。
+#[derive(Default)]
+struct VirtRot {
+    /// 当前子步的虚拟朝向：每 tick 从 `b.rot` 起，按 `b.angvel + dw` 逐子步 `integrate_angular` 推进。
+    cur: Vec<Quat>,
+    /// 上一子步的虚拟朝向（`crossed_face` 要"两个位姿各带朝向"）。
+    prev: Vec<Quat>,
+    /// 子步内累积的**角速度反作用** `Σ I⁻¹·(r × J)`（角反作用开关关时恒 0）。
+    dw: Vec<Vec3>,
+}
+
 /// **一次体接触的收集项**（§8.4.24）：先收全部命中、再按**物理序**施加 ⇒ 结果与**数组方向无关**。
 ///
 /// 为什么必须这么做：`project_body_contacts` 是**顺序 Gauss-Seidel**（体速度 `body_dv` 就地推进），
@@ -101,11 +115,13 @@ pub struct Rope {
     /// 子步内**虚拟位移**（同上序）：体自己走的 + 我们推开的，**增量累加** —— 见 `project_body_contacts`
     /// 里那条"不能乘整段时间"的注（那是所有"参数怎么调都逃逸"的真凶）。
     body_disp: Vec<Vec3>,
-    /// **子步内虚拟朝向**（与 `bodies` 同序，每 tick 开头重置为各自 `b.rot`）：由 `b.angvel` 逐子步推进
-    /// ⇒ 接触几何跟着**转动**走（§8.4.29 / 计划 2c-1）。`ω = 0` 时它恒等于 `b.rot`（零换代门）。
-    q_virt: Vec<Quat>,
-    /// 上一子步的虚拟朝向（`crossed_face` 要"两个位姿各带朝向"，见 `rigid.rs`）。
-    q_virt_prev: Vec<Quat>,
+    /// **虚拟转动**（朝向 / 上一朝向 / 角速度反作用；见 [`VirtRot`]）。
+    vrot: VirtRot,
+    /// **角反作用开关**（计划 2c-3，**默认关**）：开 ⇒ 按库仑/冲量口径把 `r × J` 回填成体的角冲量
+    /// （门面按 `angular_impulse_contract` 钉住的契约注入），并把它折进"虚拟角速度"。
+    /// **默认关**是刻意的：打开会改变动态盒在绳上的读数（那是**换代级**），先按"0=关字段"的先例落地，
+    /// 让"打开会怎样"由实测登记（§8.4.31）。静态体/睡眠体不受影响（`inv_mass`/`awake` 已为 0）。
+    pub angular_reaction: bool,
     /// **位置口径的补足量**（同上序，每 tick 开头清零；**门面读它做 `bodies.position += dx`**）：
     /// `Σ −n·w_b·(λ_geom − λ)` —— `λ = min(λ_geom, λ_vel)` 被**速度钳位**压掉的那一部分，
     /// **只补位置、不补速度**。
@@ -167,9 +183,9 @@ impl Rope {
             reactions: Vec::new(),
             body_dv: Vec::new(),
             body_disp: Vec::new(),
-            q_virt: Vec::new(),
-            q_virt_prev: Vec::new(),
+            vrot: VirtRot::default(),
             body_dx: Vec::new(),
+            angular_reaction: false,
             entry: vec![(u32::MAX, FACE_NONE); n],
         }
     }
@@ -306,12 +322,14 @@ impl Rope {
         self.body_dv.resize(bodies.len(), Vec3::ZERO);
         self.body_disp.clear();
         self.body_disp.resize(bodies.len(), Vec3::ZERO);
-        self.q_virt.clear();
-        self.q_virt.extend(bodies.iter().map(|b| b.rot));
-        self.q_virt_prev.clear();
-        self.q_virt_prev.extend(bodies.iter().map(|b| b.rot));
+        self.vrot.cur.clear();
+        self.vrot.cur.extend(bodies.iter().map(|b| b.rot));
+        self.vrot.prev.clear();
+        self.vrot.prev.extend(bodies.iter().map(|b| b.rot));
         self.body_dx.clear();
         self.body_dx.resize(bodies.len(), Vec3::ZERO);
+        self.vrot.dw.clear();
+        self.vrot.dw.resize(bodies.len(), Vec3::ZERO);
         let h = dt / self.substeps.max(1) as f32;
         for _ in 0..self.substeps {
             self.substep(h, gravity, providers, provider_count, bodies);
@@ -446,8 +464,9 @@ impl Rope {
             // **虚拟朝向**（§8.4.29 / 2c-1）：上一子步的朝向先存档（`crossed_face` 要两个位姿各带朝向），
             // 再用 `b.angvel` 按本子步时长推进。**静态/睡眠体的 `angvel` 为 0**（门面填 0，§8.4.27）
             // ⇒ 与既有行为逐位一致。
-            self.q_virt_prev[j] = self.q_virt[j];
-            self.q_virt[j] = self.q_virt[j].integrate_angular(b.angvel, h);
+            self.vrot.prev[j] = self.vrot.cur[j];
+            // 角速度 = 代理给的外部 ω + **本子步累积的反作用**（后者只在开关打开时非零）。
+            self.vrot.cur[j] = self.vrot.cur[j].integrate_angular(b.angvel + self.vrot.dw[j], h);
             let vpos = b.pos + self.body_disp[j];
             // **① 收集**（先不施加）：把本子步的全部命中收进 `hits`，命中判定与原来的逐粒子调用等价
             // （`box_hit` 只读 `self.pos[i]`/`prev[i]` 与体位姿，而响应只改**别的**粒子 ⇒ 顺序无关）。
@@ -463,8 +482,8 @@ impl Rope {
                     j,
                     b,
                     vpos,
-                    self.q_virt[j],
-                    self.q_virt_prev[j],
+                    self.vrot.cur[j],
+                    self.vrot.prev[j],
                     h,
                     radius,
                 ) else {
@@ -589,6 +608,16 @@ impl Rope {
             );
             self.body_dv[j] += impulse * b.inv_mass;
             self.body_disp[j] += impulse * (b.inv_mass * h);
+            // **角反作用**（计划 2c-3，开关默认关）：`r × J` 折成角速度增量，与 `body_dv` 对平移对称
+            // ⇒ 同一子步里后续粒子看到"已被转过一点"的体。量级由法向那支的钳位
+            // `min(λ_geom, λ_vel)` 限制（`r×J` 与 `J` 同源）⇒ 不必另设钳位。
+            // `I⁻¹` 在本体系逐轴相乘、再转回世界（与积分器 `apply_world_inv_inertia` 同口径）。
+            if self.angular_reaction {
+                let m = Mat3::from_quat(self.vrot.cur[j]);
+                let tau_local = m.transpose_mul_vec3(torque);
+                let dw = m.mul_vec3(tau_local.mul_per_elem(b.local_inv_inertia));
+                self.vrot.dw[j] += dw;
+            }
             match self.reactions.iter_mut().find(|e| e.body == b.body) {
                 Some(e) => {
                     e.impulse += impulse;

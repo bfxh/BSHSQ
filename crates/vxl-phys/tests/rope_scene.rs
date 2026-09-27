@@ -147,6 +147,68 @@ fn rope_rests_on_a_static_box_body_beside_a_rigid_body() {
     );
 }
 
+/// **角反作用（计划 2c-3）：偏置负载下"该转的转"** —— 盒子挂在绳端一侧（盒心 x=+0.25、绳只到 x=+0.5
+/// ⇒ 右半悬空），开着开关时接触必须把力矩回填给体（盒子开始倾），**关着时一点都不转**（金丝雀）。
+///
+/// 读数用"体顶朝向" `up = rot·Y` 的 `x` 分量：`up.x > 0` ⇒ 盒顶向 +x 倾 ⇒ **左侧下沉**。
+#[test]
+fn rope_torques_an_off_center_box_only_when_enabled() {
+    let run = |enable: bool| -> (f32, f32, f32, f32) {
+        let mut w = World::new(PhysConfig::default());
+        let mut rope = Rope::line(
+            Vec3::new(-0.5, 1.0, 0.0),
+            Vec3::new(0.5, 1.0, 0.0),
+            33,
+            0.02,
+        );
+        rope.damping = 0.999;
+        // **计划 2c-3 的开关**（默认关；本条是唯一动它的判据）
+        rope.angular_reaction = enable;
+        assert_eq!(w.add_rope(rope), 0);
+        for _ in 0..600 {
+            w.step();
+        }
+        let b = w.add_dynamic(
+            Shape::Box {
+                half: Vec3::new(0.3, 0.05, 0.3),
+            },
+            // 盒心偏置在 +x：盒跨 [-0.05, +0.55]，而绳只到 +0.50 ⇒ 右缘悬空
+            Vec3::new(0.25, 1.2, 0.0),
+            Quat::IDENTITY,
+            1.0 / 0.036,
+        ) as usize;
+        for _ in 0..600 {
+            w.step();
+        }
+        let up = w.bodies.rot(b).rotate_vec3(Vec3::Y);
+        (
+            up.x,
+            w.bodies.position[b].y,
+            w.bodies.angvel(b).length(),
+            w.bodies.position[b].x,
+        )
+    };
+
+    let (upx_on, y_on, w_on, x_on) = run(true);
+    let (upx_off, y_off, w_off, x_off) = run(false);
+    println!(
+        "开关 ON ：up.x={upx_on:+.6} 末 y={y_on:+.4} x={x_on:+.4} |ω|={w_on:.4}
+         开关 OFF：up.x={upx_off:+.6} 末 y={y_off:+.4} x={x_off:+.4} |ω|={w_off:.4}"
+    );
+    assert_eq!(
+        upx_off, 0.0,
+        "**金丝雀**：开关关着时接触不回填角冲量 ⇒ 盒子**一点都不该转**（实测 up.x={upx_off:+.6}）"
+    );
+    assert!(
+        upx_on.abs() > 0.02 && w_on > 1e-3,
+        "开着开关时偏置接触必须把体转起来（实测 up.x={upx_on:+.6}、|ω|={w_on:.4}）——         反了说明角冲量的**符号**错了（`r × J` 的臂取错方向）"
+    );
+    assert!(
+        y_on > 0.5,
+        "开着角反作用时盒子仍该被托住（实测末 y={y_on:+.4}）——它若掉下去，说明力矩回填把接触推崩了"
+    );
+}
+
 /// **绳索不该打扰睡眠体**（§8.4.27）：一只盒子在网格地形上**睡稳**之后，把绳搭在它顶上 ——
 /// 绳的接触照做（盒子对软体域是几何），但**反作用不许落在睡眠体上**（口径与 2b 流体一致：
 /// 睡眠体不吃外力）。不判 `awake` 时，反作用会**静默累进睡眠体的 `linvel`**（体在睡、位置不积分）

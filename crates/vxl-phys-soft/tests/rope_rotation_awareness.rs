@@ -39,6 +39,7 @@ fn run(omega: f32) -> (f32, f32, f32, u64) {
             rot: Quat::IDENTITY,
             linvel: vel,
             angvel: Vec3::new(0.0, 0.0, omega),
+            local_inv_inertia: Vec3::ZERO, // 静态/未用（角反作用开关默认关）
             inv_mass: 1.0,
         };
         r.step(DT, G, &NoProviders, 0, std::slice::from_ref(&proxy));

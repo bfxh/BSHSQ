@@ -92,6 +92,12 @@ impl World {
                 } else {
                     Vec3::ZERO
                 },
+                // 本体系逆惯量（开角反作用时绳要用它推进"虚拟角速度"；关时不用，填 0 也行，但保持一致更好）。
+                local_inv_inertia: if self.bodies.is_dynamic(i) && self.bodies.awake[i] {
+                    self.bodies.local_inv_inertia[i]
+                } else {
+                    Vec3::ZERO
+                },
                 // **睡眠体对软体域呈现为"静态"**（§8.4.27）：与 2b 流体同口径——流体那边睡眠体
                 // 照样生成边界粒子（"让静态几何可感"）但**不接收反作用**（`fluid_reaction_pass`
                 // 判 `awake`）。这里用更省的等价写法：`inv_mass = 0` ⇒ 绳索把它当墙（接触照做），
@@ -145,7 +151,18 @@ impl World {
             //         self.bodies.torque[b] += r.torque * (substeps / dt);
             //     }
             // }
-            let _ = &rope.reactions;
+            if rope.angular_reaction {
+                // **角反作用注入**（计划 2c-3）：口径按 `crates/vxl-phys/tests/angular_impulse_contract.rs`
+                // 钉住的契约 —— 本处注入发生在**所有子步之后** ⇒ 只被**一个**子步消费 ⇒ 必须 `÷ dt_sub`
+                // （= `× substeps / dt`）才交付"整 tick 的角冲量 `r.torque`"。
+                let substeps = self.config.substeps.max(1) as f32;
+                for r in &rope.reactions {
+                    let b = r.body as usize;
+                    if b < self.bodies.len() {
+                        self.bodies.torque[b] += r.torque * (substeps / dt);
+                    }
+                }
+            }
         }
         self.rope_proxies = proxies;
     }
