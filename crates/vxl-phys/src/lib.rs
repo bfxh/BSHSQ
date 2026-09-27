@@ -8,7 +8,8 @@
 //! 1. 力场 → 2. 速度积分 → 3. 宽相 → 4. 窄相 → 5. 求解 + 岛级休眠
 //!    → 6. 位置积分。
 //!
-//! 域通道（每 tick、体子步后）：流体、绳索、布料依次推进，空集直接返回。
+//! 域通道（每 tick、体子步全部完成之后）：`fluid_pass` 推进全部流体系统（`World::add_fluid` 注册）、
+//! `rope_pass` 推进全部绳索（`World::add_rope` 注册，软体域/T1）；两者都空集短路。
 //!
 //! 确定性（§5）：固定步长、严格 f32、有序归约；`state_hash()` 每 60 tick 比对。
 
@@ -37,7 +38,6 @@ mod types;
 mod world_body;
 mod world_build;
 mod world_ccd;
-mod world_cloth;
 mod world_health;
 mod world_soft;
 mod world_step;
