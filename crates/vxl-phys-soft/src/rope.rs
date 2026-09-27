@@ -530,7 +530,12 @@ impl Rope {
             let t = dp - n * dp.dot(n);
             let slip = t.length();
             if slip > 0.0 {
-                let budget = friction * depth;
+                // **候选①（§8.4.25 实验）：库仑锥的冲量口径** `|J_t| ≤ μ·J_n`。
+                // 本接触**实际**施加的法向冲量 ∝ `λ`（`J_n = m_p·w_p·λ/h`），**不是**几何穿透量
+                // `depth`（后者只在几何支被选中时等于 λ 的口径）⇒ 位置预算取 `μ·w_p·λ`。
+                // ⚠️ 这一版**预期更小**（静载下 λ 被速度钳位到远小于 λ_geom）⇒ 若它把托住打坏，
+                // 说明"现在的摩擦预算偏大"本身是**承重**的（`μ·depth` 在静载下远大于真实 `μ·J_n`）。
+                let budget = friction * (w_p * lam);
                 let removed = if slip < budget { slip } else { budget };
                 self.pos[i] -= t * (removed / slip);
             }
