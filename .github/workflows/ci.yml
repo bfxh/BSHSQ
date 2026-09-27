@@ -25,7 +25,7 @@ jobs:
           - { os: ubuntu-latest, label: "GCC / x86_64", linker: "" }
           - { os: ubuntu-latest, label: "Clang+LLD / x86_64", linker: "-C linker=clang -C link-arg=-fuse-ld=lld" }
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: clippy, rustfmt
@@ -48,7 +48,7 @@ jobs:
     name: miri (core 子集)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@be39649afda95dbf70f87cce95f68b8d5797b296 # nightly
         with:
           components: miri
@@ -62,7 +62,7 @@ jobs:
     name: loom (并发原语)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - name: loom 模型测试
         env:
@@ -75,7 +75,7 @@ jobs:
     name: TSan (并行路径)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@be39649afda95dbf70f87cce95f68b8d5797b296 # nightly
         with:
           components: rust-src
@@ -93,7 +93,7 @@ jobs:
     name: ASan (core + 门槛短跑)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@be39649afda95dbf70f87cce95f68b8d5797b296 # nightly
         with:
           components: rust-src
@@ -122,7 +122,7 @@ jobs:
           - { os: ubuntu-latest, label: "GCC", linker: "" }
           - { os: ubuntu-latest, label: "Clang", linker: "-C linker=clang -C link-arg=-fuse-ld=lld" }
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - name: Clang 工具链（clang 行）
         if: contains(matrix.label, 'Clang')
@@ -147,7 +147,7 @@ jobs:
     name: 确定性 (GCC-aarch64/qemu)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           targets: aarch64-unknown-linux-gnu
@@ -210,7 +210,7 @@ jobs:
     name: 棘轮门禁
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
@@ -222,7 +222,7 @@ jobs:
     name: 词汇禁令扫描
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: bash scripts/vocab_scan.sh .
 
   # ---- 依赖许可审计（cargo-deny；§0/§11「禁 GPL 传染」的传递依赖层面）----
@@ -232,7 +232,7 @@ jobs:
     name: 依赖许可审计 (cargo-deny)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: 安装 cargo-deny
         # 钉 0.20.2：0.14 系解析不了 RUSTSEC 新公告的 CVSS 4.0 字段（RUSTSEC-2026-0124
