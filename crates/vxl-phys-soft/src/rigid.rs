@@ -19,6 +19,9 @@ pub struct RigidProxy {
     pub rot: Quat,
     /// 体心线速度（摩擦用：粒子滑移量取**相对体**的，体在动时绳才不会被"粘"在原地）。
     pub linvel: Vec3,
+    /// **体心角速度**（§8.4.29 / 计划 2c-1：接触几何要跟着**转动**走 —— 虚拟位姿的朝向由它推进）。
+    /// 静态体与睡眠体一律填 `0`（睡眠体对软体域呈现静态，§8.4.27）。
+    pub angvel: Vec3,
     /// `0` = 静态（仍参与接触，但不接收反作用）。
     pub inv_mass: f32,
 }
@@ -48,9 +51,10 @@ pub struct RigidReaction {
 /// **调用方必须缓存这个面号**：穿越只在一子步成立 ⇒ 接触是**一段状态**（见 `Rope::entry`）。
 /// **为什么不用"最近面"**：体相对绳线**下沉**时最近面会在底面↔侧面↔顶面之间翻转 ⇒ 推力方向突变
 /// ⇒ 一次踢击把体送走（§8.4.1/§8.4.3 实测）；而"它穿过的那个面"只要还在从下面顶就一直是底面 ✓。
-#[allow(clippy::too_many_arguments)] // 形状 + 两个位姿 + 两个位置 + 半径
+#[allow(clippy::too_many_arguments)] // 两个位姿（各带朝向）+ 两个位置 + 半径
 pub fn crossed_face(
-    rot: Quat,
+    rot_prev: Quat,
+    rot_now: Quat,
     half: Vec3,
     pos_prev: Vec3,
     pos_now: Vec3,
@@ -65,9 +69,12 @@ pub fn crossed_face(
             _ => v.z,
         }
     }
-    let m = Mat3::from_quat(rot);
-    let a = m.transpose_mul_vec3(p_prev - pos_prev);
-    let b = m.transpose_mul_vec3(p_now - pos_now);
+    // **两个位姿各带自己的朝向**（§8.4.29）：体在转时"上一子步的局部系"与"当前的局部系"不同，
+    // 只用一个朝向就是把转动漏掉（`ω = 0` 时两者相同 ⇒ 与既有行为逐位一致）。
+    let m_a = Mat3::from_quat(rot_prev);
+    let m_b = Mat3::from_quat(rot_now);
+    let a = m_a.transpose_mul_vec3(p_prev - pos_prev);
+    let b = m_b.transpose_mul_vec3(p_now - pos_now);
     let mut best: Option<(f32, usize, f32, f32)> = None; // (深度, 轴, 符号, 带边交点参数)
     for k in 0..3 {
         for s in [-1.0f32, 1.0] {
@@ -103,9 +110,10 @@ pub fn crossed_face(
         _ => Vec3::new(pl.x, pl.y, s * half.z),
     };
     Some((
-        m.mul_vec3(n_local),
+        // 法线与接触点取**当前**朝向的局部系（`rot_now`）⇒ 与"现在这张面在哪"一致。
+        m_b.mul_vec3(n_local),
         depth,
-        pos_now + m.mul_vec3(q_local),
+        pos_now + m_b.mul_vec3(q_local),
         face,
     ))
 }

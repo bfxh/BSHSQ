@@ -17,7 +17,7 @@
 //! 门面接线（`World::add_rope`）；**待落地**：体积/弯曲约束、自碰撞、GPU 档。
 //! 判据在 `tests/rope_minimal.rs` 与 `crates/vxl-phys/tests/rope_scene.rs`。
 use crate::rigid::{crossed_face, shape_penetration, RigidProxy, RigidReaction};
-use vxl_phys_core::{interop::ProviderColliders, Mat3, Shape, Vec3};
+use vxl_phys_core::{interop::ProviderColliders, Mat3, Quat, Shape, Vec3};
 
 /// 入口面缓存里的"无"（见 `Rope::entry`）。
 const FACE_NONE: u8 = 255;
@@ -101,6 +101,11 @@ pub struct Rope {
     /// 子步内**虚拟位移**（同上序）：体自己走的 + 我们推开的，**增量累加** —— 见 `project_body_contacts`
     /// 里那条"不能乘整段时间"的注（那是所有"参数怎么调都逃逸"的真凶）。
     body_disp: Vec<Vec3>,
+    /// **子步内虚拟朝向**（与 `bodies` 同序，每 tick 开头重置为各自 `b.rot`）：由 `b.angvel` 逐子步推进
+    /// ⇒ 接触几何跟着**转动**走（§8.4.29 / 计划 2c-1）。`ω = 0` 时它恒等于 `b.rot`（零换代门）。
+    q_virt: Vec<Quat>,
+    /// 上一子步的虚拟朝向（`crossed_face` 要"两个位姿各带朝向"，见 `rigid.rs`）。
+    q_virt_prev: Vec<Quat>,
     /// **位置口径的补足量**（同上序，每 tick 开头清零；**门面读它做 `bodies.position += dx`**）：
     /// `Σ −n·w_b·(λ_geom − λ)` —— `λ = min(λ_geom, λ_vel)` 被**速度钳位**压掉的那一部分，
     /// **只补位置、不补速度**。
@@ -162,6 +167,8 @@ impl Rope {
             reactions: Vec::new(),
             body_dv: Vec::new(),
             body_disp: Vec::new(),
+            q_virt: Vec::new(),
+            q_virt_prev: Vec::new(),
             body_dx: Vec::new(),
             entry: vec![(u32::MAX, FACE_NONE); n],
         }
@@ -183,12 +190,15 @@ impl Rope {
     /// 方向突变 ⇒ 踢击把体送走（柔度/入口法线/质量比/虚拟位姿共 4 次否定都栽在这上面）；而"它**穿过**
     /// 的那个面"只要还在从下面顶就一直是底面 ⇒ 不翻转。**穿越判据只在一子步成立** ⇒ 接触按
     /// "一段状态"维护：记住面号，直到出去（或横向滑出面范围）。非 Box 走点式（无"面"歧义）。
+    #[allow(clippy::too_many_arguments)] // 接触包：i/j/代理/虚拟位姿（位置+朝向）/上一朝向/h/半径
     fn box_hit(
         &mut self,
         i: usize,
         j: usize,
         b: &RigidProxy,
         vpos: Vec3,
+        qrot: Quat,
+        qrot_prev: Quat,
         h: f32,
         radius: f32,
     ) -> Option<(Vec3, f32, Vec3)> {
@@ -198,7 +208,9 @@ impl Rope {
             _ => v.z,
         };
         if let Shape::Box { half } = b.shape {
-            let m = Mat3::from_quat(b.rot);
+            // **几何一律走"虚拟朝向"**（§8.4.29 / 2c-1）：体的转动由 `qrot` 带进来；
+            // `ω = 0` 时 `qrot == qrot_prev == b.rot` ⇒ 与既有行为逐位一致（零换代门靠这条）。
+            let m = Mat3::from_quat(qrot);
             let local = m.transpose_mul_vec3(self.pos[i] - vpos);
             let mut face = FACE_NONE;
             if self.entry[i].0 == b.body && self.entry[i].1 != FACE_NONE {
@@ -225,7 +237,8 @@ impl Rope {
                 // （实测：整场"缓存命中 = 0"、盒子直接穿过绳线）。
                 let vpos_prev = vpos - (b.linvel + self.body_dv[j]) * h;
                 crossed_face(
-                    b.rot,
+                    qrot_prev,
+                    qrot,
                     half,
                     vpos_prev,
                     vpos,
@@ -293,6 +306,10 @@ impl Rope {
         self.body_dv.resize(bodies.len(), Vec3::ZERO);
         self.body_disp.clear();
         self.body_disp.resize(bodies.len(), Vec3::ZERO);
+        self.q_virt.clear();
+        self.q_virt.extend(bodies.iter().map(|b| b.rot));
+        self.q_virt_prev.clear();
+        self.q_virt_prev.extend(bodies.iter().map(|b| b.rot));
         self.body_dx.clear();
         self.body_dx.resize(bodies.len(), Vec3::ZERO);
         let h = dt / self.substeps.max(1) as f32;
@@ -426,6 +443,11 @@ impl Rope {
             // （最后一个子步乘 8h）⇒ 虚拟位姿被放大 ⇒ 接触几何算错。这是**公式错误**（已修），
             // 但**实测修完仍然逃逸**（质量比 m ∈ {1,5,20,100,200} 全部逃逸）⇒ 它**不是**逃逸的成因。
             self.body_disp[j] += (b.linvel + self.body_dv[j]) * h;
+            // **虚拟朝向**（§8.4.29 / 2c-1）：上一子步的朝向先存档（`crossed_face` 要两个位姿各带朝向），
+            // 再用 `b.angvel` 按本子步时长推进。**静态/睡眠体的 `angvel` 为 0**（门面填 0，§8.4.27）
+            // ⇒ 与既有行为逐位一致。
+            self.q_virt_prev[j] = self.q_virt[j];
+            self.q_virt[j] = self.q_virt[j].integrate_angular(b.angvel, h);
             let vpos = b.pos + self.body_disp[j];
             // **① 收集**（先不施加）：把本子步的全部命中收进 `hits`，命中判定与原来的逐粒子调用等价
             // （`box_hit` 只读 `self.pos[i]`/`prev[i]` 与体位姿，而响应只改**别的**粒子 ⇒ 顺序无关）。
@@ -436,7 +458,16 @@ impl Rope {
                 }
                 // **接触面 = "入口面"（必须缓存）**（§8.4.5）：判定抽到 `box_hit`
                 // —— 本函数受 god 门"最长函数 ≤ 120 行"约束，那段不留在原地。
-                let Some((nn, depth, q)) = self.box_hit(i, j, b, vpos, h, radius) else {
+                let Some((nn, depth, q)) = self.box_hit(
+                    i,
+                    j,
+                    b,
+                    vpos,
+                    self.q_virt[j],
+                    self.q_virt_prev[j],
+                    h,
+                    radius,
+                ) else {
                     continue;
                 };
                 if depth <= 0.0 {

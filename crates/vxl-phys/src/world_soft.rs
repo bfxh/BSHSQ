@@ -85,6 +85,13 @@ impl World {
                 pos: self.bodies.position[i],
                 rot: self.bodies.rot(i),
                 linvel: self.bodies.linvel[i],
+                // **角速度**（§8.4.29 / 2c-1）：接触几何要跟着转动走。**静态体与睡眠体一律 0**
+                // （睡眠体对软体域呈现静态，§8.4.27）。
+                angvel: if self.bodies.is_dynamic(i) && self.bodies.awake[i] {
+                    self.bodies.angvel(i)
+                } else {
+                    Vec3::ZERO
+                },
                 // **睡眠体对软体域呈现为"静态"**（§8.4.27）：与 2b 流体同口径——流体那边睡眠体
                 // 照样生成边界粒子（"让静态几何可感"）但**不接收反作用**（`fluid_reaction_pass`
                 // 判 `awake`）。这里用更省的等价写法：`inv_mass = 0` ⇒ 绳索把它当墙（接触照做），

@@ -53,6 +53,7 @@ fn run(c: &Cfg) -> (f32, f32, f32) {
             pos,
             rot: Quat::IDENTITY,
             linvel: vel,
+            angvel: Vec3::ZERO, // 2c-1：本判据场景里体不转（ω = 0 ⇒ 转动项恒等）
             inv_mass: 1.0 / c.mass,
         };
         r.step(DT, G, &NoProviders, 0, std::slice::from_ref(&proxy));

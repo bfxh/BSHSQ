@@ -12,7 +12,17 @@ const R: f32 = 0.02;
 
 fn call(prev: Vec3, now: Vec3) -> Option<(Vec3, f32, Vec3, u8)> {
     // 单元情形里盒不动 ⇒ 两个位姿相同
-    crossed_face(Quat::IDENTITY, HALF, CENTER, CENTER, prev, now, R)
+    // 单元情形里盒不动**也不转** ⇒ 两个位姿的朝向相同（2c-1 后签名要求两个朝向）
+    crossed_face(
+        Quat::IDENTITY,
+        Quat::IDENTITY,
+        HALF,
+        CENTER,
+        CENTER,
+        prev,
+        now,
+        R,
+    )
 }
 
 /// ⑥ **动的是盒子**（粒子不动）—— 真实场景的机制：盒从 1.02 降到 1.00，粒子静止在 0.945
@@ -22,6 +32,7 @@ fn call(prev: Vec3, now: Vec3) -> Option<(Vec3, f32, Vec3, u8)> {
 fn moving_box_onto_still_particle() {
     let p = Vec3::new(0.0, 0.945, 0.0);
     let r = crossed_face(
+        Quat::IDENTITY,
         Quat::IDENTITY,
         HALF,
         Vec3::new(0.0, 1.02, 0.0), // 上一子步：盒底 0.97 ⇒ 粒子在带外 0.025 ≥ 0.02
