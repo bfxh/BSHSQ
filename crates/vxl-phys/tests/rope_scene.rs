@@ -147,6 +147,72 @@ fn rope_rests_on_a_static_box_body_beside_a_rigid_body() {
     );
 }
 
+/// **绳索不该打扰睡眠体**（§8.4.27）：一只盒子在网格地形上**睡稳**之后，把绳搭在它顶上 ——
+/// 绳的接触照做（盒子对软体域是几何），但**反作用不许落在睡眠体上**（口径与 2b 流体一致：
+/// 睡眠体不吃外力）。不判 `awake` 时，反作用会**静默累进睡眠体的 `linvel`**（体在睡、位置不积分）
+/// ⇒ 醒来瞬间被弹出；本条同时看两件事：`awake` 不被吵醒、`linvel` 保持 ≈ 0。
+#[test]
+fn rope_does_not_disturb_a_sleeping_body() {
+    let mut w = World::new(PhysConfig::default());
+    let _mesh = w.add_mesh(flat_mesh());
+    let half = Vec3::splat(0.25);
+    let b = w.add_dynamic(
+        Shape::Box { half },
+        Vec3::new(0.0, 0.30, 0.0),
+        Quat::IDENTITY,
+        1000.0,
+    ) as usize;
+    for _ in 0..600 {
+        w.step();
+    }
+    let (y, awake0) = (w.bodies.position[b].y, w.bodies.awake[b]);
+    assert!(
+        !awake0,
+        "盒子该已在地形上睡稳（y={y:.4}、awake={awake0}）——不入睡就无从测本条：\
+         先看默认档的入睡行为是否退化"
+    );
+
+    // 绳**搭在盒顶**（盒顶 = y + half.y）：初始就接触 ⇒ 反作用必然非零 ⇒ 本条才有分辨力。
+    let top = y + half.y + 0.02 + 1e-3;
+    let mut rope = Rope::line(
+        Vec3::new(-0.4, top, 0.0),
+        Vec3::new(0.4, top, 0.0),
+        33,
+        0.02,
+    );
+    rope.damping = 0.999;
+    assert_eq!(w.add_rope(rope), 0);
+
+    // 记一个接触确实建立过的证据（顶面被压）：绳的最低粒子应落在盒顶附近。
+    for _ in 0..900 {
+        w.step();
+    }
+    let r = w.rope(0).expect("rope 0");
+    let lowest = r.pos.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
+    let v = w.bodies.linvel[b].length();
+    println!(
+        "睡盒（半高 0.25、顶面 {:.4}）| 900 tick 后：盒 y={:.4} awake={} |v|={:.3e} | 绳最低粒子 y={lowest:.4}",
+        y + half.y,
+        w.bodies.position[b].y,
+        w.bodies.awake[b],
+        v
+    );
+    assert!(
+        !w.bodies.awake[b],
+        "绳索的接触不该把睡眠体吵醒（awake={}）",
+        w.bodies.awake[b]
+    );
+    assert!(
+        v < 1e-3,
+        "睡眠体的 `linvel` 该保持 ≈ 0（实测 |v|={v:.3e}）——大了说明绳的反作用落在了睡眠体上"
+    );
+    assert!(
+        (w.bodies.position[b].y - y).abs() < 1e-3,
+        "睡眠体的位置不该被动（{y:.5} → {:.5}）",
+        w.bodies.position[b].y
+    );
+}
+
 /// **门面级双向耦合**：动态盒落在绳上 ⇒ 被托住。
 ///
 /// 与软体侧 `rope_minimal::rope_couples_with_rigid_bodies` 同场景，但走 `World::step` 的**完整门面

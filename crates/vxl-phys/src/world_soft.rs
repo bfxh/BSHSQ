@@ -85,7 +85,13 @@ impl World {
                 pos: self.bodies.position[i],
                 rot: self.bodies.rot(i),
                 linvel: self.bodies.linvel[i],
-                inv_mass: if self.bodies.is_dynamic(i) {
+                // **睡眠体对软体域呈现为"静态"**（§8.4.27）：与 2b 流体同口径——流体那边睡眠体
+                // 照样生成边界粒子（"让静态几何可感"）但**不接收反作用**（`fluid_reaction_pass`
+                // 判 `awake`）。这里用更省的等价写法：`inv_mass = 0` ⇒ 绳索把它当墙（接触照做），
+                // 而门面既有的"静态体不收反作用"那条自动跳过回填。
+                // ⚠️ 不这么做的话：反作用会**静默累进睡眠体的 `linvel`**（体在睡、位置不积分）
+                // ⇒ 醒来瞬间被弹出。判据：`rope_scene::rope_does_not_disturb_a_sleeping_body`。
+                inv_mass: if self.bodies.is_dynamic(i) && self.bodies.awake[i] {
                     self.bodies.inv_mass[i]
                 } else {
                     0.0
