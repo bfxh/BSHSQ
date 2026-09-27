@@ -89,7 +89,7 @@ impl DefaultNarrowPhase {
         true
     }
 
-    /// 形状 → 支撑体（不支持的形状返回 None）。
+    /// 形状 → 支撑体（**三角网非凸、地形/provider 无凸表示** ⇒ `None`；是语义决定，不是漏写）。
     pub(crate) fn support_of(
         &self,
         shape: &Shape,
@@ -146,7 +146,9 @@ impl DefaultNarrowPhase {
                 pos,
                 rot: Mat3::from_quat(rot),
             })),
-            _ => None,
+            // **不受理族**（显式列名 ⇒ 新增形状会在此**编译报错**；见本函数文档）。
+            Shape::Compound { .. } | Shape::TriMesh { .. } => None,
+            Shape::HeightField(_) | Shape::Provider(_) => None,
         }
     }
 
@@ -295,6 +297,7 @@ impl DefaultNarrowPhase {
         Self {
             hulls: HullStore::default(),
             compounds: CompoundStore::default(),
+            meshes: MeshStore::default(),
             kids_buf: Vec::new(),
             skin,
             predict_dt: 0.0,

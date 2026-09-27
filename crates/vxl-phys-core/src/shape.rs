@@ -61,6 +61,14 @@ pub enum Shape {
         compound: u32,
         half: Vec3,
     },
+    /// **三角网**（薄壳：布片/薄板/碎片）：`mesh` 索引窄相 `MeshStore`（几何本体在窄相自持 ⇒
+    /// `Shape` 保持 `Copy`）；`half` = 顶点局部 AABB 半长。⚠️ **非凸** ⇒ 不进 GJK/EPA
+    /// （`support_of` 如实返回 `None`，不是漏写）；接触走逐顶点采样。逐域支持矩阵见
+    /// `docs/SURVEY-SHAPE-SUPPORT-MATRIX.md`。
+    TriMesh {
+        mesh: u32,
+        half: Vec3,
+    },
 }
 
 use crate::math::Vec3;
@@ -75,17 +83,18 @@ impl Shape {
                 half_height,
                 radius,
             } => (half_height * half_height + radius * radius).sqrt(),
-            Shape::Capsule {
-                half_height,
-                radius,
-            } => half_height + radius,
-            // 顶点距原点 `half_height`、底圈距原点 `√(h²+r²)` ⇒ 取后者。
+            // 圆锥的远点是**底圈**（锥顶比底圈近）⇒ 与圆柱同式。
             Shape::Cone {
                 half_height,
                 radius,
             } => (half_height * half_height + radius * radius).sqrt(),
-            Shape::ConvexHull { half, .. } => half.length(),
-            Shape::Compound { half, .. } => half.length(),
+            Shape::Capsule {
+                half_height,
+                radius,
+            } => half_height + radius,
+            Shape::ConvexHull { half, .. }
+            | Shape::Compound { half, .. }
+            | Shape::TriMesh { half, .. } => half.length(),
             Shape::HeightField(_) | Shape::Provider(_) => f32::INFINITY,
         }
     }
@@ -101,6 +110,7 @@ impl Shape {
             Shape::Provider(_) => "provider",
             Shape::ConvexHull { .. } => "hull",
             Shape::Compound { .. } => "compound",
+            Shape::TriMesh { .. } => "trimesh",
         }
     }
 }

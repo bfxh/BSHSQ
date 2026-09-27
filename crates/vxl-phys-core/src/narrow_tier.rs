@@ -98,8 +98,8 @@ pub fn pack_bodies(bodies: &BodySet) -> Vec<u32> {
         let r = bodies.rot(i);
         out.extend_from_slice(&[p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]);
         out.extend_from_slice(&[r.x.to_bits(), r.y.to_bits(), r.z.to_bits(), r.w.to_bits()]);
-        // 卡上已接的族 = 球×球、球×盒、盒×盒；其余（圆柱/圆锥/外壳/胶囊/高度场/provider/复合体）
-        // 一律 `KIND_NONE` ⇒ 由主机回填。
+        // 卡上已接的族 = 球×球、球×盒、盒×盒；其余（圆柱/圆锥/外壳/胶囊/高度场/provider/复合体/
+        // 三角网）一律 `KIND_NONE` ⇒ 由主机回填。
         let (kind, params) = match bodies.shape[i] {
             Shape::Sphere { radius } => (KIND_SPHERE, [radius, 0.0, 0.0]),
             Shape::Box { half } => (KIND_BOX, [half.x, half.y, half.z]),

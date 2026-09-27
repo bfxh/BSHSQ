@@ -181,7 +181,7 @@ fn surface(shape: &Shape, s: f32, out: &mut SurfaceLattice) {
             half_height,
             radius,
         } => cone(half_height, radius, s, out),
-        // 复合体（子形状在窄相 store 里，本 crate 不可达）、高度场、provider、凸壳：
+        // 复合体（子形状在窄相 store 里，本 crate 不可达）、高度场、provider、凸壳、三角网：
         // 不生成。**返回 0 粒而不是近似**——近似面片会给错体积，比没有更坏。
         _ => {}
     }

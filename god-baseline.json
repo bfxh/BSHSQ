@@ -55,8 +55,8 @@
   "max_type_members": 0
  },
  "crates/vxl-phys-broad/src/shape.rs": {
-  "file_lines": 111,
-  "max_fn_lines": 105,
+  "file_lines": 104,
+  "max_fn_lines": 98,
   "max_type_members": 0
  },
  "crates/vxl-phys-broad/src/trait_phase.rs": {
@@ -155,8 +155,8 @@
   "max_type_members": 2
  },
  "crates/vxl-phys-core/src/shape.rs": {
-  "file_lines": 107,
-  "max_fn_lines": 22,
+  "file_lines": 117,
+  "max_fn_lines": 23,
   "max_type_members": 2
  },
  "crates/vxl-phys-core/tests/loom_primitives.rs": {
@@ -500,8 +500,8 @@
   "max_type_members": 0
  },
  "crates/vxl-phys-narrow/src/entry.rs": {
-  "file_lines": 81,
-  "max_fn_lines": 62,
+  "file_lines": 83,
+  "max_fn_lines": 59,
   "max_type_members": 1
  },
  "crates/vxl-phys-narrow/src/geom.rs": {
@@ -555,9 +555,14 @@
   "max_type_members": 4
  },
  "crates/vxl-phys-narrow/src/lib.rs": {
-  "file_lines": 47,
+  "file_lines": 48,
   "max_fn_lines": 0,
   "max_type_members": 0
+ },
+ "crates/vxl-phys-narrow/src/mesh_store.rs": {
+  "file_lines": 316,
+  "max_fn_lines": 34,
+  "max_type_members": 9
  },
  "crates/vxl-phys-narrow/src/pair.rs": {
   "file_lines": 36,
@@ -565,14 +570,14 @@
   "max_type_members": 1
  },
  "crates/vxl-phys-narrow/src/pair_shaped.rs": {
-  "file_lines": 876,
-  "max_fn_lines": 112,
+  "file_lines": 867,
+  "max_fn_lines": 101,
   "max_type_members": 10
  },
  "crates/vxl-phys-narrow/src/phase.rs": {
-  "file_lines": 96,
+  "file_lines": 98,
   "max_fn_lines": 9,
-  "max_type_members": 33
+  "max_type_members": 34
  },
  "crates/vxl-phys-narrow/src/polytope.rs": {
   "file_lines": 256,
@@ -583,6 +588,11 @@
   "file_lines": 156,
   "max_fn_lines": 38,
   "max_type_members": 4
+ },
+ "crates/vxl-phys-narrow/src/provider.rs": {
+  "file_lines": 221,
+  "max_fn_lines": 60,
+  "max_type_members": 2
  },
  "crates/vxl-phys-narrow/src/sat.rs": {
   "file_lines": 444,
@@ -600,7 +610,7 @@
   "max_type_members": 5
  },
  "crates/vxl-phys-narrow/src/support.rs": {
-  "file_lines": 358,
+  "file_lines": 361,
   "max_fn_lines": 109,
   "max_type_members": 16
  },
@@ -614,19 +624,69 @@
   "max_fn_lines": 15,
   "max_type_members": 5
  },
+ "crates/vxl-phys-narrow/tests/clone_cost_probe.rs": {
+  "file_lines": 183,
+  "max_fn_lines": 46,
+  "max_type_members": 0
+ },
  "crates/vxl-phys-replay/src/lib.rs": {
   "file_lines": 279,
   "max_fn_lines": 35,
   "max_type_members": 3
  },
  "crates/vxl-phys-soft/src/lib.rs": {
-  "file_lines": 112,
+  "file_lines": 22,
+  "max_fn_lines": 0,
+  "max_type_members": 0
+ },
+ "crates/vxl-phys-soft/src/params.rs": {
+  "file_lines": 103,
   "max_fn_lines": 10,
   "max_type_members": 4
  },
+ "crates/vxl-phys-soft/src/rigid.rs": {
+  "file_lines": 204,
+  "max_fn_lines": 76,
+  "max_type_members": 8
+ },
+ "crates/vxl-phys-soft/src/rope.rs": {
+  "file_lines": 635,
+  "max_fn_lines": 108,
+  "max_type_members": 23
+ },
+ "crates/vxl-phys-soft/tests/angular_reaction_holds.rs": {
+  "file_lines": 115,
+  "max_fn_lines": 57,
+  "max_type_members": 0
+ },
+ "crates/vxl-phys-soft/tests/crossed_face_probe.rs": {
+  "file_lines": 105,
+  "max_fn_lines": 17,
+  "max_type_members": 0
+ },
+ "crates/vxl-phys-soft/tests/rigid_coupling_gap.rs": {
+  "file_lines": 138,
+  "max_fn_lines": 108,
+  "max_type_members": 0
+ },
+ "crates/vxl-phys-soft/tests/rope_coupling_robustness.rs": {
+  "file_lines": 130,
+  "max_fn_lines": 55,
+  "max_type_members": 5
+ },
+ "crates/vxl-phys-soft/tests/rope_minimal.rs": {
+  "file_lines": 431,
+  "max_fn_lines": 111,
+  "max_type_members": 0
+ },
+ "crates/vxl-phys-soft/tests/rope_rotation_awareness.rs": {
+  "file_lines": 96,
+  "max_fn_lines": 45,
+  "max_type_members": 0
+ },
  "crates/vxl-phys-solver/src/ccd.rs": {
-  "file_lines": 68,
-  "max_fn_lines": 21,
+  "file_lines": 69,
+  "max_fn_lines": 22,
   "max_type_members": 0
  },
  "crates/vxl-phys-solver/src/cfg.rs": {
@@ -745,8 +805,8 @@
   "max_type_members": 6
  },
  "crates/vxl-phys/examples/arena_bench/main.rs": {
-  "file_lines": 132,
-  "max_fn_lines": 109,
+  "file_lines": 129,
+  "max_fn_lines": 106,
   "max_type_members": 0
  },
  "crates/vxl-phys/examples/arena_bench/probes_a.rs": {
@@ -890,7 +950,7 @@
   "max_type_members": 5
  },
  "crates/vxl-phys/src/lib.rs": {
-  "file_lines": 51,
+  "file_lines": 52,
   "max_fn_lines": 0,
   "max_type_members": 0
  },
@@ -934,6 +994,16 @@
   "max_fn_lines": 26,
   "max_type_members": 1
  },
+ "crates/vxl-phys/src/world_mesh.rs": {
+  "file_lines": 66,
+  "max_fn_lines": 22,
+  "max_type_members": 5
+ },
+ "crates/vxl-phys/src/world_soft.rs": {
+  "file_lines": 170,
+  "max_fn_lines": 105,
+  "max_type_members": 5
+ },
  "crates/vxl-phys/src/world_step.rs": {
   "file_lines": 368,
   "max_fn_lines": 97,
@@ -954,6 +1024,11 @@
   "max_fn_lines": 0,
   "max_type_members": 23
  },
+ "crates/vxl-phys/tests/angular_impulse_contract.rs": {
+  "file_lines": 70,
+  "max_fn_lines": 20,
+  "max_type_members": 0
+ },
  "crates/vxl-phys/tests/capsule_drop.rs": {
   "file_lines": 76,
   "max_fn_lines": 59,
@@ -967,6 +1042,11 @@
  "crates/vxl-phys/tests/compound_warm.rs": {
   "file_lines": 90,
   "max_fn_lines": 60,
+  "max_type_members": 0
+ },
+ "crates/vxl-phys/tests/debris_mass.rs": {
+  "file_lines": 88,
+  "max_fn_lines": 29,
   "max_type_members": 0
  },
  "crates/vxl-phys/tests/default_tier_stability.rs": {
@@ -990,8 +1070,8 @@
   "max_type_members": 0
  },
  "crates/vxl-phys/tests/provider_shape_coverage.rs": {
-  "file_lines": 190,
-  "max_fn_lines": 61,
+  "file_lines": 213,
+  "max_fn_lines": 38,
   "max_type_members": 0
  },
  "crates/vxl-phys/tests/rest_height_contract.rs": {
@@ -1004,8 +1084,18 @@
   "max_fn_lines": 45,
   "max_type_members": 0
  },
+ "crates/vxl-phys/tests/rope_scene.rs": {
+  "file_lines": 330,
+  "max_fn_lines": 60,
+  "max_type_members": 0
+ },
+ "crates/vxl-phys/tests/shape_support_matrix.rs": {
+  "file_lines": 233,
+  "max_fn_lines": 39,
+  "max_type_members": 2
+ },
  "crates/vxl-phys/tests/sleep_wake_contract.rs": {
-  "file_lines": 163,
+  "file_lines": 161,
   "max_fn_lines": 60,
   "max_type_members": 0
  },

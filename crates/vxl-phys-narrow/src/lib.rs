@@ -29,6 +29,7 @@ use vxl_phys_core::{JobSystem, Mat3, Quat, Shape, Vec3, CYLINDER_SEGMENTS};
 mod entry;
 mod geom;
 mod hf;
+mod mesh_store;
 mod pair;
 mod pair_shaped;
 mod phase;
@@ -39,7 +40,7 @@ mod store;
 mod support;
 mod types;
 pub(crate) use self::{entry::*, geom::*};
-pub use self::{phase::*, store::*, types::*};
+pub use self::{mesh_store::*, phase::*, store::*, types::*};
 // ↑ 子模块顶层条目再导出（impl-only 模块不入 glob，避免 unused）
 
 #[cfg(test)]

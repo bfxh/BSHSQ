@@ -111,10 +111,10 @@ pub fn mass_props(shape: &Shape, density: f32) -> MassProps {
                 local_inv_inertia: Vec3::new(1.0 / ixz, 1.0 / iy, 1.0 / ixz),
             }
         }
-        // 复合体 / 凸体外壳：按局部 AABB 盒惯量近似（本层看不到子形状表，见 `aabb_box_props`）。
-        Shape::Compound { half, .. } | Shape::ConvexHull { half, .. } => {
-            aabb_box_props(density, half)
-        }
+        // 复合体 / 凸体外壳 / 三角网：按局部 AABB 盒惯量近似（本层看不到几何表，见 `aabb_box_props`）。
+        Shape::Compound { half, .. }
+        | Shape::ConvexHull { half, .. }
+        | Shape::TriMesh { half, .. } => aabb_box_props(density, half),
         // 高度场 / 外部 provider 只作为静态地形存在，不参与质量属性。
         Shape::HeightField(_) | Shape::Provider(_) => MassProps {
             mass: 0.0,

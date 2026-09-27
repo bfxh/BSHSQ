@@ -8,6 +8,8 @@ pub struct DefaultNarrowPhase {
     pub(crate) hulls: HullStore,
     /// 复合体仓库（子形状表；由 `Shape::Compound { compound, .. }` 引用）。
     pub(crate) compounds: CompoundStore,
+    /// 三角网仓库（薄壳：布片/薄板/碎片；支持矩阵见 `docs/SURVEY-SHAPE-SUPPORT-MATRIX.md`）。
+    pub(crate) meshes: MeshStore,
     /// 子形状表 scratch（`kids_take`/`kids_put` 借出，避开 `&self`/`&mut self` 借用冲突）。
     pub(crate) kids_buf: Vec<CompoundChild>,
     pub(crate) skin: f32,

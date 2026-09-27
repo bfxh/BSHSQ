@@ -198,6 +198,6 @@ pub fn shape_penetration(
             let n = d * (1.0 / dist);
             Some((n, total - dist, p - n * radius))
         }
-        _ => None, // Cylinder / Cone / ConvexHull / Compound / Provider / HeightField：待补
+        _ => None, // Cylinder / Cone / ConvexHull / Compound / Provider / HeightField / TriMesh：待补
     }
 }

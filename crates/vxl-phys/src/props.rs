@@ -62,12 +62,12 @@ pub(crate) fn cross_section_area(shape: &Shape) -> f32 {
     match *shape {
         Shape::Box { half } => 4.0 * (half.x * half.y + half.y * half.z + half.z * half.x) / 3.0,
         Shape::Sphere { radius } => std::f32::consts::PI * radius * radius,
+        // 圆柱 / 胶囊：中段按圆柱（胶囊含帽时略低估，阻力估计够用）。
         Shape::Cylinder {
             half_height,
             radius,
-        } => 2.0 * radius * (2.0 * half_height) / 2.0 + std::f32::consts::PI * radius * radius,
-        // 胶囊：中段按圆柱（含帽时略低估，阻力估计够用）。
-        Shape::Capsule {
+        }
+        | Shape::Capsule {
             half_height,
             radius,
         } => 2.0 * radius * (2.0 * half_height) / 2.0 + std::f32::consts::PI * radius * radius,
@@ -77,11 +77,10 @@ pub(crate) fn cross_section_area(shape: &Shape) -> f32 {
             half_height,
             radius,
         } => radius * half_height + std::f32::consts::PI * radius * radius,
-        Shape::ConvexHull { half, .. } => {
-            4.0 * (half.x * half.y + half.y * half.z + half.z * half.x) / 3.0
-        }
-        // 复合体：同外壳（局部 AABB 并集半长的外接盒近似；阻力估计够用）。
-        Shape::Compound { half, .. } => {
+        // 外壳 / 复合体 / 三角网：同款（局部 AABB 的外接盒近似；阻力估计够用）。
+        Shape::ConvexHull { half, .. }
+        | Shape::Compound { half, .. }
+        | Shape::TriMesh { half, .. } => {
             4.0 * (half.x * half.y + half.y * half.z + half.z * half.x) / 3.0
         }
         Shape::HeightField(_) | Shape::Provider(_) => 0.0,
@@ -102,9 +101,10 @@ pub(crate) fn shape_volume(shape: &Shape) -> f32 {
 /// 半球/锥等取局部 AABB 的最大半长 ⇒ 采样点落在体表附近即可（不做精确解析）。
 pub(crate) fn body_half_extent(shape: &Shape) -> f32 {
     match *shape {
-        Shape::Box { half } | Shape::ConvexHull { half, .. } | Shape::Compound { half, .. } => {
-            half.x.max(half.y).max(half.z)
-        }
+        Shape::Box { half }
+        | Shape::ConvexHull { half, .. }
+        | Shape::Compound { half, .. }
+        | Shape::TriMesh { half, .. } => half.x.max(half.y).max(half.z),
         Shape::Sphere { radius } => radius,
         Shape::Cylinder {
             half_height,
