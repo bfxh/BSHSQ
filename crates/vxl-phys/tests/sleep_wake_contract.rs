@@ -130,6 +130,10 @@ fn sleeping_body_wakes_with_settled_hold_enabled() {
 }
 
 /// 开两个开关后**逐位确定**（安座趟与门的计数都在固定次序下运行）。
+///
+/// 判据口径（**2026-09-27 加强**）：摘要改用引擎**自己的** `World::state_hash()`（replay 的
+/// 规范摘要：位置 + 姿态 + 线速度 + 角速度，xxh3-128）再串上**未参与哈希**的 `awake` 位——
+/// 旧口径只读 `p.x/p.y/v.x/v.y`（漏 `z`、姿态、角速度、`awake`）⇒ 对"只写一半状态"无分辨力。
 #[test]
 fn gate_and_settle_are_deterministic() {
     let digest = |settled_hold: u32| {
@@ -142,14 +146,8 @@ fn gate_and_settle_are_deterministic() {
         for _ in 0..200 {
             w.step();
         }
-        let mut d: Vec<u32> = Vec::new();
-        for i in 0..w.bodies.len() {
-            let p = w.bodies.position[i];
-            let v = w.bodies.linvel[i];
-            d.extend([p.x.to_bits(), p.y.to_bits(), v.x.to_bits(), v.y.to_bits()]);
-        }
-        d.push(sleeper as u32);
-        d
+        let awake: Vec<bool> = (0..w.bodies.len()).map(|i| w.bodies.awake[i]).collect();
+        (w.state_hash(), awake, sleeper)
     };
     assert_eq!(digest(4), digest(4), "settled_hold=4 两跑应逐位一致");
     assert_eq!(digest(2), digest(2), "settled_hold=2 两跑应逐位一致");

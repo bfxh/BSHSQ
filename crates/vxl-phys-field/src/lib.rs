@@ -35,7 +35,7 @@ impl ForceField for GravityField {
 #[derive(Clone, Copy, Debug)]
 pub struct WindField {
     pub velocity: Vec3,
-    /// F = k·|v_rel|·v_rel（线性化阻力）。
+    /// `F = k·|v_rel|·v_rel`（**二次**阻力；⚠️ 2026-09-27 更正：原写"线性化阻力"，与式不符）。
     pub k: f32,
 }
 

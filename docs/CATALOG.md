@@ -7,7 +7,14 @@
 
 ## 0. 库清单（依赖事实）
 
-- 工作区共 **19 个 crate**，**零外部依赖**（`[dependencies]` 里只有 `vxl-phys-*` path 依赖）。
+- 工作区共 **20 个 crate**（⚠️ **2026-09-27 更正**：此前写 19——`Cargo.toml` 的 `members`
+  实为 20 项；差额来自后加的 `vxl-phys-gpu` / `vxl-phys-memfind` / `vxl-phys-ffi` /
+  `vxl-phys-splat` 等，本文件下方表格逐条未同步）。
+- **外部依赖面**（⚠️ **2026-09-27 更正**：此前写"零外部依赖"——自 GPU 档起不再成立）：
+  运行期 **2 件**——`xxhash-rust`（仅 `vxl-phys-replay`，xxh3-128 状态哈希）与 `wgpu`
+  （仅 `vxl-phys-gpu`，GPU 档后端，传递依赖 101 个 crate）；另有 `loom` 为 `cfg(loom)`
+  门控的 dev-dep。基线登记与理由见 `scripts/deps-baseline.json`，选型审计见
+  `LIBRARY-AUDIT.md`，依赖红线由 `scripts/deps_lock.py` 守（只准减、新增须登记理由）。
 - 唯一例外：`gold-sample/`（**独立包，不进 workspace**）依赖 `rapier3d`——仅用于
   **金样对拍**（T5），不参与引擎构建。
 - 依赖方向（DAG，禁止环；`Cargo.toml` 头注与 SPEC §1 一致）：
@@ -22,7 +29,7 @@
 | **状态** | ✅ 落地 / 🔄 在研 / 🦴 骨架（参数级）/ ⬜ 未建 | 与 `ROUTE.md` 里程碑表一致 |
 | **热路径** | 🔥 每 tick × 每体/每接触 / 🌤 每 tick 一次 / ❄️ 事件级 | 决定允许的写法（见 §4） |
 
-## 2. 分层编目（19 crate）
+## 2. 分层编目（20 crate）
 
 ### 柱石层（base layer）
 
@@ -60,7 +67,7 @@
 | `vxl-phys-aero` | 风/气动（面元） | 参数骨架 | — | 🦴 | 🌤 |
 | `vxl-phys-marine` | 海洋/浮力 | 参数骨架 | — | 🦴 | 🌤 |
 | `vxl-phys-mech` | 机械/关节族 | 参数骨架 | — | 🦴 | 🔥（关节求解） |
-| `vxl-phys-gpu` | GPU 后端 trait | 骨架（wgpu/rust-gpu 后端 trait） | — | 🦴 | — |
+| `vxl-phys-gpu` | GPU 档（§8 / M4，**显式档**） | **wgpu 计算管线**：常驻 `Packet`（网格重建 → 密度 → EOS → 力 → 积分，含壁面镜像鬼影 + 投影、卡上反作用聚合、刚体积分腿）+ `NarrowTier`（窄相固定槽 + 主机回填）+ 宽相/BVH-bbox 探针；**13 个 WGSL**（12 在 `src/`、1 在 `examples/`） | wgpu（唯一外部运行期依赖之一） | ✅（口径 B；默认路径一行不走 ⇒ 三哈希/金样不受影响） | 🌤 每 tick（卡上相位） |
 
 ### 桥接层（对外/对工具）
 

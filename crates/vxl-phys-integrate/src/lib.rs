@@ -34,7 +34,7 @@ impl Integrator {
             let ang_accel = bodies.apply_world_inv_inertia(i, bodies.torque[i]);
             bodies.set_angvel_raw(i, bodies.angvel(i) + ang_accel * dt);
 
-            // 限速（确定性钳制，逐轴比较顺序固定）。
+            // 限速（确定性钳制：**整体长度等比缩放** `v *= max/|v|`，无逐轴比较；⚠️ 2026-09-27 更正原注）。
             let lv = bodies.linvel[i];
             let sp = lv.length();
             if sp > max_linear {

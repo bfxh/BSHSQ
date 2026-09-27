@@ -20,7 +20,7 @@ impl World {
     /// **破坏（M3 第一块）**：把体素体盒域内的占据格转为**刚体碎块**
     /// （贪心合并成盒 → 逐个动态体），并从体素体里移除。返回碎块数。
     /// 确定性：提取顺序 = 固定扫描序（见 `VoxelVolume::extract_boxes`）；
-    /// 碎块质量 = `density × 8·hx·hy·hz`。
+    /// 碎块质量 = `density × 8·hx·hy·hz`（⚠️ 2026-09-27 前把该质量当**密度**传给 `push_dynamic`——它内部会再乘体积 ⇒ 实际质量是 `ρ·V²`（**尺寸相关**；V=1 恰好掩盖），故下面反解密度 `d`）。
     pub fn spawn_box_debris(&mut self, id: u32, min: Vec3, max: Vec3, density: f32) -> usize {
         self.spawn_box_debris_vel(id, min, max, density, Vec3::ZERO)
     }
@@ -40,10 +40,10 @@ impl World {
         let boxes = vol.extract_boxes(min, max);
         let n = boxes.len();
         for (c, h) in boxes {
-            let mass = density * 8.0 * h.x * h.y * h.z;
-            let b =
-                self.bodies
-                    .push_dynamic(Shape::Box { half: h }, c, Quat::IDENTITY, mass.max(1e-3));
+            let d = (1e-3 / (8.0 * h.x * h.y * h.z)).max(density).max(1e-3);
+            let b = self
+                .bodies
+                .push_dynamic(Shape::Box { half: h }, c, Quat::IDENTITY, d);
             self.bodies.linvel[b as usize] = vel;
         }
         self.refresh_provider_bounds();
@@ -59,9 +59,9 @@ impl World {
         let boxes = vol.extract_sphere(center, radius);
         let n = boxes.len();
         for (c, h) in boxes {
-            let mass = density * 8.0 * h.x * h.y * h.z;
+            let d = (1e-3 / (8.0 * h.x * h.y * h.z)).max(density).max(1e-3);
             self.bodies
-                .push_dynamic(Shape::Box { half: h }, c, Quat::IDENTITY, mass.max(1e-3));
+                .push_dynamic(Shape::Box { half: h }, c, Quat::IDENTITY, d);
         }
         self.refresh_provider_bounds();
         n
@@ -86,9 +86,9 @@ impl World {
         let mut n = 0usize;
         for (_si, boxes) in cells {
             for (c, h) in boxes {
-                let mass = density * 8.0 * h.x * h.y * h.z;
+                let d = (1e-3 / (8.0 * h.x * h.y * h.z)).max(density).max(1e-3);
                 self.bodies
-                    .push_dynamic(Shape::Box { half: h }, c, Quat::IDENTITY, mass.max(1e-3));
+                    .push_dynamic(Shape::Box { half: h }, c, Quat::IDENTITY, d);
                 n += 1;
             }
         }

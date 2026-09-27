@@ -1,5 +1,10 @@
-//! entry：从 lib.rs 按域拆出（纯搬移，语义未改）。
+//! entry：从 lib.rs 按域拆出（纯搬移，语义未改）；**另含并行门槛常量的登记**（2026-09-27）。
 use super::*;
+
+/// 窄相**并行门槛**（对数）：小于它走串行（线程启动开销 > 收益）。**这是本相自己的标定**——
+/// 每对窄相是 µs 级，而 `broad::bvh_phase` 的 AABB 更新是 ≈30ns/项 ⇒ 两者摊销点差三个数量级
+/// （那边标定 32768）。**与 `ScopedPool::min_parallel` 默认值同属巧合，不要合并这两个来源。**
+const NARROW_MIN_PARALLEL: usize = 2048;
 
 /// 内部时「最大平面距」（全部为负；面数小，代价可忽略）。
 pub(crate) fn max_plane_d_of(poly: &WorldPoly, p: Vec3) -> f32 {
@@ -34,20 +39,17 @@ impl NarrowPhase for DefaultNarrowPhase {
         self.cached_ax_b = (u32::MAX, u64::MAX, [Vec3::ZERO; 3]);
         self.cached_hull = [(u32::MAX, u64::MAX), (u32::MAX, u64::MAX)];
         let threads = jobs.threads();
-        // 小规模串行（线程启动开销 > 收益）；并行 = 每块独立 clone（含自有
-        // scratch），结果按块序拼接 = pair 序（§5 确定性契约）。
-        if threads <= 1 || pairs.len() < 2048 {
+        // 小规模串行（线程启动开销 > 收益）；并行 = 每块独立 clone + 按块序拼接 = pair 序（§5）。
+        if threads <= 1 || pairs.len() < NARROW_MIN_PARALLEL {
             for &(a, b) in pairs {
                 self.process_pair(a, b, bodies, heightfields, providers, out);
             }
             return;
         }
         let this = &*self;
-        let n_chunks = threads.min(pairs.len().div_ceil(2048));
+        let n_chunks = threads.min(pairs.len().div_ceil(NARROW_MIN_PARALLEL));
         let chunk = pairs.len().div_ceil(n_chunks);
-        // 输出缓冲预分配（T3 结构项②的第一片）：8B 场景实测对/流形 ≈ 15:1，
-        // 旧实现每块从空 Vec 逐次增长（每块 ~8 次重分配 + memcpy），且最终
-        // 拼接要把全部流形再搬一遍。按下界预留容量即免掉这一段。
+        // 输出缓冲预分配（T3 结构项②的第一片）：8B 实测对/流形 ≈ 15:1；旧实现每块从空 Vec 逐次增长（~8 次重分配 + memcpy）且最终拼接再搬一遍 ⇒ 按下界预留即免掉这段。
         let out_hint = self.out_hint.max(16);
         let mut outs: Vec<Vec<Manifold>> = (0..n_chunks)
             .map(|_| Vec::with_capacity(out_hint / n_chunks + 8))

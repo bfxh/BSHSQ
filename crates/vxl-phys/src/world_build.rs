@@ -41,7 +41,7 @@ impl World {
             provider_bounds: Vec::new(),
             fluids: Vec::new(),
             fluid_boundary: FluidBoundary::default(),
-            ropes: Vec::new(),
+            soft: crate::world_cloth::SoftDomain::default(),
             rope_proxies: Vec::new(),
             timings: PhaseTimings::default(),
         }
@@ -129,7 +129,7 @@ impl World {
 
     /// 添加一条**关节**（§2.5 关节约束族：球/转动/固定/棱柱/距离）。
     /// 锚点/轴均为体局部量；返回关节 id（关节序即求解序 ⇒ 确定性）。
-    /// v1 未接限位与马达（见 `vxl_phys_solver::joints` 模块文档）。
+    /// 限位与马达**均已接线**（2026-09-27 更正原"v1 未接"）；见 `vxl_phys_solver::joints`。
     pub fn add_joint(&mut self, joint: Joint) -> u32 {
         self.joints.add(joint)
     }

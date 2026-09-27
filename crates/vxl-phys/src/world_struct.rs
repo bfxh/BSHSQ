@@ -34,8 +34,8 @@ pub struct World {
     /// **2b 边界粒子那一族的成组状态**（开关 / 暂存 / 覆盖集；定义见 `world_soft.rs`）——
     /// 收成一个结构是为给软体域腾成员位（本结构受 god 门成员棘轮，只准减）。
     pub(crate) fluid_boundary: FluidBoundary,
-    /// **软体域：绳索**（`World::add_rope` 注册；`rope_pass` 每 tick 推进一次，空集零成本短路）。
-    pub(crate) ropes: Vec<vxl_phys_soft::Rope>,
+    /// 软体域：绳索与布料按各自注册顺序推进（空集短路）。
+    pub(crate) soft: crate::world_cloth::SoftDomain,
     /// 绳索的**刚体代理暂存**（每 tick 重建，复用免分配；`rope_pass` 里 `mem::take` 借出后归还）。
     pub(crate) rope_proxies: Vec<vxl_phys_soft::RigidProxy>,
     pub(crate) timings: PhaseTimings,

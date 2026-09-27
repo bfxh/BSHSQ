@@ -41,14 +41,6 @@ pub(crate) fn main() {
             cfg.normal_inner = v;
         }
     }
-    if let Some(pos) = rest.iter().position(|a| a == "--serial") {
-        // 串行作业系统（对照"每步开线程"的开销）。
-        if rest.get(pos + 1).map(|s| s.as_str()) != Some("0") {
-            let mut w_cfg = cfg.clone();
-            w_cfg.velocity_iterations = cfg.velocity_iterations;
-            cfg = w_cfg;
-        }
-    }
     println!(
         "配置：iterations={} inner={} substeps={} contact_skin={}",
         cfg.velocity_iterations, cfg.normal_inner, cfg.substeps, cfg.contact_skin
@@ -97,6 +89,11 @@ pub(crate) fn main() {
             scene_joint_chains(cfg.clone());
             continue;
         }
+        // `--serial X`：串行作业系统（对照"每步开线程"的开销）。
+        // ⚠️ 2026-09-27 清理：此处原本还有一段 `if let Some(pos) = …position("--serial")` 的块，
+        // 内容是 `let mut w_cfg = cfg.clone(); w_cfg.velocity_iterations = cfg.velocity_iterations;
+        // cfg = w_cfg;`——**对 cfg 的空操作**，且那时 `World` 还没建 ⇒ 它不可能影响任何行为。
+        // 真正生效的是这里：抓到标志后把 `w.jobs` 换成 `SerialJobSystem`（见下方 `if serial`）。
         let serial = rest.iter().any(|a| a == "--serial");
         // `--mu X`：金字塔场景的摩擦覆盖（判定"堆不入睡"的能量源）。
         let mu_ovr = rest

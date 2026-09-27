@@ -67,7 +67,7 @@ impl Joint {
     }
 
     /// 加**马达**（转动：目标角速度 rad/s；棱柱：目标线速度 m/s；`max_force <= 0` = 关）。
-    /// 关节限位仍未实现（需累计相对转角状态）。
+    /// 限位另由 [`Self::with_limits`] 设，**已实现**（2026-09-27 更正原"仍未实现"，见模块文档）。
     pub fn with_motor(mut self, target_velocity: f32, max_force: f32) -> Self {
         self.motor_target = target_velocity;
         self.motor_max_force = max_force;

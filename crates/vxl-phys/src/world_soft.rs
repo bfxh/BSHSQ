@@ -36,25 +36,25 @@ impl FluidBoundary {
 impl World {
     /// 注册一条绳索（`vxl_phys_soft::Rope`），返回其索引。
     pub fn add_rope(&mut self, rope: vxl_phys_soft::Rope) -> usize {
-        self.ropes.push(rope);
-        self.ropes.len() - 1
+        self.soft.ropes.push(rope);
+        self.soft.ropes.len() - 1
     }
 
     /// 已注册绳索（判据/渲染读 `pos` / `vel`）。
     pub fn ropes(&self) -> &[vxl_phys_soft::Rope] {
-        &self.ropes
+        &self.soft.ropes
     }
 
     /// 第 `i` 条绳索。
     pub fn rope(&self, i: usize) -> Option<&vxl_phys_soft::Rope> {
-        self.ropes.get(i)
+        self.soft.ropes.get(i)
     }
 
-    /// **域通道**（每 tick 一次、体子步全部完成之后）：液体域 → 软体域。
-    /// 顺序固定 ⇒ 确定性不受影响（两条通道互不读对方状态）。
+    /// 固定域序：流体 → 绳索 → 布料；空集通道直接返回。
     pub(crate) fn domain_pass(&mut self) {
         self.fluid_pass();
         self.rope_pass();
+        self.cloth_pass();
     }
 
     /// **软体域通道**：每条绳索按自身 `substeps` 推进一个 `config.dt`；接触走统一提供者通道
@@ -62,7 +62,7 @@ impl World {
     /// 反作用回填：`bodies.linvel += body_dv`（速度增量）、`bodies.torque += τ/dt`（角冲量 → 力矩口径，
     /// 与 2b 流体反作用同段位）。**空集 ⇒ 零成本短路**。
     pub(crate) fn rope_pass(&mut self) {
-        if self.ropes.is_empty() {
+        if self.soft.ropes.is_empty() {
             return;
         }
         let dt = self.config.dt;
@@ -70,31 +70,10 @@ impl World {
         let count = self.providers.len() as u32;
         // 刚体代理（每 tick 重建：体在动）。**地形类形状跳过**（`Provider`/`HeightField` 走提供者
         // 通道；`Compound` 本片不支持 ⇒ 直接跳过，别让它悄悄不清碰）。
-        self.rope_proxies.clear();
-        for i in 0..self.bodies.len() {
-            let shape = self.bodies.shape[i];
-            if matches!(
-                shape,
-                Shape::Provider(_) | Shape::HeightField(_) | Shape::Compound { .. }
-            ) {
-                continue;
-            }
-            self.rope_proxies.push(vxl_phys_soft::RigidProxy {
-                body: i as u32,
-                shape,
-                pos: self.bodies.position[i],
-                rot: self.bodies.rot(i),
-                linvel: self.bodies.linvel[i],
-                inv_mass: if self.bodies.is_dynamic(i) {
-                    self.bodies.inv_mass[i]
-                } else {
-                    0.0
-                },
-            });
-        }
+        self.refresh_soft_proxies();
         let proxies = std::mem::take(&mut self.rope_proxies);
         let providers = &self.providers;
-        for rope in &mut self.ropes {
+        for rope in &mut self.soft.ropes {
             rope.step(dt, gravity, providers, count, &proxies);
             for (j, p) in proxies.iter().enumerate() {
                 if p.inv_mass <= 0.0 {

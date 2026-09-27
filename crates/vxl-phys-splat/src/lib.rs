@@ -91,7 +91,7 @@ pub struct GaussianSplatField {
     splats: Vec<Splat>,
     /// 等值面阈值：σ > iso ⇒ 内部。
     pub iso: f32,
-    /// 截断（α 超过该值不再计入；9 = 3σ）。
+    /// 截断（α 超过该值不再计入）。**默认 16.0 = 4σ**（`new` 里设；⚠️ 2026-09-27 更正原"9 = 3σ"——P6 已把默认从 3σ 抬到 4σ）。
     pub cut: f32,
     /// 加速结构（`rebuild_grid` 建；`push` 置脏为 None ⇒ 不建即为全扫）。
     grid: Option<Grid>,

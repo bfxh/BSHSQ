@@ -40,8 +40,8 @@ struct MeshGrid {
     bins: Vec<Vec<u32>>,
 }
 
-/// 建桶的格数上限（超限退回全扫；防内存灾难）。
-const GRID_MAX_BINS: u64 = 1 << 21;
+/// 建桶的格数上限（超限退回全扫；防内存灾难）。**单一来源** = core 的箱子常量（2026-09-27 改）。
+const GRID_MAX_BINS: u64 = vxl_phys_core::grid::GRID_MAX_BINS as u64;
 
 impl TriMesh {
     /// 建网（顶点 + 三角索引；索引越界的三角形被跳过——不 panic，如实丢弃）。

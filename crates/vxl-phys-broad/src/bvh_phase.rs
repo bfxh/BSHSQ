@@ -120,7 +120,7 @@ impl BvhBroadPhase {
 
     /// 0) AABB 计算：纯函数按下标写槽位（§6 并行契约）。分块并行且
     ///    spawn 数受控（for_each_chunk_mut：≤ threads−1，禁止线程爆炸）。
-    ///    门槛 32768：单体内 AABB ≈ 30ns，低于此并行开销（≈0.6ms 启动）不划算。
+    ///    门槛 32768：单体内 AABB ≈ 30ns，低于此并行开销（≈0.6ms 启动）不划算（⚠️ 与窄相的 2048 不是同一个量：那边每对 µs 级）。
     fn update_aabbs(
         &mut self,
         bodies: &BodySet,
@@ -350,7 +350,7 @@ impl BroadPhase for BvhBroadPhase {
         let full = leaves_missing;
         // 0) AABB 计算：纯函数按下标写槽位（§6 并行契约）。分块并行且
         //    spawn 数受控（for_each_chunk_mut：≤ threads−1，禁止线程爆炸）。
-        //    门槛 32768：单体内 AABB ≈ 30ns，低于此并行开销（≈0.6ms 启动）不划算。
+        //    门槛 32768：单体内 AABB ≈ 30ns，低于此并行开销（≈0.6ms 启动）不划算（⚠️ 与窄相的 2048 不是同一个量）。
         self.update_aabbs(bodies, hf_bounds, provider_bounds, threads, full);
         let d_aabb = vxl_phys_core::probe::us(t_aabb);
         let t_tree = vxl_phys_core::probe::start();
