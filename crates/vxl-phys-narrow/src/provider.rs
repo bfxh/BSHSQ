@@ -69,7 +69,11 @@ impl DefaultNarrowPhase {
                     buf,
                 )
             }
-            _ => false, // 其余形状 vs 提供者：待专用查询
+            // 三角网 vs 提供者：**逐顶点**点查询（与外壳臂同构；非凸 ⇒ 不走 GJK/EPA）。
+            Shape::TriMesh { .. } => self.mesh_provider_contacts(
+                body_shape, body, bpos, brot, id, pr_is_a, band, providers, buf,
+            ),
+            _ => false, // 其余形状（复合体/高度场…）vs 提供者：见支持矩阵表
         }
     }
 

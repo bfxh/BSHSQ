@@ -212,21 +212,80 @@ fn gap_trimesh_passes_through_box_until_t1b() {
     );
 }
 
-/// **③ 已知缺口（T1b 关闭）· 三角网 × 提供者（三角网地板）**：同一缺口的第二条腿
-/// （判据 ① 的原场景）。翻面条件同上。
+/// **判据 ①（provider 腿，T1b-1 已落地）· 三角网 × 提供者（三角网地板）**：
+/// 布片落到三角网地板上 ⇒ **被托住**（口径见下；与 `provider_shape_coverage.rs` 同族但**不卡绝对值**）。
+///
+/// 流形 = **逐顶点采样**（`mesh_pair.rs::mesh_provider_contacts`）：顶点即样本、法线取提供者
+/// 在该点的外法线 ⇒ 平面地板上多个顶点同法线 ⇒ 一条流形多点支撑。
+///
+/// **两条口径**（都按本仓测量协议：决定量取**窗口均值**，单点差可以只是相位）：
+/// ① **不下穿**：末体心高度有界（实测 −0.0086 m）；
+/// ② **已收敛**：末 60 tick 的 `|v|` 均值 < 0.1（实测 0.047）。
+/// 残留微幅振荡是**点采样路线**的既有性质（外壳路同量级）⇒ 由对拍判据
+/// `trimesh_route_matches_hull_route_on_provider` 守；`就位间隙 ≈ 0` 的收紧另立一片。
 #[test]
-fn gap_trimesh_passes_through_provider_floor_until_t1b() {
+fn trimesh_is_held_by_provider_floor() {
+    let (_, mesh_v, mesh_y) = drop_on_floor(true, 600);
+    println!("[判据①] mesh: y={mesh_y:+.5} |v|末窗均值={mesh_v:.5}");
+    assert!(
+        mesh_y.abs() < 0.05,
+        "布片应被托在地板附近（体心 y 实得 {mesh_y:+.5}）"
+    );
+    assert!(
+        mesh_v < 0.1,
+        "末窗 |v| 均值 {mesh_v:.5} 未收敛（真掉穿/自由落体会 ≫ 0.1）"
+    );
+}
+
+/// **路线对拍（比值判据）**：同几何、同场景、只换**接触路线**——
+/// **三角网顶点**（本片新路）vs **既有凸体外壳点云**（`hull_provider_contacts`，点查询同款采样）。
+///
+/// 判据：两条路都**被托住**，且新路的末窗 `|v|` 均值 **不超过老路的 2 倍**（实测 1.2×）。
+/// 为什么用比值（本仓 §9 口径：耦合横向量取比值、不卡绝对值）：两条路的残留都是
+/// **点采样 + 预测接触**的微幅振荡（实测 0.047 / 0.039），绝对值随机器/参数微动；比值只问
+/// "新路有没有比既有路差一个量级"。
+///
+/// ⚠️ 这是**弱对照**（质量差 5 个量级：薄壳 `ρ·t·ΣA = 1000·0.01·1 ≈ 10 kg`，
+/// 外壳走 AABB 盒兜底 ⇒ 半长 y=0 ⇒ `≈1e-4 kg`）——正因如此它同时说明：
+/// 这层微振荡**与质量/惯量无关**（两路在 5 个量级差下同量级）⇒ 不是本片引入的伪影。
+#[test]
+fn trimesh_route_matches_hull_route_on_provider() {
+    let (_, mesh_v, mesh_y) = drop_on_floor(true, 600);
+    let (_, hull_v, hull_y) = drop_on_floor(false, 600);
+    println!("[对拍] mesh y={mesh_y:+.5} |v|={mesh_v:.5} ／ hull y={hull_y:+.5} |v|={hull_v:.5}");
+    assert!(
+        mesh_y.abs() < 0.05 && hull_y.abs() < 0.05,
+        "两条路都该被托住（mesh y={mesh_y:+.5} / hull y={hull_y:+.5}）"
+    );
+    assert!(
+        mesh_v < hull_v * 2.0 + 1e-3,
+        "三角网路的末窗 |v|（{mesh_v:.5}）比既有外壳路（{hull_v:.5}）差一个量级 ⇒ 新路有问题"
+    );
+}
+
+/// 把「平铺网格」从 `y = 2` 掉到**三角网地板**上，跑 `ticks`；返回 `(体号, 末 60 tick 的 |v| 均值, 末体心 y)`。
+///
+/// `as_mesh = true` ⇒ 走三角网（`Shape::TriMesh`，顶点点查询）；`false` ⇒ 走既有凸体外壳
+/// （同几何点云，`add_hull` + `spawn_hull_body`）⇒ **只换路线、不换几何**。
+fn drop_on_floor(as_mesh: bool, ticks: usize) -> (usize, f32, f32) {
     let (pts, tris) = plate(2, 0.5);
     let mut w = World::new(PhysConfig::default());
     let _floor = w.add_mesh(flat_mesh());
-    let mesh = w.add_trimesh(pts, tris);
-    let b =
-        w.spawn_trimesh_body(mesh, Vec3::new(0.0, 2.0, 0.0), Quat::IDENTITY, 1000.0, 0.01) as usize;
-    for _ in 0..TICKS {
+    let body = if as_mesh {
+        let m = w.add_trimesh(pts, tris);
+        w.spawn_trimesh_body(m, Vec3::new(0.0, 2.0, 0.0), Quat::IDENTITY, 1000.0, 0.01)
+    } else {
+        let h = w.add_hull(pts);
+        w.spawn_hull_body(h, Vec3::new(0.0, 2.0, 0.0), Quat::IDENTITY, 1000.0)
+    } as usize;
+    let mut vsum = 0.0f32;
+    let mut n = 0.0f32;
+    for tick in 0..ticks {
         w.step();
+        if tick + 60 >= ticks {
+            vsum += w.bodies.linvel[body].length();
+            n += 1.0;
+        }
     }
-    assert!(
-        w.bodies.position[b].y < -1.0,
-        "三角网停在地板上了 —— T1b 似乎已落地：请把本判据翻面成『逐顶点间隙 ≈ 0』"
-    );
+    (body, vsum / n, w.bodies.position[body].y)
 }

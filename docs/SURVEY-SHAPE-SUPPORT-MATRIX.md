@@ -33,7 +33,7 @@
 | 7 | `props.rs::cross_section_area` | 穷尽 | 并入外壳臂（局部 AABB 外接盒近似；阻力估计够用） | ✅ |
 | 8 | `props.rs::body_half_extent` | 穷尽 | 并入 盒/外壳/复合体 臂（`max` 半长） | ✅ |
 | 9 | `props.rs::shape_volume` | `_` | 自动（走 `mass_props` ⇒ 薄壳体积 = `t·ΣA`）——**不是静默缺口** | — |
-| 10 | `narrow/src/provider.rs::provider_shape_contacts` | `_ => false` | **显式臂**（T1a 拒收；T1b 顶点采样，与 `hull_provider_contacts` 同构） | 已显式化 |
+| 10 | `narrow/src/provider.rs::provider_shape_contacts` | `_ => false` | **✅ 已受理（T1b-1 落地）**：`mesh_provider_contacts` 逐顶点点查询（与 `hull_provider_contacts` 同构） | 已显式化 |
 | 11 | `narrow/src/support.rs::support_of` | `_ => None` | **显式列名**：三角网**非凸** ⇒ 不进 GJK/EPA（这是**语义决定**，不是"没写"） | 已显式化 |
 | 12 | `narrow/src/support.rs::poly_for` | `_ => None` | 保持：三角网不是**凸多面体**；调用方已按 `None` 分支处理（`pair_shaped` 各臂都查 `Some/None`） | — |
 | 13 | `narrow/src/pair_shaped.rs::pair_non_heightfield` | `_ => {}` | T1a **保持**（= 无接触）；由矩阵判据**钉成"已知缺口"**，T1b 关掉 | ⚠️ 已知缺口 |
@@ -44,9 +44,10 @@
 | 18 | `vxl-phys/src/world_body.rs`（构造侧） | 构造 | 新增 `add_trimesh` + `spawn_trimesh_body`（照 `spawn_hull_body` 先例） | — |
 | 19 | `vxl-phys/src/world_step*.rs`（步进管线） | **无形状分派** | 形状只经 broad/narrow/mass/ccd 四路进场 ⇒ 管线**零改动**（`rg -c "Shape::" world_step*` = 0） | — |
 
-**"已知缺口"三条**（T1a 落地时**如实登记**、T1b 逐个关闭）：#6 高度场、#10 provider、#13 凸体对。
-三条都由在树判据 `crates/vxl-phys/tests/shape_support_matrix.rs` **逐条钉住**（含金丝雀：
-现在断言"无接触"，T1b 落地后翻成"停住"）——这就是本仓"有形状、无接触"缺口的标准处理法
+**"已知缺口"三条**（T1a 落地时**如实登记**、T1b 逐个关闭）：#6 高度场、#10 provider（**✅ 已关：T1b-1**）、
+#13 凸体对（盒/球先做 = T1b-2；外壳 × 三角网要另立一片）。**仍开的两条**都由在树判据
+`crates/vxl-phys/tests/shape_support_matrix.rs` **逐条钉住**（含金丝雀：现在断言"无接触"，
+落地后翻成"停住"）——这就是本仓"有形状、无接触"缺口的标准处理法
 （先例：`tests/provider_shape_coverage.rs`，胶囊/圆柱/圆锥那条）。
 
 ## 2. 判据（**先判据后实现**）
@@ -120,3 +121,31 @@ fmt 又把两条模式拆回 4 行 ⇒ 白做）。⇒ **"给枚举加一条臂"
 **优先级（重排，别只堆新计划）**：① 2c-3 默认翻转（等维护侧一句话，属换代）→ ② **本计划 T1a**
 （布料那条线的唯一前置）→ ③ 体素↔多边形转换的物理四件（**无几何缺口挡路**，想要可见成果可先走）
 → ④ GPU 接触/解算切片、自碰撞进阶、撕裂/塑性。
+
+## 6. T1b-1 实测（provider 腿；判据与读数）
+
+**落地**：`crates/vxl-phys-narrow/src/mesh_pair.rs`（新文件）——`fill_mesh_world`（**与 `fill_hull_world`
+共用 `hull_pts` 缓冲**：一个体只有一种形状 ⇒ 不新增字段、不碰 god 门成员棘轮）+ `mesh_provider_contacts`
+（逐顶点 `contacts_point`，与外壳臂同构）。`provider.rs` 只加一行分发。
+
+**判据（在树）与读数**（600 tick，末 60 tick 取窗口均值——本仓测量协议：决定量取窗口均值）：
+
+| 判据 | 读数 |
+|---|---|
+| ① **不下穿**：末体心高度有界 | mesh 路 **y = −0.0086 m**（阈值 0.05） |
+| ② **已收敛**：末窗 `\|v\|` 均值 < 0.1 | mesh 路 **0.047** |
+| ③ **路线对拍（比值）**：mesh 路 ≤ 外壳路 ×2 | mesh **0.047** / 外壳（`hull_provider_contacts`）**0.039** ⇒ **1.2×** |
+
+**⚠️ 两条如实登记**（都不是静默）：
+
+1. **残留微幅振荡**（末窗 `|v|` ≈ 0.04~0.05、体心绕面上下 ~1 cm 摆动、缓慢衰减）：**两条路都有**
+   （外壳路同样 0.039）⇒ 这是本仓"**点采样 + 预测接触**"路线的既有性质，**不是本片引入**；
+   且它与质量无关（两路质量差 5 个量级而残余同量级 ⇒ 不是质量/惯量伪影）。⇒ 判据取**比值**，
+   绝对值只留"没掉穿"这一条。
+2. **一次自由落体瞬变**（实测 t≈240：接触集短暂全消失 ⇒ 体按 `g·dt` 自由落 2~3 tick、
+   `|v|` 峰值 0.41，之后 ~150 tick 内衰减回 0.001）：**有名字、有读数、留档**；
+   机制候选 = 预测接触平衡点来回穿越（零点附近的接触集抖动），收紧口径（"就位间隙 ≈ 0"）
+   另立一片，不混进本条判据。
+
+**下一片（T1b-2）**：`Shape::TriMesh` × {盒, 球}（解析逐顶点，非 provider 路）+ 翻
+`gap_trimesh_passes_through_box_until_t1b`；再往后 = 高度场腿（#6）与外壳对（#13）。

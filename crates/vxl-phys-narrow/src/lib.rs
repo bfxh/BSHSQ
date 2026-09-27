@@ -29,6 +29,7 @@ use vxl_phys_core::{JobSystem, Mat3, Quat, Shape, Vec3, CYLINDER_SEGMENTS};
 mod entry;
 mod geom;
 mod hf;
+mod mesh_pair;
 mod mesh_store;
 mod pair;
 mod pair_shaped;
