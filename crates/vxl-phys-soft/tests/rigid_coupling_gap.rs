@@ -102,12 +102,17 @@ fn box_on_rope_is_held() {
     let v = vel.y;
     println!(
         "短窗(60 tick) y={y_at_60:.4} | 长窗(1800 tick) 末 y={y:.4} v={v:+.3} | 横向 x={x:+.4}\n\
-         横向判据：|x|max={x_abs_max:.4}（t={t_xmax}）| 漂移起始 t={t_x05} 时 y={y_x05:.4} | 最后一次接触 t={t_lost} 时 y={y_lost:.4} x={x_lost:+.4}\
+         横向判据：|x|max={x_abs_max:.4}（t={t_xmax}）| 漂移起始 {} | 最后一次接触 t={t_lost} 时 y={y_lost:.4} x={x_lost:+.4}\
          ⇒ **{}**",
-        if y_lost > 0.8 {
-            "滑出型（丢接触时仍在绳高度）"
+        if t_x05 == usize::MAX {
+            "未达 5 cm".to_string()
         } else {
-            "下沉型（丢接触前已沉下去）"
+            format!("t={t_x05}（y={y_x05:.4}）")
+        },
+        if y_lost > 0.8 {
+            "末次接触仍在绳高度（被托住）"
+        } else {
+            "末次接触前已沉下去"
         }
     );
     // **判据（§8.4.18/§8.4.20）**：这两枚钉子把**形态**钉住 —— 缺口开着时是"横向滑出"型
