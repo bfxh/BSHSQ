@@ -1094,6 +1094,11 @@
   "max_fn_lines": 59,
   "max_type_members": 0
  },
+ "crates/vxl-phys/tests/cloth_reaction_scene.rs": {
+  "file_lines": 92,
+  "max_fn_lines": 52,
+  "max_type_members": 0
+ },
  "crates/vxl-phys/tests/cloth_scene.rs": {
   "file_lines": 76,
   "max_fn_lines": 45,
