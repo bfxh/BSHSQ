@@ -14,6 +14,7 @@
 //! `face_force` 已备，接线属后续切片）；接触几何走"最近面"（`rigid::shape_penetration`），
 //! **没有** rope 那套"入口面"缓存 —— 布片命中点多、面法线不像绳那样在底面↔侧面↔顶面之间翻转。
 use crate::cloth_coupling::BodyCoupling;
+use crate::cloth_self_collision::SelfContacts;
 use crate::params::Stiffness;
 use crate::rigid::RigidProxy;
 use std::collections::HashSet;
@@ -107,6 +108,8 @@ pub struct ClothSheet {
     pub(crate) buf: Vec<InteropContact>,
     /// **粒子↔刚体耦合状态**（反作用两腿 `dv`/`dx`；与 `step` 的 `bodies` 同序）。
     pub body: BodyCoupling,
+    /// **自碰撞状态**（空间哈希 + 禁止对；`cfg.enabled` 默认 `false` ⇒ 零成本）。
+    pub self_contacts: SelfContacts,
 }
 
 impl ClothSheet {
@@ -122,71 +125,25 @@ impl ClothSheet {
         let n = points.len();
         let rho = if density > 0.0 { density } else { 1.0 };
         let t = if thickness > 0.0 { thickness } else { 1e-3 };
-        // 唯一边（插入序 = 三角扫描序；HashSet 只做去重）。
-        let mut cons: Vec<[u32; 2]> = Vec::new();
-        let mut seen: HashSet<[u32; 2]> = HashSet::new();
-        for tri in &tris {
-            for k in 0..3 {
-                let (a, b) = (tri[k], tri[(k + 1) % 3]);
-                let key = if a < b { [a, b] } else { [b, a] };
-                if seen.insert(key) {
-                    cons.push(key);
-                }
-            }
-        }
+        // 唯一边（结构+剪切）、弯曲二环对、薄壳均分质量 —— 三块各自抽成纯函数
+        // （`new` 原 100 行，顶 god 门最长函数棘轮；2026-09-29 切片 T3 抽出的）。
+        let cons = unique_edges(&tris);
         let rest = cons
             .iter()
             .map(|[a, b]| (points[*b as usize] - points[*a as usize]).length())
             .collect();
-        // **弯曲约束**（规格 `ClothConstraints.bending` 的落点）：取**二环对**（邻居的邻居，
-        // 排除直连与自身）——四边形网格上即"隔一格"的跨格距离约束，是最省的弯曲代理
-        // （与 XPBD 布料同族做法）。默认 compliance = `Soft` 档（弯曲通常比拉伸软一个量级）；
-        // 置 `f32::INFINITY` ⇒ 关弯曲。插入序 = i 升序 → 邻居表序 → k 升序（确定性）。
-        let mut adj: Vec<Vec<u32>> = vec![Vec::new(); n];
-        for [a, b] in &cons {
-            adj[*a as usize].push(*b);
-            adj[*b as usize].push(*a);
-        }
-        for v in adj.iter_mut() {
-            v.sort_unstable();
-        }
-        let mut bend: Vec<[u32; 2]> = Vec::new();
-        let mut seen2: HashSet<[u32; 2]> = HashSet::new();
-        for i in 0..n as u32 {
-            for &j in &adj[i as usize] {
-                for &k in &adj[j as usize] {
-                    if k == i || adj[i as usize].binary_search(&k).is_ok() {
-                        continue; // 自身 / 直连（直连已由结构+剪切覆盖）
-                    }
-                    let key = if i < k { [i, k] } else { [k, i] };
-                    if seen2.insert(key) {
-                        bend.push(key);
-                    }
-                }
-            }
-        }
+        let bend = bend_pairs(&cons, n);
         let bend_rest = bend
             .iter()
             .map(|[a, b]| (points[*b as usize] - points[*a as usize]).length())
             .collect();
-        // 薄壳均分质量：每三角面积 ×ρt/3 记到三个角上。
-        let mut mass = vec![0.0f32; n];
-        for tri in &tris {
-            let (a, b, c) = (
-                points[tri[0] as usize],
-                points[tri[1] as usize],
-                points[tri[2] as usize],
-            );
-            let area = (b - a).cross(c - a).length() * 0.5;
-            let share = rho * t * area / 3.0;
-            for v in tri {
-                mass[*v as usize] += share;
-            }
-        }
+        let mass = shell_mass(&tris, &points, rho, t);
         let inv_mass = mass
             .iter()
             .map(|&m| if m > 0.0 { 1.0 / m } else { 0.0 })
             .collect();
+        let mut self_contacts = SelfContacts::new(t * 0.5);
+        self_contacts.set_forbidden(&cons, &bend);
         Self {
             pos: points,
             prev: Vec::new(),
@@ -210,6 +167,7 @@ impl ClothSheet {
             skin: 0.02,
             buf: Vec::new(),
             body: BodyCoupling::default(),
+            self_contacts,
         }
     }
 
@@ -362,6 +320,11 @@ impl ClothSheet {
         provider_count: u32,
         bodies: &[RigidProxy],
     ) {
+        // **自碰撞**（切片 T3；默认关 ⇒ 本行即短路）。列在 `radius` 早退**之前**：它是
+        // 布片**自己对自己**的接触，与"世界接触半径"（`radius < 0` = 关世界接触）无关。
+        if self.self_contacts.cfg.enabled {
+            self.project_self_contacts();
+        }
         if self.radius < 0.0 {
             return;
         }
@@ -420,4 +383,71 @@ impl ClothSheet {
     pub fn bend_count(&self) -> usize {
         self.bend.len()
     }
+}
+
+/// **唯一边集**（结构 + 剪切）：四边形网格的对角线本就是三角形的共享边 ⇒ 一组覆盖两组。
+/// 插入序 = 三角扫描序（`HashSet` 只做去重）⇒ **确定性**。
+fn unique_edges(tris: &[[u32; 3]]) -> Vec<[u32; 2]> {
+    let mut cons: Vec<[u32; 2]> = Vec::new();
+    let mut seen: HashSet<[u32; 2]> = HashSet::new();
+    for tri in tris {
+        for k in 0..3 {
+            let (a, b) = (tri[k], tri[(k + 1) % 3]);
+            let key = if a < b { [a, b] } else { [b, a] };
+            if seen.insert(key) {
+                cons.push(key);
+            }
+        }
+    }
+    cons
+}
+
+/// **弯曲约束**（规格 `ClothConstraints.bending` 的落点）：取**二环对**（邻居的邻居，排除直连与
+/// 自身）—— 四边形网格上即"隔一格"的跨格距离约束，是最省的弯曲代理（与 XPBD 布料同族做法）。
+/// 默认 compliance = `Soft` 档（弯曲通常比拉伸软一个量级）；置 `f32::INFINITY` ⇒ 关弯曲。
+/// 插入序 = `i` 升序 → 邻居表序 → `k` 升序（**确定性**）。
+fn bend_pairs(cons: &[[u32; 2]], n: usize) -> Vec<[u32; 2]> {
+    let mut adj: Vec<Vec<u32>> = vec![Vec::new(); n];
+    for [a, b] in cons {
+        adj[*a as usize].push(*b);
+        adj[*b as usize].push(*a);
+    }
+    for v in adj.iter_mut() {
+        v.sort_unstable();
+    }
+    let mut bend: Vec<[u32; 2]> = Vec::new();
+    let mut seen: HashSet<[u32; 2]> = HashSet::new();
+    for i in 0..n as u32 {
+        for &j in &adj[i as usize] {
+            for &k in &adj[j as usize] {
+                if k == i || adj[i as usize].binary_search(&k).is_ok() {
+                    continue; // 自身 / 直连（直连已由结构+剪切覆盖）
+                }
+                let key = if i < k { [i, k] } else { [k, i] };
+                if seen.insert(key) {
+                    bend.push(key);
+                }
+            }
+        }
+    }
+    bend
+}
+
+/// **薄壳均分质量**：每三角面积 × `ρt/3` 记到三个角上（与窄相 `MeshStore::shell_props` 同口径 ⇒
+/// 两者对同一张网给出的总质量一致）。
+fn shell_mass(tris: &[[u32; 3]], points: &[Vec3], rho: f32, t: f32) -> Vec<f32> {
+    let mut mass = vec![0.0f32; points.len()];
+    for tri in tris {
+        let (a, b, c) = (
+            points[tri[0] as usize],
+            points[tri[1] as usize],
+            points[tri[2] as usize],
+        );
+        let area = (b - a).cross(c - a).length() * 0.5;
+        let share = rho * t * area / 3.0;
+        for v in tri {
+            mass[*v as usize] += share;
+        }
+    }
+    mass
 }
