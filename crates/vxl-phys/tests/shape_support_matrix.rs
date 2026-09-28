@@ -251,6 +251,85 @@ fn trimesh_never_penetrates_sphere() {
     );
 }
 
+/// **判据 ①（凸体腿扩展，T1b-4）· 三角网 × 静态圆柱**：布片落在**柱顶圆盘**上 ⇒ **被托住**。
+/// 圆柱半径 1.0 > 布片半对角 ≈ 0.707 ⇒ 完全落在端面内（避开"滑出边缘"这类与接触无关的失败）。
+/// 注：本片走**解析柱面**（真圆端面），与本仓其它路径对圆柱用的多面化近似不同。
+#[test]
+fn trimesh_is_held_by_cylinder() {
+    const TOP: f32 = 0.5;
+    let (pts, tris) = plate(2, 0.5);
+    let mut w = World::new(PhysConfig::default());
+    let mesh = w.add_trimesh(pts, tris);
+    w.add_static(
+        Shape::Cylinder {
+            half_height: TOP,
+            radius: 1.0,
+        },
+        Vec3::ZERO,
+        Quat::IDENTITY,
+    );
+    let b =
+        w.spawn_trimesh_body(mesh, Vec3::new(0.0, 2.0, 0.0), Quat::IDENTITY, 1000.0, 0.01) as usize;
+    let mut vsum = 0.0f32;
+    let mut n = 0.0f32;
+    for tick in 0..600 {
+        w.step();
+        if tick + 60 >= 600 {
+            vsum += w.bodies.linvel[b].length();
+            n += 1.0;
+        }
+    }
+    let y = w.bodies.position[b].y;
+    let v = vsum / n;
+    println!("[判据①-cyl] y={y:+.5}（柱顶 {TOP}） |v|末窗均值={v:.5}");
+    assert!(
+        (y - TOP).abs() < 0.05,
+        "布片应被托在柱顶（体心 y 实得 {y:+.5}，柱顶 {TOP}）"
+    );
+    assert!(v < 0.1, "末窗 |v| 均值 {v:.5} 未收敛");
+}
+
+/// **判据 ①（凸体腿扩展，T1b-4）· 三角网 × 静态胶囊**：**横向**胶囊上 ⇒ **全程不深穿透**。
+///
+/// 布片坐横向胶囊会像坐棱上一样**翻落**（真物理）⇒ 判"接触承诺"：逐 tick 逐顶点量到**轴段**
+/// （世界 ±`HALF`·X）的距离 − 半径，全程 ≥ `−0.05`。
+#[test]
+fn trimesh_never_penetrates_capsule() {
+    const R: f32 = 0.5;
+    const HALF: f32 = 0.5;
+    let (pts, tris) = plate(2, 0.5);
+    let mut w = World::new(PhysConfig::default());
+    let mesh = w.add_trimesh(pts.clone(), tris);
+    // 胶囊横放：绕 Z 转 90° ⇒ 局部 +Y 轴变成世界 ±X
+    let lying = Quat::from_axis_angle(Vec3::Z, std::f32::consts::FRAC_PI_2);
+    w.add_static(
+        Shape::Capsule {
+            half_height: HALF,
+            radius: R,
+        },
+        Vec3::ZERO,
+        lying,
+    );
+    let b =
+        w.spawn_trimesh_body(mesh, Vec3::new(0.0, 2.0, 0.0), Quat::IDENTITY, 1000.0, 0.01) as usize;
+    let mut worst = f32::MAX;
+    for _ in 0..600 {
+        w.step();
+        let (p, q) = (w.bodies.position[b], w.bodies.rot(b));
+        for v in &pts {
+            let wp = p + q.rotate_vec3(*v);
+            let ax = wp.x.clamp(-HALF, HALF); // 轴段上的最近点（x 夹取）
+            let d = Vec3::new(wp.x - ax, wp.y, wp.z);
+            worst = worst.min(d.length() - R);
+        }
+    }
+    println!("[判据①-cap] 全程最深顶点穿透 = {worst:+.5}（判据 ≥ −0.05）");
+    assert!(
+        worst > -0.05,
+        "顶点穿透胶囊过深（最深 {worst:+.5}）⇒ 胶囊腿的接触没守住"
+    );
+}
+
 /// **判据 ①（高度场腿，T1b-3 已落地）· 三角网 × 高度场**：布片落到**平地形**（h ≡ 0）上 ⇒
 /// **被托住**（口径同 provider 腿：高度有界 + 末窗 `|v|` 均值收敛）。
 ///

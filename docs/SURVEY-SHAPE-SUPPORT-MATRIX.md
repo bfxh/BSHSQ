@@ -36,7 +36,7 @@
 | 10 | `narrow/src/provider.rs::provider_shape_contacts` | `_ => false` | **✅ 已受理（T1b-1 落地）**：`mesh_provider_contacts` 逐顶点点查询（与 `hull_provider_contacts` 同构） | 已显式化 |
 | 11 | `narrow/src/support.rs::support_of` | `_ => None` | **显式列名**：三角网**非凸** ⇒ 不进 GJK/EPA（这是**语义决定**，不是"没写"） | 已显式化 |
 | 12 | `narrow/src/support.rs::poly_for` | `_ => None` | 保持：三角网不是**凸多面体**；调用方已按 `None` 分支处理（`pair_shaped` 各臂都查 `Some/None`） | — |
-| 13 | `narrow/src/pair_shaped.rs::pair_non_heightfield` | `_ => {}` | **✅ 已受理（T1b-2）**：三角网早分支 ⇒ `mesh_pair`（盒/球解析采样；其余如实不受理） | 已显式化 |
+| 13 | `narrow/src/pair_shaped.rs::pair_non_heightfield` | `_ => {}` | **✅ 已受理（T1b-2/T1b-4）**：三角网早分支 ⇒ `mesh_pair`（盒/球/胶囊/圆柱解析采样；其余如实不受理） | 已显式化 |
 | 14 | `core/src/narrow_tier.rs::pack_bodies` | `_ => KIND_NONE` | 注释登记（**卡上不接** ⇒ 主机回填） | 注释 |
 | 15 | `fluid/src/boundary.rs::supports` | `matches!` 显式 | `false`（2b 不生成边界粒子 ⇒ 该体仍走 2a 介质场，**既不叠加也不留空**） | 已显式化 |
 | 16 | `fluid/src/boundary.rs::{min_half_extent, surface}` | `_` | 注释登记：**不生成**（"近似面片会给错体积，比没有更坏"——沿用该文件既有裁决） | 注释 |
@@ -45,8 +45,8 @@
 | 19 | `vxl-phys/src/world_step*.rs`（步进管线） | **无形状分派** | 形状只经 broad/narrow/mass/ccd 四路进场 ⇒ 管线**零改动**（`rg -c "Shape::" world_step*` = 0） | — |
 
 **"已知缺口"三条**（T1a 落地时**如实登记**、T1b 逐个关闭）：#6 高度场（**✅ 已关：T1b-3**）、
-#10 provider（**✅ 已关：T1b-1**）、#13 凸体对（**✅ 部分关闭：T1b-2 接盒/球**；**仍开** =
-胶囊/圆柱/圆锥/外壳/复合体/另一个三角网 ⇒ 另立片）。
+#10 provider（**✅ 已关：T1b-1**）、#13 凸体对（**✅ 部分关闭：T1b-2/T1b-4 接盒/球/胶囊/圆柱**；
+**仍开** = 锥/外壳/复合体/另一个三角网 ⇒ 另立片）。
 **仍开的那几条**都由在树判据 `crates/vxl-phys/tests/shape_support_matrix.rs` **逐条钉住**
 （现状 = 不产接触；落地后翻成"停住"）——这就是本仓"有形状、无接触"缺口的标准处理法
 （先例：`tests/provider_shape_coverage.rs`，胶囊/圆柱/圆锥那条）。
@@ -150,12 +150,13 @@ fmt 又把两条模式拆回 4 行 ⇒ 白做）。⇒ **"给枚举加一条臂"
 
 ## 7. T1b-2 / T1b-3 实测（凸体腿 + 高度场腿；判据与读数）
 
-**落地**：`mesh_pair.rs` 增加 `mesh_pair`（逐顶点**解析**最近点；只接**盒 / 球**，其余如实不受理）
-+ `point_shape`（点 × {盒, 球} 的最近点/外法线/深度，`Vec3`/`Mat3` 手写，无新依赖）
+**落地**：`mesh_pair.rs` 增加 `mesh_pair`（逐顶点**解析**最近点；受理 **盒 / 球 / 胶囊 / 圆柱**，
+其余如实不受理）+ `point_shape`（点 × 上述四族的最近点/外法线/深度，`Vec3`/`Mat3` 手写，无新依赖）
 + `mesh_heightfield`（与 `hull_heightfield` **同构**：逐顶点 `hf.sample` ⇒ `depth = h − v.y`）；
 `pair_shaped.rs::pair_non_heightfield` 加**早分支**、高度场分派里把三角网拆出为独立臂。
 法线从求解器定义反推：`n_o` = 把顶点推出去的方向 ⇒ **三角网在 a 侧取 `−n_o`、在 b 侧取 `+n_o`**
 （高度场腿的 sign 由 `heightfield_pair` 那段**形状无关**地处理）。
+**锥 / 外壳 / 复合体 / 另一个三角网**仍未受理（要斜面解析或面数据 ⇒ 另立片）。
 
 **判据（在树）与读数**（600 tick，末窗 = 末 60 tick 均值）：
 
@@ -164,13 +165,19 @@ fmt 又把两条模式拆回 4 行 ⇒ 白做）。⇒ **"给枚举加一条臂"
 | `trimesh_is_held_by_box` | **y = +0.99199**（盒顶 1.0）、`\|v\| = 0.0056` | 平衡穿透 8 mm、几乎静止 |
 | `trimesh_never_penetrates_sphere` | 全程最深顶点穿透 **−0.00624** | 薄片在球顶翻落（真物理）⇒ 判"接触承诺"而非"停住" |
 | `trimesh_is_held_by_heightfield` | **y = −0.00797**、`\|v\| = **0.0032**` | 平地形（h ≡ 0） |
+| `trimesh_is_held_by_cylinder`（T1b-4） | **y = +0.49202**（柱顶 0.5）、`\|v\| = **0.0032**` | 落柱顶圆盘；走**解析柱面**（真圆） |
+| `trimesh_never_penetrates_capsule`（T1b-4） | 全程最深顶点穿透 **−0.00624** | 横放胶囊（脊）；亦判"接触承诺" |
 | `trimesh_is_held_by_provider_floor`（T1b-1 回归） | y = −0.00862、`\|v\| = 0.047` | 未动 |
 
-**⇒ 判据 ①（球 / 盒 / 提供者 / 高度场）四条腿全通。**
+**⇒ 判据 ① 六条腿全通**（球 / 盒 / 提供者 / 高度场 / 圆柱 / 胶囊）。
 
-**⚠️ 一条读数差异（证据变强，但仍不写成结论）**：四条腿里**唯一**残留偏大的是 **provider 腿**
-（0.047），另外三条（盒 0.0056、高度场 0.0032、以及同款的既有外壳路 0.039）——
-**3 对 1**。三条收敛好的路都**直接**把候选点交给 `select_contacts`；provider 腿多经过一层
+**⭐ 一次免费的交叉验证**：球腿与胶囊腿的最深穿透**逐位相同**（−0.00624）。这不是巧合——
+**横放胶囊的"脊"与半径 0.5 的球顶在几何上等价**（同一曲率半径），而两者走的是 `point_shape` 里
+**两条独立分支**（球 / 线段+半径）⇒ 同读数说明两条解析分支口径一致。
+
+**⚠️ 一条读数差异（证据变强，但仍不写成结论）**：**六条腿里唯一残留偏大的是 provider 腿**
+（0.047），其余"直接 `select_contacts`"的路都在 0.0032~0.039（圆柱 0.0032 / 高度场 0.0032 /
+盒 0.0056 / 既有外壳路 0.039）——**4 对 1**。provider 腿多经过一层
 `pick_dominant_normal` + `four_corner_points`（其 `feature % 16` 的"面心/四角"约定是为
 **逐面发射**设计的，对**顶点采样**只能靠"无面心组 ⇒ 用全部组"兜底）。
 ⇒ 要收紧 provider 腿的残留，**先看取点选择那一环**（这是一条可检验的假设，不是结论）。

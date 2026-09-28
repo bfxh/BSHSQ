@@ -109,8 +109,14 @@ impl DefaultNarrowPhase {
         } else {
             (sb, pb, rb, pa, ra, sa)
         };
-        // 受理面：只接盒 / 球（其余 = 不受理 ⇒ 本对不产接触）
-        if !matches!(*oshape, Shape::Box { .. } | Shape::Sphere { .. }) {
+        // 受理面：盒 / 球 / 胶囊 / 圆柱（其余 = 不受理 ⇒ 本对不产接触）
+        if !matches!(
+            *oshape,
+            Shape::Box { .. }
+                | Shape::Sphere { .. }
+                | Shape::Capsule { .. }
+                | Shape::Cylinder { .. }
+        ) {
             return;
         }
         let side = if mesh_is_a { 0 } else { 1 };
@@ -194,10 +200,14 @@ impl DefaultNarrowPhase {
     }
 }
 
-/// 点 × {盒, 球} 的**解析最近点**：返回 `(对方外法线 n_o, 深度, 对方表面上的接触点)`。
+/// 点 × {盒, 球, 胶囊, 圆柱} 的**解析最近点**：返回 `(对方外法线 n_o, 深度, 对方表面上的接触点)`。
 ///
 /// 深度口径与全仓一致（`SPEC §4.3`）：**正 = 穿透**、负 = 分离（分离时 `n_o` 仍指"把点推出去"）。
-/// `None` = 该形状不在本片受理面内（**不猜**：调用方按"不受理"处理）。
+/// `None` = 该形状不在本片受理面内（**不猜**：调用方按"不受理"处理）。锥 / 外壳 / 复合体 /
+/// 另一个三角网仍未受理（要面数据或斜面解析 ⇒ 另立片，见支持矩阵）。
+///
+/// 注：圆柱/胶囊走**解析面**（真圆、真柱面）——与本仓其它路径对这两族用的**多面化**近似不同，
+/// 对本片（顶点采样）反而是更准的接触面。
 fn point_shape(p: Vec3, shape: &Shape, c: Vec3, rot: Quat) -> Option<(Vec3, f32, Vec3)> {
     match *shape {
         Shape::Sphere { radius } => {
@@ -208,6 +218,64 @@ fn point_shape(p: Vec3, shape: &Shape, c: Vec3, rot: Quat) -> Option<(Vec3, f32,
             }
             let n_o = d * (1.0 / len);
             Some((n_o, radius - len, c + n_o * radius))
+        }
+        // 胶囊 = "线段 + 半径" ⇒ 先求轴段最近点，再按球处理（与 `vxl-phys-soft::rigid` 同款）。
+        Shape::Capsule {
+            half_height,
+            radius,
+        } => {
+            let axis = Mat3::from_quat(rot).mul_vec3(Vec3::Y);
+            let t = (p - c).dot(axis).clamp(-half_height, half_height);
+            let q = c + axis * t;
+            let d = p - q;
+            let len = d.length();
+            if len <= 1e-6 {
+                return Some((Vec3::Y, radius, q + Vec3::Y * radius));
+            }
+            let n_o = d * (1.0 / len);
+            Some((n_o, radius - len, q + n_o * radius))
+        }
+        // 有限圆柱（局部 +Y）：侧面 / 端面 / **边圈** 三分支（含柱内"最近面"选择）。
+        Shape::Cylinder {
+            half_height,
+            radius,
+        } => {
+            let r3 = Mat3::from_quat(rot);
+            let q = r3.transpose_mul_vec3(p - c); // 局部坐标
+            let rho = (q.x * q.x + q.z * q.z).sqrt();
+            let ay = q.y.abs();
+            // 径向单位向量（局部；落在轴上时任取 +X ⇒ 确定性）
+            let rdir = if rho > 1e-6 {
+                Vec3::new(q.x / rho, 0.0, q.z / rho)
+            } else {
+                Vec3::X
+            };
+            let side = |y: f32| rdir * radius + Vec3::Y * y; // 侧面上的点
+            let cap = |s: f32| Vec3::new(q.x, s * half_height, q.z); // 端面上的点
+            let (n_l, depth, surf) = if rho <= radius && ay <= half_height {
+                // 柱内：最近的是侧面还是端面（并列取侧面 ⇒ 确定性）
+                let (d_side, d_cap) = (radius - rho, half_height - ay);
+                if d_side <= d_cap {
+                    (rdir, d_side, side(q.y))
+                } else {
+                    let s = if q.y < 0.0 { -1.0 } else { 1.0 };
+                    (Vec3::Y * s, d_cap, cap(s))
+                }
+            } else if rho > radius && ay <= half_height {
+                (rdir, radius - rho, side(q.y)) // 侧面外侧（depth ≤ 0）
+            } else if rho <= radius {
+                let s = if q.y < 0.0 { -1.0 } else { 1.0 };
+                (Vec3::Y * s, half_height - ay, cap(s)) // 端面外侧
+            } else {
+                // 侧面外侧 + 端面外 ⇒ 最近点是**边圈**
+                let s = if q.y < 0.0 { -1.0 } else { 1.0 };
+                let rim = Vec3::new(rdir.x * radius, s * half_height, rdir.z * radius);
+                let d = q - rim;
+                let len = d.length();
+                let n_l = if len > 1e-6 { d * (1.0 / len) } else { rdir };
+                (n_l, -len, rim)
+            };
+            Some((r3.mul_vec3(n_l), depth, c + r3.mul_vec3(surf)))
         }
         Shape::Box { half } => {
             let r = Mat3::from_quat(rot);
