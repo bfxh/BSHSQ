@@ -158,6 +158,40 @@ impl DefaultNarrowPhase {
             points: ContactPoints::from_slice(&self.cand),
         });
     }
+
+    /// **三角网 × 高度场**：逐顶点采样（与 `hull_heightfield` **同构**，只换点源）。
+    ///
+    /// 逐个**顶点**取世界点 → `hf.sample(x, z)` ⇒ `depth = h − v.y`（正 = 顶点在地形之下 = 穿透），
+    /// 接触点落在地形面上（`(x, h, z)`）；法线与 sign 由调用方 `heightfield_pair` 按 a/b 侧决定
+    /// （那里是**形状无关**的：取最深样本的地形法线）⇒ 本函数只负责**填 `self.cand`**。
+    pub(crate) fn mesh_heightfield(
+        &mut self,
+        mesh: u32,
+        pos: Vec3,
+        rot: Quat,
+        hf: &HeightField,
+    ) -> bool {
+        self.cand.clear();
+        let r = Mat3::from_quat(rot);
+        let pts = self.meshes.points(mesh);
+        for (idx, &p) in pts.iter().enumerate() {
+            let v = pos + r.mul_vec3(p);
+            if let Some((h, _)) = hf.sample(v.x, v.z) {
+                let depth = h - v.y;
+                if depth > -self.skin {
+                    self.cand.push(ContactPoint {
+                        point: Vec3::new(v.x, h, v.z),
+                        depth,
+                        feature: idx as u32 + 1,
+                    });
+                }
+            }
+        }
+        if self.cand.is_empty() {
+            return false;
+        }
+        self.select_contacts(self.min_point_sep)
+    }
 }
 
 /// 点 × {盒, 球} 的**解析最近点**：返回 `(对方外法线 n_o, 深度, 对方表面上的接触点)`。

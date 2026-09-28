@@ -263,8 +263,10 @@ impl DefaultNarrowPhase {
                     self.poly_heightfield(idx, bpos, brot, hf)
                 }
                 Shape::ConvexHull { hull, .. } => self.hull_heightfield(hull, bpos, brot, hf),
-                // 三角网 × 高度场属 T1b（顶点采样）；矩阵判据钉住"现在无接触"这一已知缺口。
-                Shape::HeightField(_) | Shape::Provider(_) | Shape::TriMesh { .. } => return true,
+                Shape::HeightField(_) | Shape::Provider(_) => return true,
+                // 三角网 × 高度场：**逐顶点采样**（`mesh_pair.rs::mesh_heightfield`；法线与 sign
+                // 由本函数的"最深样本地形法线"那段形状无关地处理）。
+                Shape::TriMesh { mesh, .. } => self.mesh_heightfield(mesh, bpos, brot, hf),
                 // 复合体已在上游按子形状展开（本臂不可达，留作穷尽性）。
                 Shape::Compound { .. } => return true,
                 // 胶囊体 × 地形：沿中心线取 N 个样本（每个样本按球处理）。

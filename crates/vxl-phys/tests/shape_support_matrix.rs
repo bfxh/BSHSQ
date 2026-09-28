@@ -251,6 +251,35 @@ fn trimesh_never_penetrates_sphere() {
     );
 }
 
+/// **判据 ①（高度场腿，T1b-3 已落地）· 三角网 × 高度场**：布片落到**平地形**（h ≡ 0）上 ⇒
+/// **被托住**（口径同 provider 腿：高度有界 + 末窗 `|v|` 均值收敛）。
+///
+/// 流形 = `mesh_pair.rs::mesh_heightfield` 逐顶点采样；法线与 a/b 侧的 sign 由
+/// `heightfield_pair` 的"最深样本地形法线"那段**形状无关地**处理。
+#[test]
+fn trimesh_is_held_by_heightfield() {
+    let (pts, tris) = plate(2, 0.5);
+    let mut w = World::new(PhysConfig::default());
+    w.add_heightfield(HeightField::flat(-4.0, -4.0, 9, 9, 1.0, 0.0));
+    let mesh = w.add_trimesh(pts, tris);
+    let b =
+        w.spawn_trimesh_body(mesh, Vec3::new(0.0, 2.0, 0.0), Quat::IDENTITY, 1000.0, 0.01) as usize;
+    let mut vsum = 0.0f32;
+    let mut n = 0.0f32;
+    for tick in 0..600 {
+        w.step();
+        if tick + 60 >= 600 {
+            vsum += w.bodies.linvel[b].length();
+            n += 1.0;
+        }
+    }
+    let y = w.bodies.position[b].y;
+    let v = vsum / n;
+    println!("[判据①-hf] y={y:+.5} |v|末窗均值={v:.5}");
+    assert!(y.abs() < 0.05, "布片应被托在地形上（体心 y 实得 {y:+.5}）");
+    assert!(v < 0.1, "末窗 |v| 均值 {v:.5} 未收敛");
+}
+
 /// **判据 ①（provider 腿，T1b-1 已落地）· 三角网 × 提供者（三角网地板）**：
 /// 布片落到三角网地板上 ⇒ **被托住**（口径见下；与 `provider_shape_coverage.rs` 同族但**不卡绝对值**）。
 ///
