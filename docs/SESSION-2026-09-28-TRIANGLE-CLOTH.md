@@ -82,7 +82,11 @@ export CARGO_TARGET_DIR=C:/vxl-wl-target && bash scripts/gate_all.sh   # 先确�
   → `git status` 复查 → 提交推送 → 后台核 CI（只看 `headSha == HEAD 且 success`）。
 - 判据位置：`crates/vxl-phys/tests/{shape_support_matrix,aero_face_forces,cloth_scene}.rs`、
   `crates/vxl-phys-soft/tests/{cloth_minimal,cloth_contact,cloth_body,cloth_bending,cloth_reaction,rope_*}.rs`。
-- **上一片（2b-ii）的代码提交 = `294849f`**；本档提交在其之上（只动 `docs/` ⇒ **不触发 CI**，
-  与 09-28 那次同款）⇒ 核 CI 时看 **`294849f`** 而不是 HEAD。
+- **上一片（2b-ii）的代码提交 = `294849f`**；其上还有两笔：`ceb6982`（交接档）与 `1684d76`
+  （修 CI 红的私有文档链接 + 本机门链补 `doc` 一步）。
+  ⚠️ **更正（2026-09-29 实测）**：**docs 提交也会触发 CI** —— `ceb6982` 的「静态 (文档/强化 lint)」
+  job 就红了（`RUSTDOCFLAGS=-D warnings cargo doc` 抓的是**私有**模块/私有方法的文档链接，
+  clippy 看不见）⇒ **核 CI 一律看 `headSha == HEAD` 且 `success`**，别按"docs 不触发 CI"推断。
+  本机门链已补 `step doc`（`scripts/gate_all.sh`，口径与 CI 逐字相同）⇒ 这一类不再漏。
 - 逐片实测与留档：`docs/SURVEY-SOFT-CLOTH-AND-CONVERSION.md` §8.4.33–42、
   `docs/SURVEY-SHAPE-SUPPORT-MATRIX.md` §6–§10。
