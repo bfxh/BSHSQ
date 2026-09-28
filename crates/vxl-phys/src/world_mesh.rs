@@ -30,6 +30,36 @@ impl World {
         self.narrow.mesh_surface_area(mesh)
     }
 
+    /// 顶点局部 AABB 半长（构 `Shape::TriMesh` 静态体用；与 `spawn_trimesh_body` 同源）。
+    pub fn trimesh_half_extents(&self, mesh: u32) -> Vec3 {
+        self.narrow.mesh_half_extents(mesh)
+    }
+
+    /// **开启面元气动**（T4；`AeroConfig` = 密度/Cd/风）。未调用 ⇒ `aero_pass` 短路 ⇒
+    /// 默认档逐位不变。重复调用 = 覆盖配置（快照在下一子步重写）。
+    pub fn set_aero(&mut self, cfg: vxl_phys_aero::AeroConfig) {
+        self.aero = Some(vxl_phys_aero::AeroState::new(cfg));
+    }
+
+    /// 本子步施加在 `body` 上的**气动合力**（未开启 / 非三角网体 ⇒ `Vec3::ZERO`）。
+    /// 仪器与被测同源：读的就是 `aero_pass` 刚施加的那份（不是另算一份）。
+    pub fn aero_force(&self, body: u32) -> Vec3 {
+        self.aero
+            .as_ref()
+            .and_then(|st| st.forces.get(body as usize))
+            .copied()
+            .unwrap_or(Vec3::ZERO)
+    }
+
+    /// 本子步施加在 `body` 上的**气动力矩**（关于体原点；口径同 `bodies.torque`）。
+    pub fn aero_torque(&self, body: u32) -> Vec3 {
+        self.aero
+            .as_ref()
+            .and_then(|st| st.torques.get(body as usize))
+            .copied()
+            .unwrap_or(Vec3::ZERO)
+    }
+
     /// 生成**三角网动态体**（薄壳）：顶点/三角已在 [`Self::add_trimesh`] 注册；`thickness` = 壳厚（m）。
     ///
     /// 半长取**顶点局部 AABB**（宽相保守）；质量/惯量按**薄壳**覆写
@@ -37,9 +67,8 @@ impl World {
     /// `push_dynamic` 内部只有 AABB 盒兜底近似。退化网（无有效三角）保留兜底 ⇒ 质量 0
     /// （等效静态），与空复合体同款。
     ///
-    /// ⚠️ **已知缺口（T1b 关闭）**：三角网 × 任何形状**暂不产生接触**（逐顶点采样未落地）——
-    /// 半长/质量/惯量已是可用的一等几何，但"撞得上"要等 T1b。该缺口由
-    /// `crates/vxl-phys/tests/shape_support_matrix.rs` **钉住**（不是静默）。
+    /// 接触受理面与逐域支持矩阵见 `docs/SURVEY-SHAPE-SUPPORT-MATRIX.md`
+    /// （判据：`crates/vxl-phys/tests/shape_support_matrix.rs`）。
     pub fn spawn_trimesh_body(
         &mut self,
         mesh: u32,

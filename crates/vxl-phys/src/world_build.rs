@@ -43,6 +43,7 @@ impl World {
             fluid_boundary: FluidBoundary::default(),
             ropes: Vec::new(),
             rope_proxies: Vec::new(),
+            aero: None,
             timings: PhaseTimings::default(),
         }
     }

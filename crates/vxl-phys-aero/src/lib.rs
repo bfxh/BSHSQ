@@ -1,9 +1,19 @@
 //! # vxl-phys-aero
 //!
-//! 气动域（面元气动力）—— M2+ 落地。
-//! 每三角面：F = ½ρ·Cd·A·(v_wind − v_tri)·|v_rel|（Bridson 线化气动力，与布料 §4.7 同通道）。
+//! 气动域（面元气动力）—— **T4 落地（2026-09-28）**：把本 crate 从纯配置变成**消费方**。
+//! 每三角面（Bridson 线化气动力，与布料 §4.7 同通道）：
+//! `F_face = ½·ρ·Cd·A·u·|u|`，`u = v_wind − v_face_center`（**全相对速度**——含切向；
+//! 面元 ⊥ 风时退化为平板阻力 `½ρv²A·Cd`，判据 ③ 与解析式**精确对拍**）。
+//! 力/力矩由门面的 `aero_pass` **逐子步**施加（`bodies.force/torque` 是逐子步累加器，
+//! 口径同 `angular_impulse_contract` 的已钉契约）；`AeroState.forces/torques` 留**逐体快照**
+//! 作判据仪器（读到的就是施加的那份，不是另算的一份）。
+//!
+//! **开关语义**：门面 `World::set_aero` 显式开启 ⇒ `Option` 槽默认 `None` ⇒ **默认档逐位不变**
+//! （零成本短路，与 `angular_reaction` / 卡上窄相同款先例）。
 
 #![forbid(unsafe_code)]
+
+use vxl_phys_core::Vec3;
 
 #[derive(Clone, Copy, Debug)]
 pub struct AeroConfig {
@@ -23,6 +33,38 @@ impl Default for AeroConfig {
             drag_coefficient: 1.0,
             lift_slope: 5.0,
             wind: [0.0, 0.0, 0.0],
+        }
+    }
+}
+
+/// **单面元的气动力**（Bridson 线化）：`F = ½·ρ·Cd·A·u·|u|`。
+///
+/// `u` = 面元处的**相对气流**（风 − 面元速度）；`u = 0 ⇒ F = 0`（**逐位精确**，金丝雀判据用）。
+/// 面元 ⊥ 风时 `|F| = ½ρv²A·Cd`（平板阻力解析式）；含切向分量（全相对速度口径，
+/// 与本 crate 文档头的 Bridson 公式一致）。
+#[inline]
+pub fn face_force(u: Vec3, area: f32, cfg: &AeroConfig) -> Vec3 {
+    u * (0.5 * cfg.air_density * cfg.drag_coefficient * area * u.length())
+}
+
+/// **气动域的运行态**（门面 `World` 的 `Option` 槽内容）：配置 + **逐体力/力矩快照**
+/// （`aero_pass` 每子步重写；判据经 `World::aero_force/aero_torque` 读到的就是
+/// 本子步施加的那份 ⇒ 仪器与被测代码同源）。
+#[derive(Clone, Debug)]
+pub struct AeroState {
+    pub cfg: AeroConfig,
+    /// 逐体力快照（与 `bodies` 同序；本子步施加的那份）。
+    pub forces: Vec<Vec3>,
+    /// 逐体力矩快照（关于**体原点**；与 `bodies.torque` 同口径）。
+    pub torques: Vec<Vec3>,
+}
+
+impl AeroState {
+    pub fn new(cfg: AeroConfig) -> Self {
+        Self {
+            cfg,
+            forces: Vec::new(),
+            torques: Vec::new(),
         }
     }
 }

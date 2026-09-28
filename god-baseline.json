@@ -1,6 +1,6 @@
 {
  "crates/vxl-phys-aero/src/lib.rs": {
-  "file_lines": 29,
+  "file_lines": 71,
   "max_fn_lines": 8,
   "max_type_members": 4
  },
@@ -985,8 +985,8 @@
   "max_type_members": 24
  },
  "crates/vxl-phys/src/world_build.rs": {
-  "file_lines": 176,
-  "max_fn_lines": 38,
+  "file_lines": 177,
+  "max_fn_lines": 39,
   "max_type_members": 15
  },
  "crates/vxl-phys/src/world_ccd.rs": {
@@ -1000,9 +1000,9 @@
   "max_type_members": 1
  },
  "crates/vxl-phys/src/world_mesh.rs": {
-  "file_lines": 66,
+  "file_lines": 95,
   "max_fn_lines": 22,
-  "max_type_members": 5
+  "max_type_members": 9
  },
  "crates/vxl-phys/src/world_soft.rs": {
   "file_lines": 170,
@@ -1010,9 +1010,14 @@
   "max_type_members": 5
  },
  "crates/vxl-phys/src/world_step.rs": {
-  "file_lines": 368,
-  "max_fn_lines": 97,
+  "file_lines": 372,
+  "max_fn_lines": 100,
   "max_type_members": 7
+ },
+ "crates/vxl-phys/src/world_step/aero.rs": {
+  "file_lines": 65,
+  "max_fn_lines": 49,
+  "max_type_members": 1
  },
  "crates/vxl-phys/src/world_step/fluid_stepper.rs": {
   "file_lines": 81,
@@ -1025,9 +1030,14 @@
   "max_type_members": 12
  },
  "crates/vxl-phys/src/world_struct.rs": {
-  "file_lines": 43,
+  "file_lines": 46,
   "max_fn_lines": 0,
-  "max_type_members": 23
+  "max_type_members": 24
+ },
+ "crates/vxl-phys/tests/aero_face_forces.rs": {
+  "file_lines": 132,
+  "max_fn_lines": 33,
+  "max_type_members": 0
  },
  "crates/vxl-phys/tests/angular_impulse_contract.rs": {
   "file_lines": 70,

@@ -38,5 +38,8 @@ pub struct World {
     pub(crate) ropes: Vec<vxl_phys_soft::Rope>,
     /// 绳索的**刚体代理暂存**（每 tick 重建，复用免分配；`rope_pass` 里 `mem::take` 借出后归还）。
     pub(crate) rope_proxies: Vec<vxl_phys_soft::RigidProxy>,
+    /// **气动域**（T4）：`set_aero` 显式开启（含配置 + 逐体力/力矩快照）；
+    /// `None` = 未开启 ⇒ `aero_pass` 首行短路 ⇒ 默认档逐位不变。
+    pub(crate) aero: Option<vxl_phys_aero::AeroState>,
     pub(crate) timings: PhaseTimings,
 }

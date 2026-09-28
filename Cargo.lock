@@ -1021,6 +1021,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 name = "vxl-phys"
 version = "0.1.0"
 dependencies = [
+ "vxl-phys-aero",
  "vxl-phys-broad",
  "vxl-phys-core",
  "vxl-phys-field",
@@ -1037,6 +1038,9 @@ dependencies = [
 [[package]]
 name = "vxl-phys-aero"
 version = "0.1.0"
+dependencies = [
+ "vxl-phys-core",
+]
 
 [[package]]
 name = "vxl-phys-broad"

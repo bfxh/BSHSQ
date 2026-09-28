@@ -1,6 +1,7 @@
 //! world_step：从 lib.rs 按域拆出（纯搬移，语义未改）。
 use super::*;
 
+mod aero;
 pub(crate) mod fluid_stepper;
 pub(crate) mod narrow_tier;
 
@@ -274,6 +275,9 @@ impl World {
         let t0 = vxl_phys_core::probe::start();
         self.fields.apply(&mut self.bodies);
         self.medium_pass();
+        // 面元气动（T4）：`set_aero` 显式开启才生效（Option 槽 ⇒ 未开启首行短路、逐位不变）。
+        // 与介质/重力同段位 = **逐子步**施加（力累加器的已钉契约，§8.4.28）。
+        self.aero_pass();
         // 2b（Akinci 边界粒子）反作用：与 2a 同段位（体子步开始处、积分之前），
         // 只对 2b 注册的流体生效 ⇒ 未开的场景零成本、逐位不变。
         self.fluid_reaction_pass();
