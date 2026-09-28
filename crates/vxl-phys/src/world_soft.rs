@@ -24,6 +24,18 @@ pub struct FluidBoundary {
     pub covered: Vec<bool>,
 }
 
+/// **软体域的成组状态**（原 `World` 的 `ropes`/`rope_proxies` 两个散字段收成一组，
+/// 给布片腾成员位——`FluidBoundary` 同款先例；god 门成员棘轮只准减）。
+#[derive(Default)]
+pub struct SoftDomain {
+    /// 绳索（`World::add_rope` 注册；`rope_pass` 每 tick 推进一次，空集零成本短路）。
+    pub ropes: Vec<vxl_phys_soft::Rope>,
+    /// 绳索的**刚体代理暂存**（每 tick 重建，复用免分配；`rope_pass` 里 `mem::take` 借出后归还）。
+    pub rope_proxies: Vec<vxl_phys_soft::RigidProxy>,
+    /// 布片（`World::add_cloth` 注册；`cloth_pass` 每 tick 推进一次，空集零成本短路）。
+    pub cloths: Vec<vxl_phys_soft::ClothSheet>,
+}
+
 impl FluidBoundary {
     /// 该流体是否开了 2b（越界一律 `false`）。**写成方法而不是在调用点展开链**：
     /// 展开式在原地超 `chain_width` 会被 rustfmt 折成 5 行 —— 而 `world_body.rs` 受尺寸棘轮
@@ -36,25 +48,42 @@ impl FluidBoundary {
 impl World {
     /// 注册一条绳索（`vxl_phys_soft::Rope`），返回其索引。
     pub fn add_rope(&mut self, rope: vxl_phys_soft::Rope) -> usize {
-        self.ropes.push(rope);
-        self.ropes.len() - 1
+        self.soft.ropes.push(rope);
+        self.soft.ropes.len() - 1
     }
 
     /// 已注册绳索（判据/渲染读 `pos` / `vel`）。
     pub fn ropes(&self) -> &[vxl_phys_soft::Rope] {
-        &self.ropes
+        &self.soft.ropes
     }
 
     /// 第 `i` 条绳索。
     pub fn rope(&self, i: usize) -> Option<&vxl_phys_soft::Rope> {
-        self.ropes.get(i)
+        self.soft.ropes.get(i)
+    }
+
+    /// 注册一张布片（`vxl_phys_soft::ClothSheet`），返回其索引。
+    pub fn add_cloth(&mut self, cloth: vxl_phys_soft::ClothSheet) -> usize {
+        self.soft.cloths.push(cloth);
+        self.soft.cloths.len() - 1
+    }
+
+    /// 已注册布片（判据/渲染读 `pos`）。
+    pub fn cloths(&self) -> &[vxl_phys_soft::ClothSheet] {
+        &self.soft.cloths
+    }
+
+    /// 第 `i` 张布片。
+    pub fn cloth(&self, i: usize) -> Option<&vxl_phys_soft::ClothSheet> {
+        self.soft.cloths.get(i)
     }
 
     /// **域通道**（每 tick 一次、体子步全部完成之后）：液体域 → 软体域。
-    /// 顺序固定 ⇒ 确定性不受影响（两条通道互不读对方状态）。
+    /// 顺序固定 ⇒ 确定性不受影响（各条通道互不读对方状态）。
     pub(crate) fn domain_pass(&mut self) {
         self.fluid_pass();
         self.rope_pass();
+        self.cloth_pass();
     }
 
     /// **软体域通道**：每条绳索按自身 `substeps` 推进一个 `config.dt`；接触走统一提供者通道
@@ -62,7 +91,7 @@ impl World {
     /// 反作用回填：`bodies.linvel += body_dv`（速度增量）、`bodies.torque += τ/dt`（角冲量 → 力矩口径，
     /// 与 2b 流体反作用同段位）。**空集 ⇒ 零成本短路**。
     pub(crate) fn rope_pass(&mut self) {
-        if self.ropes.is_empty() {
+        if self.soft.ropes.is_empty() {
             return;
         }
         let dt = self.config.dt;
@@ -70,7 +99,7 @@ impl World {
         let count = self.providers.len() as u32;
         // 刚体代理（每 tick 重建：体在动）。**地形类形状跳过**（`Provider`/`HeightField` 走提供者
         // 通道；`Compound` 本片不支持 ⇒ 直接跳过，别让它悄悄不清碰）。
-        self.rope_proxies.clear();
+        self.soft.rope_proxies.clear();
         for i in 0..self.bodies.len() {
             let shape = self.bodies.shape[i];
             if matches!(
@@ -79,7 +108,7 @@ impl World {
             ) {
                 continue;
             }
-            self.rope_proxies.push(vxl_phys_soft::RigidProxy {
+            self.soft.rope_proxies.push(vxl_phys_soft::RigidProxy {
                 body: i as u32,
                 shape,
                 pos: self.bodies.position[i],
@@ -111,9 +140,9 @@ impl World {
                 },
             });
         }
-        let proxies = std::mem::take(&mut self.rope_proxies);
+        let proxies = std::mem::take(&mut self.soft.rope_proxies);
         let providers = &self.providers;
-        for rope in &mut self.ropes {
+        for rope in &mut self.soft.ropes {
             rope.step(dt, gravity, providers, count, &proxies);
             for (j, p) in proxies.iter().enumerate() {
                 if p.inv_mass <= 0.0 {
@@ -164,6 +193,20 @@ impl World {
                 }
             }
         }
-        self.rope_proxies = proxies;
+        self.soft.rope_proxies = proxies;
+    }
+
+    /// **布料域通道**（T 软体切片 1）：每张布片按自身 `substeps` 推进一个 `config.dt`。
+    /// **本片边界**：无接触（提供者/刚体/自碰撞都属后续切片，见 `cloth.rs` 模块文档）。
+    /// 空集 ⇒ 零成本短路 ⇒ 默认档逐位不变。
+    pub(crate) fn cloth_pass(&mut self) {
+        if self.soft.cloths.is_empty() {
+            return;
+        }
+        let dt = self.config.dt;
+        let gravity = self.config.gravity;
+        for cloth in &mut self.soft.cloths {
+            cloth.step(dt, gravity);
+        }
     }
 }

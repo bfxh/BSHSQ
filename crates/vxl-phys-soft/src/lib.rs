@@ -3,6 +3,7 @@
 //! 软体/布料（`SPEC.md` §4.6/§4.7，XPBD）—— M3 落地。
 //!
 //! - [`params`]：参数骨架（刚度档 α / 撕裂阈值 / 自碰撞），数值全部来自规格书；
+//! - [`cloth`]：**布料最小闭环**（三角网 + XPBD 距离约束 + 薄壳均分质量）——判据在 `tests/cloth_minimal.rs`；
 //! - [`rope`]：**绳索最小闭环**（1D 粒子链 + XPBD 距离约束 + 点-形状接触 + 切向摩擦）——
 //!   判据在 `tests/rope_minimal.rs`（悬垂形状对**同长度解析悬链线** / 二阶收敛 / 落在真实三角网上 /
 //!   斜面静摩擦阈值）与 `crates/vxl-phys/tests/rope_scene.rs`（门面级）；
@@ -12,10 +13,12 @@
 
 #![forbid(unsafe_code)]
 
+pub mod cloth;
 pub mod params;
 pub mod rigid;
 pub mod rope;
 
+pub use cloth::ClothSheet;
 pub use params::{ClothConstraints, SelfCollision, Stiffness, TearStrain};
 pub use rigid::{RigidProxy, RigidReaction};
 pub use rope::Rope;

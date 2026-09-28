@@ -639,8 +639,13 @@
   "max_fn_lines": 35,
   "max_type_members": 3
  },
+ "crates/vxl-phys-soft/src/cloth.rs": {
+  "file_lines": 201,
+  "max_fn_lines": 60,
+  "max_type_members": 13
+ },
  "crates/vxl-phys-soft/src/lib.rs": {
-  "file_lines": 22,
+  "file_lines": 25,
   "max_fn_lines": 0,
   "max_type_members": 0
  },
@@ -662,6 +667,11 @@
  "crates/vxl-phys-soft/tests/angular_reaction_holds.rs": {
   "file_lines": 115,
   "max_fn_lines": 57,
+  "max_type_members": 0
+ },
+ "crates/vxl-phys-soft/tests/cloth_minimal.rs": {
+  "file_lines": 130,
+  "max_fn_lines": 37,
   "max_type_members": 0
  },
  "crates/vxl-phys-soft/tests/crossed_face_probe.rs": {
@@ -985,8 +995,8 @@
   "max_type_members": 24
  },
  "crates/vxl-phys/src/world_build.rs": {
-  "file_lines": 177,
-  "max_fn_lines": 39,
+  "file_lines": 176,
+  "max_fn_lines": 38,
   "max_type_members": 15
  },
  "crates/vxl-phys/src/world_ccd.rs": {
@@ -1005,9 +1015,9 @@
   "max_type_members": 9
  },
  "crates/vxl-phys/src/world_soft.rs": {
-  "file_lines": 170,
+  "file_lines": 213,
   "max_fn_lines": 105,
-  "max_type_members": 5
+  "max_type_members": 9
  },
  "crates/vxl-phys/src/world_step.rs": {
   "file_lines": 372,
@@ -1030,9 +1040,9 @@
   "max_type_members": 12
  },
  "crates/vxl-phys/src/world_struct.rs": {
-  "file_lines": 46,
+  "file_lines": 44,
   "max_fn_lines": 0,
-  "max_type_members": 24
+  "max_type_members": 23
  },
  "crates/vxl-phys/tests/aero_face_forces.rs": {
   "file_lines": 132,
@@ -1047,6 +1057,11 @@
  "crates/vxl-phys/tests/capsule_drop.rs": {
   "file_lines": 76,
   "max_fn_lines": 59,
+  "max_type_members": 0
+ },
+ "crates/vxl-phys/tests/cloth_scene.rs": {
+  "file_lines": 69,
+  "max_fn_lines": 38,
   "max_type_members": 0
  },
  "crates/vxl-phys/tests/compound_mass.rs": {
