@@ -5,20 +5,27 @@
 
 ## 门禁链（每次源码改动落地前，ADR 0005）
 
-**一条命令版（推荐）**：`bash scripts/gate_all.sh` —— 主仓五项 + 行为门 + 金样门全跑，
+**一条命令版（推荐）**：`bash scripts/gate_all.sh` —— 主仓静态门（fmt / clippy / **doc** /
+test / vocab / discipline / god / deps_lock / ci_shape / typos）+ 行为门 + 金样门全跑，
 逐项贴退出码、任一失败先打日志尾部再非零退出（`SKIP_GOLD=1` 可跳过金样门）。
 ⚠️ 跑它时**别编辑源码**、**别并发其它 cargo 构建**（两条都踩过，见文末）。
 下面展开的是它内部逐步跑的东西：
 
 ```bash
-cd "/d/开发/RUST WL"
+cd "/d/KF/RUST WL"
 export CARGO_TARGET_DIR=C:/vxl-wl-target
 cargo fmt --all
 cargo test --release > /tmp/test.log 2>&1; echo "test=$?"
 cargo clippy --workspace --all-targets -- -D warnings > /tmp/clippy.log 2>&1; echo "clippy=$?"
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace > /tmp/doc.log 2>&1; echo "doc=$?"
 bash scripts/vocab_scan.sh . > /tmp/vocab.log 2>&1; echo "vocab=$?"
 /c/vxl-wl-tools/typos.exe . > /tmp/typos.log 2>&1; echo "typos=$?"
 ```
+
+**2026-09-29 补 `doc` 一步**：CI 的「静态 (文档/强化 lint)」跑的是
+`RUSTDOCFLAGS=-D warnings cargo doc`，而本地门链此前**没有同款** ⇒ 出现了一次
+「本机全绿、CI 红」——把**私有**模块 / 私有方法写成文档链接（`` [`…`] ``）时只有 rustdoc
+看得见（clippy 不管）。口径与 CI 逐字相同（`--no-deps` + 同一份 `RUSTDOCFLAGS`）。
 
 注意：**输出重定向 + 显式 `$?`**（管道会吞退出码，fb51911 事故）；日志文件先看尾部。
 **2026-09-15 更正**：clippy 这一项此前若干轮是**红的**（`solve_constraint` 8 参数漏挂

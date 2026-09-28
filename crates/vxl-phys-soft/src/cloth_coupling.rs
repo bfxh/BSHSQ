@@ -8,7 +8,7 @@
 //! - **静态/睡眠代理 = 墙**（2b-i）：逐粒子解析穿透 + 库仑锥，**无反作用**（`inv_mass = 0`）。
 //!   逐字保留（`tests/cloth_body.rs` 的两条读数**逐位不变**）。
 //! - **动态代理 = 两体约束 + 反作用两腿**（2b-ii）：口径与 `rope::apply_body_hit` 同款，
-//!   §8.4.20 三条使能条件一条不缺。**唯一偏离**见 [`ClothSheet::body_contacts_dynamic`] 的注。
+//!   §8.4.20 三条使能条件一条不缺。**唯一偏离**见 `body_contacts_dynamic` 的注。
 use crate::cloth::ClothSheet;
 use crate::rigid::RigidProxy;
 use vxl_phys_core::Vec3;
@@ -127,7 +127,7 @@ impl ClothSheet {
     /// 1. rope 的"按 `x` 升序"与它的数组序（左→右）**逐位等价** ⇒ 既有读数不动；布片的数组序是
     ///    **行主序（`z` 外层、`x` 内层）** ⇒ 本序与数组序**不等价**（这是一条新的 GS 路径）。
     ///    取它是因为"几何的函数"这条性质比"沿用数组序"更承重。
-    /// 2. ⭐ **位置腿也进虚拟位姿**（见 [`ClothSheet::apply_body_hit`] 的 `disp` 那两行）——
+    /// 2. ⭐ **位置腿也进虚拟位姿**（见 `apply_body_hit` 的 `disp` 那两行）——
     ///    rope 没有这一步，实测差 15 cm 级的单 tick 上抛（下面是实测留档）。
     ///
     /// **⭐ 实测（2026-09-29，同一场景只差那一行）**：让盒落到四周钉住的布片上（网格 8×8、

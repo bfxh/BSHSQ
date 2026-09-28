@@ -59,6 +59,10 @@ if [ $rc -ne 0 ]; then
 fi
 
 step clippy 0 cargo clippy --workspace --all-targets -- -D warnings -D clippy::todo -D clippy::unimplemented -D clippy::dbg_macro -D clippy::mem_forget -D clippy::undocumented_unsafe_blocks -D clippy::let_underscore_must_use
+# **rustdoc 警告即错误**（含 broken / **private intra-doc links**）：CI 的「静态 (文档/强化 lint)」
+# 那一步此前本地**没有同款** ⇒ 2026-09-29 撞了一次「本机全绿、CI 红」——私有模块与私有方法
+# 被写成文档链接（`[`…`]`）时只有 rustdoc 看得见，clippy 不管。口径与 CI **逐字相同**。
+step doc 0 env "RUSTDOCFLAGS=-D warnings" cargo doc --no-deps --workspace
 step test 0 cargo test --release
 step vocab 0 bash scripts/vocab_scan.sh .
 # 纪律扫描（forbid 覆盖 / 零 unsafe / 零 f64 / 零 SIMD 内建 / 零 fast-math）——
