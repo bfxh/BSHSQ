@@ -318,6 +318,12 @@ impl DefaultNarrowPhase {
         rb: Quat,
         out: &mut Vec<Manifold>,
     ) {
+        // 三角网 × 其它：**逐顶点采样**（非凸 ⇒ 不进 GJK/EPA；实现在 `mesh_pair.rs`，
+        // 受理面 = 盒/球，其余如实不受理 ⇒ 该对不产接触）。
+        if matches!(*sa, Shape::TriMesh { .. }) || matches!(*sb, Shape::TriMesh { .. }) {
+            self.mesh_pair(a, b, sa, sb, pa, ra, pb, rb, out);
+            return;
+        }
         match (*sa, *sb) {
             (Shape::Sphere { radius: ra_ }, Shape::Sphere { radius: rb_ }) => {
                 sphere_sphere(a, b, pa, ra_, pb, rb_, out);

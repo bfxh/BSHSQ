@@ -36,7 +36,7 @@
 | 10 | `narrow/src/provider.rs::provider_shape_contacts` | `_ => false` | **✅ 已受理（T1b-1 落地）**：`mesh_provider_contacts` 逐顶点点查询（与 `hull_provider_contacts` 同构） | 已显式化 |
 | 11 | `narrow/src/support.rs::support_of` | `_ => None` | **显式列名**：三角网**非凸** ⇒ 不进 GJK/EPA（这是**语义决定**，不是"没写"） | 已显式化 |
 | 12 | `narrow/src/support.rs::poly_for` | `_ => None` | 保持：三角网不是**凸多面体**；调用方已按 `None` 分支处理（`pair_shaped` 各臂都查 `Some/None`） | — |
-| 13 | `narrow/src/pair_shaped.rs::pair_non_heightfield` | `_ => {}` | T1a **保持**（= 无接触）；由矩阵判据**钉成"已知缺口"**，T1b 关掉 | ⚠️ 已知缺口 |
+| 13 | `narrow/src/pair_shaped.rs::pair_non_heightfield` | `_ => {}` | **✅ 已受理（T1b-2）**：三角网早分支 ⇒ `mesh_pair`（盒/球解析采样；其余如实不受理） | 已显式化 |
 | 14 | `core/src/narrow_tier.rs::pack_bodies` | `_ => KIND_NONE` | 注释登记（**卡上不接** ⇒ 主机回填） | 注释 |
 | 15 | `fluid/src/boundary.rs::supports` | `matches!` 显式 | `false`（2b 不生成边界粒子 ⇒ 该体仍走 2a 介质场，**既不叠加也不留空**） | 已显式化 |
 | 16 | `fluid/src/boundary.rs::{min_half_extent, surface}` | `_` | 注释登记：**不生成**（"近似面片会给错体积，比没有更坏"——沿用该文件既有裁决） | 注释 |
@@ -45,9 +45,9 @@
 | 19 | `vxl-phys/src/world_step*.rs`（步进管线） | **无形状分派** | 形状只经 broad/narrow/mass/ccd 四路进场 ⇒ 管线**零改动**（`rg -c "Shape::" world_step*` = 0） | — |
 
 **"已知缺口"三条**（T1a 落地时**如实登记**、T1b 逐个关闭）：#6 高度场、#10 provider（**✅ 已关：T1b-1**）、
-#13 凸体对（盒/球先做 = T1b-2；外壳 × 三角网要另立一片）。**仍开的两条**都由在树判据
-`crates/vxl-phys/tests/shape_support_matrix.rs` **逐条钉住**（含金丝雀：现在断言"无接触"，
-落地后翻成"停住"）——这就是本仓"有形状、无接触"缺口的标准处理法
+#13 凸体对（**✅ 部分关闭：T1b-2 接盒/球**；**仍开** = 胶囊/圆柱/圆锥/外壳/复合体/另一个三角网 ⇒ 另立片）。
+**仍开的那几条**都由在树判据 `crates/vxl-phys/tests/shape_support_matrix.rs` **逐条钉住**
+（现状 = 不产接触；落地后翻成"停住"）——这就是本仓"有形状、无接触"缺口的标准处理法
 （先例：`tests/provider_shape_coverage.rs`，胶囊/圆柱/圆锥那条）。
 
 ## 2. 判据（**先判据后实现**）
@@ -147,5 +147,30 @@ fmt 又把两条模式拆回 4 行 ⇒ 白做）。⇒ **"给枚举加一条臂"
    机制候选 = 预测接触平衡点来回穿越（零点附近的接触集抖动），收紧口径（"就位间隙 ≈ 0"）
    另立一片，不混进本条判据。
 
-**下一片（T1b-2）**：`Shape::TriMesh` × {盒, 球}（解析逐顶点，非 provider 路）+ 翻
-`gap_trimesh_passes_through_box_until_t1b`；再往后 = 高度场腿（#6）与外壳对（#13）。
+## 7. T1b-2 实测（凸体腿：盒/球；判据与读数）
+
+**落地**：`mesh_pair.rs` 增加 `mesh_pair`（逐顶点**解析**最近点；只接**盒 / 球**，其余如实不受理）
++ `point_shape`（点 × {盒, 球} 的最近点/外法线/深度，`Vec3`/`Mat3` 手写，无新依赖）；
+`pair_shaped.rs::pair_non_heightfield` 加**早分支**（三角网 ⇒ `mesh_pair`）。
+法线从求解器定义反推：`n_o` = 把顶点推出去的方向 ⇒ **三角网在 a 侧取 `−n_o`、在 b 侧取 `+n_o`**。
+
+**判据（在树）与读数**（600 tick）：
+
+| 判据 | 读数 | 说明 |
+|---|---|---|
+| `trimesh_is_held_by_box`：贴盒顶 + 末窗 `\|v\|` 均值 < 0.1 | **y = +0.99199**（盒顶 1.0）、`\|v\| = 0.0056` | 平衡穿透 **8 mm**、**几乎静止** |
+| `trimesh_never_penetrates_sphere`：全程最深顶点穿透 ≥ −0.05 | **−0.00624** | 薄片在球顶翻落（真物理）⇒ 判"接触承诺"而非"停住" |
+| `trimesh_is_held_by_provider_floor`（T1b-1 回归） | y = −0.00862、`\|v\| = 0.047` | 未动 |
+
+**⚠️ 一条读数差异留档（不解释成结论）**：**盒腿比 provider 腿收敛得好一个量级**
+（末窗 `|v|` 0.0056 vs 0.047）。候选机制（未验证）：provider 腿的流形要过
+`pick_dominant_normal` + `four_corner_points`（`feature % 16` 的角/心约定对**顶点采样**不适用，
+靠"无面心组 ⇒ 用全部组"兜底），而盒腿是**同一解析面**的 9 个顶点直接过 `select_contacts`。
+⇒ 若要收紧 provider 腿的残留，先看**取点选择**那一环，而不是回到"就位间隙"。
+
+**口径边界（写清）**：顶点采样 ⇒ **细几何钻不过粗网格的格心**才是承诺；本片球腿用
+"球径（1.0）与顶点间距（0.5）可比"保证这一点。更细的几何（球/胶囊半径 ≪ 格距）要等
+**点-三角/边-边**那类窄相（`PLAN-triangle-first-class.md` 的 T2），不在本片。
+
+**下一片**：#6 高度场腿（顶点 × 高度场，`hf.rs` 同款）→ 外壳/复合体对（#13 余项）→
+自碰撞（T3，空间哈希 + 默认关闭的开关）→ 面元气动（T4）。

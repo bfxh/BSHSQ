@@ -13,8 +13,6 @@ use vxl_phys_broad::shape_aabb;
 use vxl_phys_core::{PhysConfig, Quat, Shape, Vec3};
 use vxl_phys_terrain::mesh::TriMesh;
 
-const TICKS: usize = 240;
-
 /// 平铺网格（`n×n` 格、跨度 `±size`、落在 **y = 0 平面**）。
 fn plate(n: usize, size: f32) -> (Vec<Vec3>, Vec<[u32; 3]>) {
     let mut pts = Vec::new();
@@ -185,30 +183,71 @@ fn trimesh_body_gets_thin_shell_props() {
     );
 }
 
-/// **③ 已知缺口（T1b 关闭）· 三角网 × 静态盒**：逐顶点采样未落地 ⇒ 薄壳**穿过**盒子。
+/// **判据 ①（凸体腿，T1b-2 已落地）· 三角网 × 静态盒**：布片落到盒顶 ⇒ **被托住**。
 ///
-/// 本判据**钉住现状**（不是"期望它坏"）：T1b 落地后它会红 ⇒ 那时把断言翻面成"被托住"。
-/// 缺口因此有名字、有断言、有翻面条件——不静默。
+/// 口径同 provider 腿（取窗口均值）：高度贴盒顶 + 末窗 `|v|` 均值收敛。
+/// 盒顶 2×2 大于布片 1×1 ⇒ 落点完全在支撑面内（避开"滑出边缘"这类与接触无关的失败）。
 #[test]
-fn gap_trimesh_passes_through_box_until_t1b() {
+fn trimesh_is_held_by_box() {
+    const TOP: f32 = 1.0;
     let (pts, tris) = plate(2, 0.5);
     let mut w = World::new(PhysConfig::default());
     let mesh = w.add_trimesh(pts, tris);
     w.add_static(
         Shape::Box {
-            half: Vec3::splat(0.5),
+            half: Vec3::splat(TOP),
         },
         Vec3::ZERO,
         Quat::IDENTITY,
     );
     let b =
         w.spawn_trimesh_body(mesh, Vec3::new(0.0, 3.0, 0.0), Quat::IDENTITY, 1000.0, 0.01) as usize;
-    for _ in 0..TICKS {
+    let mut vsum = 0.0f32;
+    let mut n = 0.0f32;
+    for tick in 0..600 {
         w.step();
+        if tick + 60 >= 600 {
+            vsum += w.bodies.linvel[b].length();
+            n += 1.0;
+        }
     }
+    let y = w.bodies.position[b].y;
+    let v = vsum / n;
+    println!("[判据①-box] y={y:+.5}（盒顶 {TOP}） |v|末窗均值={v:.5}");
     assert!(
-        w.bodies.position[b].y < -1.0,
-        "三角网被盒托住了 —— T1b 似乎已落地：请把本判据翻面成『停住』并更新支持矩阵"
+        (y - TOP).abs() < 0.05,
+        "布片应被托在盒顶（体心 y 实得 {y:+.5}，盒顶 {TOP}）"
+    );
+    assert!(v < 0.1, "末窗 |v| 均值 {v:.5} 未收敛");
+}
+
+/// **判据 ①（凸体腿）· 三角网 × 静态球**：布片落在球上 ⇒ **全程不深穿透**。
+///
+/// 薄片坐在球顶上会**翻落**（真物理，不该当失败）⇒ 这条判的是**接触的承诺**：
+/// 逐 tick 取 9 个顶点里最深的 `|v_i − c| − r`，全程 ≥ `−0.05`。
+/// 口径前提：球径（1.0）与顶点间距（0.5）可比 ⇒ 球**钻不过顶点之间**（顶点采样的已知边界，
+/// 见 `mesh_pair.rs` 文件头）。
+#[test]
+fn trimesh_never_penetrates_sphere() {
+    const R: f32 = 0.5;
+    let (pts, tris) = plate(2, 0.5);
+    let mut w = World::new(PhysConfig::default());
+    let mesh = w.add_trimesh(pts.clone(), tris);
+    w.add_static(Shape::Sphere { radius: R }, Vec3::ZERO, Quat::IDENTITY);
+    let b =
+        w.spawn_trimesh_body(mesh, Vec3::new(0.0, 2.0, 0.0), Quat::IDENTITY, 1000.0, 0.01) as usize;
+    let mut worst = f32::MAX;
+    for _ in 0..600 {
+        w.step();
+        let (p, q) = (w.bodies.position[b], w.bodies.rot(b));
+        for v in &pts {
+            worst = worst.min((p + q.rotate_vec3(*v)).length() - R);
+        }
+    }
+    println!("[判据①-sphere] 全程最深顶点穿透 = {worst:+.5}（判据 ≥ −0.05）");
+    assert!(
+        worst > -0.05,
+        "顶点穿透球体过深（最深 {worst:+.5}）⇒ 球腿的接触没守住（没有它，布片会直接落下穿）"
     );
 }
 
