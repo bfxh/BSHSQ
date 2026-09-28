@@ -640,9 +640,14 @@
   "max_type_members": 3
  },
  "crates/vxl-phys-soft/src/cloth.rs": {
-  "file_lines": 425,
-  "max_fn_lines": 149,
-  "max_type_members": 21
+  "file_lines": 424,
+  "max_fn_lines": 100,
+  "max_type_members": 22
+ },
+ "crates/vxl-phys-soft/src/cloth_coupling.rs": {
+  "file_lines": 261,
+  "max_fn_lines": 67,
+  "max_type_members": 5
  },
  "crates/vxl-phys-soft/src/lib.rs": {
   "file_lines": 25,
@@ -688,6 +693,11 @@
   "file_lines": 131,
   "max_fn_lines": 37,
   "max_type_members": 0
+ },
+ "crates/vxl-phys-soft/tests/cloth_reaction.rs": {
+  "file_lines": 354,
+  "max_fn_lines": 79,
+  "max_type_members": 15
  },
  "crates/vxl-phys-soft/tests/crossed_face_probe.rs": {
   "file_lines": 105,
@@ -1030,8 +1040,8 @@
   "max_type_members": 9
  },
  "crates/vxl-phys/src/world_soft.rs": {
-  "file_lines": 223,
-  "max_fn_lines": 65,
+  "file_lines": 245,
+  "max_fn_lines": 54,
   "max_type_members": 10
  },
  "crates/vxl-phys/src/world_step.rs": {

@@ -1,15 +1,19 @@
-//! cloth：**布料最小闭环**（三角网 + XPBD 距离约束）——软体域第二块（绳索之后的切片）。
+//! cloth：**布料最小闭环**（三角网 + XPBD 约束）——软体域第二块（绳索之后的切片）。
 //!
 //! 与 [`crate::rope::Rope`] 同一套 XPBD 机械（预测 → 逐子步 Gauss-Seidel 投影 → 速度回写），
 //! 差别只在**拓扑**：绳 = 链式邻居对，布 = **三角网的唯一边集**（结构 + 剪切：四边形网格的
-//! 对角线本就是三角形的共享边 ⇒ 唯一边集已覆盖两组；**弯曲约束未做**，属后续切片）。
+//! 对角线本就是三角形的共享边 ⇒ 唯一边集已覆盖两组）；**弯曲**由二环对补齐（见 `bend`）。
 //!
 //! **质量 = 薄壳均分**：`m_i = ρ·t·Σ(incident A_tri)/3`——与窄相 `MeshStore::shell_props`
 //! 的薄壳总质量同口径（两者对同一张网给出的总质量一致）。
 //!
-//! **本片边界（写清，不是漏）**：接触只接**提供者**（球采样 + 库仑锥，与 rope 同款；
-//! 刚体/自碰撞属后续切片）、无撕裂、无弯曲、无气动消费（`vxl-phys-aero` 的 `face_force`
-//! 已备，接线属后续切片）。
+//! **已有**：三组距离约束（结构/剪切/弯曲）、提供者接触、**刚体接触**——静态/睡眠代理 = 墙
+//! （切片 2b-i），动态代理 = 两体约束 + **反作用两腿** `body.dv`/`body.dx`（切片 2b-ii，
+//! 口径与 `rope::apply_body_hit` 同款，见 [`BodyCoupling`]）。
+//! **边界（写清，不是漏）**：无自碰撞、无撕裂、无塑性、无气动消费（`vxl-phys-aero` 的
+//! `face_force` 已备，接线属后续切片）；接触几何走"最近面"（`rigid::shape_penetration`），
+//! **没有** rope 那套"入口面"缓存 —— 布片命中点多、面法线不像绳那样在底面↔侧面↔顶面之间翻转。
+use crate::cloth_coupling::BodyCoupling;
 use crate::params::Stiffness;
 use crate::rigid::RigidProxy;
 use std::collections::HashSet;
@@ -101,6 +105,8 @@ pub struct ClothSheet {
     /// 接触带（预测接触用；默认 0.02）。
     pub skin: f32,
     pub(crate) buf: Vec<InteropContact>,
+    /// **粒子↔刚体耦合状态**（反作用两腿 `dv`/`dx`；与 `step` 的 `bodies` 同序）。
+    pub body: BodyCoupling,
 }
 
 impl ClothSheet {
@@ -203,6 +209,7 @@ impl ClothSheet {
             friction: 0.5,
             skin: 0.02,
             buf: Vec::new(),
+            body: BodyCoupling::default(),
         }
     }
 
@@ -228,8 +235,8 @@ impl ClothSheet {
 
     /// 推进一个 `dt`（内部按 `substeps` 细分）。接触 = **提供者**球采样 + 库仑锥
     /// （`provider_count = 0` 或 `radius < 0` ⇒ 零成本跳过）+ **刚体代理**
-    /// （切片 2b-i：**静态/睡眠代理 = 墙**（投影，无反作用）；动态代理的反应两腿
-    /// `body_dv`/`body_dx` 属 2b-ii，§8.4.20 同款——此处如实跳过，不是漏）。
+    /// （静态/睡眠代理 = 墙；**动态代理 = 两体约束 + 反作用两腿 `body.dv`/`body.dx`**，切片 2b-ii）。
+    /// 反作用累加在 [`BodyCoupling`] 里，由门面在**体解算之后**取用（⇒ 下一 tick 生效）。
     pub fn step(
         &mut self,
         dt: f32,
@@ -247,6 +254,7 @@ impl ClothSheet {
         if self.bend_lambda.len() != self.bend.len() {
             self.bend_lambda = vec![0.0; self.bend.len()];
         }
+        self.reset_body_state(bodies.len());
         let h = dt / self.substeps.max(1) as f32;
         for _ in 0..self.substeps.max(1) {
             self.substep(h, gravity, providers, provider_count, bodies);
@@ -254,6 +262,10 @@ impl ClothSheet {
     }
 
     /// 单个子步：预测 → 距离约束（XPBD）→ 接触 → 速度回写 + 阻尼。
+    ///
+    /// **为什么切成四段**（2026-09-29，切片 2b-ii）：① 本函数原本 149 行（god 门**最长函数**
+    /// 棘轮顶格）⇒ 动态代理那条腿（两体约束 + 反作用两腿 + 收集/排序）**放不下**；
+    /// ② 四段的边界就是原注释里的 ①②③④ —— 切法与注释同构，不是为拆而拆。
     fn substep(
         &mut self,
         h: f32,
@@ -262,9 +274,15 @@ impl ClothSheet {
         provider_count: u32,
         bodies: &[RigidProxy],
     ) {
-        let n = self.pos.len();
-        // ① 预测（钉住粒子原地不动、速度清零；与 rope 同款）。
-        for i in 0..n {
+        self.predict(h, gravity);
+        self.project_constraints(h);
+        self.project_contacts(h, providers, provider_count, bodies);
+        self.write_back(h);
+    }
+
+    /// ① 预测（钉住粒子原地不动、速度清零；与 rope 同款）。
+    fn predict(&mut self, h: f32, gravity: Vec3) {
+        for i in 0..self.pos.len() {
             if self.inv_mass[i] == 0.0 {
                 self.prev[i] = self.pos[i];
                 self.vel[i] = Vec3::ZERO;
@@ -274,10 +292,13 @@ impl ClothSheet {
             self.prev[i] = self.pos[i];
             self.pos[i] += self.vel[i] * h;
         }
-        // ② 距离约束（Gauss-Seidel；λ 每子步清零、子步内按迭代累加 = XPBD 口径）。
-        //    **结构/剪切**（唯一边，`compliance`）+ **弯曲**（二环对，`bend_compliance`）——
-        //    两组同段位求解：弯曲列在后（先满足强约束再让软约束让位，与"硬→软"的
-        //    Gauss-Seidel 顺序惯例一致）。`bend_compliance = ∞` ⇒ 该组自然退化为不动。
+    }
+
+    /// ② 距离约束（Gauss-Seidel；`λ` 每子步清零、子步内按迭代累加 = XPBD 口径）。
+    /// **结构/剪切**（唯一边，`compliance`）+ **弯曲**（二环对，`bend_compliance`）——
+    /// 两组同段位求解：弯曲列在后（先满足强约束再让软约束让位，与"硬→软"的
+    /// Gauss-Seidel 顺序惯例一致）。`bend_compliance = ∞` ⇒ 该组自然退化为不动。
+    fn project_constraints(&mut self, h: f32) {
         for l in self.lambda.iter_mut() {
             *l = 0.0;
         }
@@ -285,8 +306,8 @@ impl ClothSheet {
             *l = 0.0;
         }
         let a_tilde = self.compliance / (h * h);
-        // **关弯曲**（非有限 compliance）⇒ `a_tilde_bend = inf` ⇒ 下方显式短路（`inf/inf = NaN`，
-        // 金丝雀判据实测抓到过：NaN 会毒化整场）。
+        // **关弯曲**（非有限 compliance）⇒ `a_tilde_bend = inf`。`inf/inf = NaN` 会毒化整场
+        // （弯曲金丝雀判据实测抓到过）⇒ 下方**显式短路**，不是"靠数学自然退化"。
         let a_tilde_bend = self.bend_compliance / (h * h);
         for _ in 0..self.iterations.max(1) {
             for (k, [i, j]) in self.cons.iter().enumerate() {
@@ -329,8 +350,22 @@ impl ClothSheet {
                 self.pos[j] += dir * (self.inv_mass[j] * dl);
             }
         }
-        // ③ 接触：提供者球采样 + 库仑锥（`sphere_contacts_project`，与 rope 同款纯搬移）。
-        if self.radius >= 0.0 && provider_count > 0 {
+    }
+
+    /// ③ **接触**（`radius < 0` ⇒ 两类接触一起关、零成本）：**提供者**球采样 + 库仑锥
+    /// （`sphere_contacts_project`，与 rope 同款纯搬移）→ ③.5 **刚体代理**
+    /// （静态/睡眠 = 墙；动态 = 反作用两腿，见 [`BodyCoupling`]）。
+    fn project_contacts(
+        &mut self,
+        h: f32,
+        providers: &dyn ProviderColliders,
+        provider_count: u32,
+        bodies: &[RigidProxy],
+    ) {
+        if self.radius < 0.0 {
+            return;
+        }
+        if provider_count > 0 {
             let Self {
                 pos,
                 prev,
@@ -353,49 +388,13 @@ impl ClothSheet {
                 buf,
             );
         }
-        // ③.5 布片 ↔ 刚体（切片 2b-i）：**静态/睡眠代理 = 墙**——逐粒子解析穿透
-        // （`rigid::shape_penetration`，Sphere/Box/Capsule 受理）+ 库仑锥
-        // （滑移量取**相对体**的：`dp − v_body·h`——提供者是静态地形这一项恒为零，
-        // 体在动时布才不会被"粘"在原地；与 rope 同款口径）。**动态代理跳过**
-        // （反应两腿 `body_dv`/`body_dx` 属 2b-ii，此处如实不受理）。
-        if self.radius >= 0.0 {
-            for b in bodies.iter() {
-                if b.inv_mass > 0.0 {
-                    continue; // 动态代理：2b-ii
-                }
-                for i in 0..self.pos.len() {
-                    if self.inv_mass[i] == 0.0 {
-                        continue;
-                    }
-                    let Some((n, depth, _)) = crate::rigid::shape_penetration(
-                        &b.shape,
-                        b.pos,
-                        b.rot,
-                        self.pos[i],
-                        self.radius,
-                    ) else {
-                        continue;
-                    };
-                    if depth <= 0.0 {
-                        continue; // 带内预判不推（无恢复系数的位置口径）
-                    }
-                    self.pos[i] += n * depth;
-                    if self.friction > 0.0 {
-                        let dp = self.pos[i] - self.prev[i] - b.linvel * h;
-                        let t = dp - n * dp.dot(n);
-                        let slip = t.length();
-                        if slip > 0.0 {
-                            let budget = self.friction * depth;
-                            let removed = if slip < budget { slip } else { budget };
-                            self.pos[i] -= t * (removed / slip);
-                        }
-                    }
-                }
-            }
-        }
-        // ④ 速度回写 + 阻尼。
+        self.body_contacts(bodies, h);
+    }
+
+    /// ④ 速度回写 + 阻尼（`v = (x − x_prev)/h`；钉住粒子恒 0）。
+    fn write_back(&mut self, h: f32) {
         let inv_h = 1.0 / h;
-        for i in 0..n {
+        for i in 0..self.pos.len() {
             self.vel[i] = if self.inv_mass[i] == 0.0 {
                 Vec3::ZERO
             } else {

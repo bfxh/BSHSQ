@@ -149,20 +149,9 @@ impl World {
         let providers = &self.providers;
         for rope in &mut self.soft.ropes {
             rope.step(dt, gravity, providers, count, &proxies);
-            for (j, p) in proxies.iter().enumerate() {
-                if p.inv_mass <= 0.0 {
-                    continue; // 静态体不收反作用
-                }
-                if let Some(dv) = rope.body_dv.get(j) {
-                    self.bodies.linvel[p.body as usize] += *dv;
-                }
-                // **位置口径回填**（`Rope::body_dx`，§8.4.9）：只回速度会让体每 tick 按 `v·dt` 走过的
-                // `g·dt²` 一去不回（实测下沉 ≈ 整漏的 83%）⇒ 把钳位压掉的那一份位置补上。
-                // **速度侧不动**（`body_dx` 是从位置口径算出来的）⇒ 不会把修正反射成速度。
-                if let Some(dx) = rope.body_dx.get(j) {
-                    self.bodies.position[p.body as usize] += *dx;
-                }
-            }
+            // **反作用两腿**（`Rope::body_dv` 速度口径 + `Rope::body_dx` 位置口径，§8.4.9）：
+            // 与布料域**共用同一段实现**（切片 2b-ii 提取 —— 两处逐字相同，见 `apply_two_leg_reactions`）。
+            apply_two_leg_reactions(&mut self.bodies, &proxies, &rope.body_dv, &rope.body_dx);
             // **角反作用：本片不施加**（§8.4.9/§8.4.10 实测）。理由不是"力矩算错了"，而是
             // **接触模型看不见转动**：`body_disp` 只跟踪平移、摩擦的滑移用 `b.linvel` 而非
             // `linvel + ω×r`、`crossed_face` 用的是**冻结的** `rot` ⇒ 把角动量回填给体以后，
@@ -201,9 +190,11 @@ impl World {
         self.soft.rope_proxies = proxies;
     }
 
-    /// **布料域通道**（软体切片 1/2）：每张布片按自身 `substeps` 推进一个 `config.dt`；
-    /// 接触走**统一提供者通道**（与 rope 同款：`0..providers.len()` 全量 id + 球采样 + 库仑锥）。
-    /// 空集 ⇒ 零成本短路 ⇒ 默认档逐位不变。
+    /// **布料域通道**（软体切片 1/2/2b-ii）：每张布片按自身 `substeps` 推进一个 `config.dt`；
+    /// 接触走**统一提供者通道**（与 rope 同款：`0..providers.len()` 全量 id + 球采样 + 库仑锥）
+    /// 与**刚体代理**（静态/睡眠 = 墙；动态 = 两体约束 + 反作用两腿）。
+    /// 反作用回填与 `rope_pass` **同口径**：`bodies.linvel += dv`（速度增量）+
+    /// `bodies.position += dx`（位置口径补足，§8.4.9）。**空集 ⇒ 零成本短路**。
     pub(crate) fn cloth_pass(&mut self) {
         if self.soft.cloths.is_empty() {
             return;
@@ -216,7 +207,38 @@ impl World {
         let proxies = std::mem::take(&mut self.soft.rope_proxies);
         for cloth in &mut self.soft.cloths {
             cloth.step(dt, gravity, providers, count, &proxies);
+            // **反作用两腿**（切片 2b-ii，与 `rope_pass` 同段位、同口径 —— 共用同一段实现）：
+            // 静态/睡眠体（代理里 `inv_mass = 0`）不收反作用；角反作用**本片不引入**
+            // （§8.4.20 条件②：接触模型看不见转动）。
+            apply_two_leg_reactions(&mut self.bodies, &proxies, &cloth.body.dv, &cloth.body.dx);
         }
         self.soft.rope_proxies = proxies;
+    }
+}
+
+/// **反作用两腿回填**（绳/布共用；切片 2b-ii 从 `rope_pass` 提取）：`linvel += dv`（速度口径）+
+/// `position += dx`（位置口径补足，§8.4.9 —— 只补位置不补速度，否则会把位置修正反射成速度）。
+/// **静态/睡眠体不收反作用**（代理里 `inv_mass = 0`，§8.4.27）；`proxies` 与 `dv`/`dx` **同序**。
+/// **写成自由函数而不是方法**：调用点里 `rope`/`cloth` 已借着 `self.soft`，方法会与 `&mut self.bodies`
+/// 冲突；自由函数让两个字段各自借用。
+fn apply_two_leg_reactions(
+    bodies: &mut BodySet,
+    proxies: &[vxl_phys_soft::RigidProxy],
+    dv: &[Vec3],
+    dx: &[Vec3],
+) {
+    for (j, p) in proxies.iter().enumerate() {
+        if p.inv_mass <= 0.0 {
+            continue; // 静态/睡眠体不收反作用
+        }
+        let b = p.body as usize;
+        // 与提取前**逐字同款**：`dv`/`dx` 取 `get`（长度不足即跳过），体的下标直接索引
+        // （`proxies` 由 `rebuild_soft_proxies` 按 `0..bodies.len()` 建 ⇒ 恒在界内）。
+        if let Some(v) = dv.get(j) {
+            bodies.linvel[b] += *v;
+        }
+        if let Some(d) = dx.get(j) {
+            bodies.position[b] += *d;
+        }
     }
 }
