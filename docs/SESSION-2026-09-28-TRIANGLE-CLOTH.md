@@ -82,11 +82,14 @@ export CARGO_TARGET_DIR=C:/vxl-wl-target && bash scripts/gate_all.sh   # 先确�
   → `git status` 复查 → 提交推送 → 后台核 CI（只看 `headSha == HEAD 且 success`）。
 - 判据位置：`crates/vxl-phys/tests/{shape_support_matrix,aero_face_forces,cloth_scene}.rs`、
   `crates/vxl-phys-soft/tests/{cloth_minimal,cloth_contact,cloth_body,cloth_bending,cloth_reaction,rope_*}.rs`。
-- **上一片（2b-ii）的代码提交 = `294849f`**；其上还有两笔：`ceb6982`（交接档）与 `1684d76`
-  （修 CI 红的私有文档链接 + 本机门链补 `doc` 一步）。
-  ⚠️ **更正（2026-09-29 实测）**：**docs 提交也会触发 CI** —— `ceb6982` 的「静态 (文档/强化 lint)」
-  job 就红了（`RUSTDOCFLAGS=-D warnings cargo doc` 抓的是**私有**模块/私有方法的文档链接，
-  clippy 看不见）⇒ **核 CI 一律看 `headSha == HEAD` 且 `success`**，别按"docs 不触发 CI"推断。
-  本机门链已补 `step doc`（`scripts/gate_all.sh`，口径与 CI 逐字相同）⇒ 这一类不再漏。
+- **CI 核法（2026-09-29 读 `paths-ignore` 后写死）**：本仓 CI **跳过纯 docs 推送**
+  （`paths-ignore: docs/**`、`**/*.md`、`gold-sample/**`），且 `concurrency` 开
+  `cancel-in-progress`（同分支新 push 取消旧 run）。⇒ **判"CI 绿"= 找「最后一次含代码的 push」
+  那一次 run，`headSha == 该次 tip` 且 `success`**。⚠️ 纯 docs 的 tip（如 `30fdb6e`）
+  **根本没有 run** —— 那不是"没验证"，是设计上跳过（门槛：这次 push 里有没有非 docs 文件）。
+- 本片对应的一笔 = **`294849f`**（代码）。其后 `ceb6982`（交接档）那次 push **连带**了 `294849f`
+  ⇒ run 覆盖到它，并在 **文档/强化 lint** 上首发红（`RUSTDOCFLAGS=-D warnings cargo doc` 抓的是
+  **私有**模块/私有方法的文档链接 `` [`…`] ``，clippy 看不见）⇒ 修在 **`1684d76`**，
+  并把这一步补进了本机 `gate_all`（`step doc`，口径与 CI 逐字相同）⇒ 这一类不再漏。
 - 逐片实测与留档：`docs/SURVEY-SOFT-CLOTH-AND-CONVERSION.md` §8.4.33–42、
   `docs/SURVEY-SHAPE-SUPPORT-MATRIX.md` §6–§10。
