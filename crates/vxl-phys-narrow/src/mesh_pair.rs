@@ -79,10 +79,12 @@ impl DefaultNarrowPhase {
         supported
     }
 
-    /// **三角网 × 凸体**（T1b-2；只接**盒 / 球**）：逐顶点**解析**最近点采样。
+    /// **三角网 × 凸体**（受理 **盒 / 球 / 胶囊 / 圆柱 / 锥**；T1b-2 起分片扩到五族）：
+    /// 逐顶点**解析**最近点采样。
     ///
-    /// 其余形状（胶囊/圆柱/圆锥/外壳/复合体/另一个三角网）**如实不受理**（直接返回、不产接触），
-    /// 逐条登记在 `docs/SURVEY-SHAPE-SUPPORT-MATRIX.md`（**不是静默**：由金丝雀判据钉住现状）。
+    /// **外壳 / 另一个三角网如实不受理**（要面数据 ⇒ T2 领地）；**复合体无需此处受理**——
+    /// 它在 `process_pair_shaped` 最前部就展开成子对，子形状各走本函数。逐条登记在
+    /// `docs/SURVEY-SHAPE-SUPPORT-MATRIX.md`（**不是静默**：由矩阵判据钉住现状）。
     ///
     /// **法线口径**（本片唯一容易搞反的地方，从求解器定义反推）：求解器把 `+n·λ` 给 b、`−n·λ` 给 a，
     /// 而 `n_o` = "把顶点推出去"的方向（对方在该点的外法线）⇒
@@ -109,13 +111,14 @@ impl DefaultNarrowPhase {
         } else {
             (sb, pb, rb, pa, ra, sa)
         };
-        // 受理面：盒 / 球 / 胶囊 / 圆柱（其余 = 不受理 ⇒ 本对不产接触）
+        // 受理面：盒 / 球 / 胶囊 / 圆柱 / 锥（其余 = 不受理 ⇒ 本对不产接触）
         if !matches!(
             *oshape,
             Shape::Box { .. }
                 | Shape::Sphere { .. }
                 | Shape::Capsule { .. }
                 | Shape::Cylinder { .. }
+                | Shape::Cone { .. }
         ) {
             return;
         }
@@ -200,14 +203,15 @@ impl DefaultNarrowPhase {
     }
 }
 
-/// 点 × {盒, 球, 胶囊, 圆柱} 的**解析最近点**：返回 `(对方外法线 n_o, 深度, 对方表面上的接触点)`。
+/// 点 × {盒, 球, 胶囊, 圆柱, 锥} 的**解析最近点**：返回 `(对方外法线 n_o, 深度, 对方表面上的接触点)`。
 ///
 /// 深度口径与全仓一致（`SPEC §4.3`）：**正 = 穿透**、负 = 分离（分离时 `n_o` 仍指"把点推出去"）。
-/// `None` = 该形状不在本片受理面内（**不猜**：调用方按"不受理"处理）。锥 / 外壳 / 复合体 /
-/// 另一个三角网仍未受理（要面数据或斜面解析 ⇒ 另立片，见支持矩阵）。
+/// `None` = 该形状不在本片受理面内（**不猜**：调用方按"不受理"处理）。外壳 / 复合体 /
+/// 另一个三角网仍未受理（要面数据 ⇒ 另立片；**复合体 × 三角网无需本函数**——复合体在窄相
+/// 最前部就展开成子对，子形状走本函数，见支持矩阵）。
 ///
-/// 注：圆柱/胶囊走**解析面**（真圆、真柱面）——与本仓其它路径对这两族用的**多面化**近似不同，
-/// 对本片（顶点采样）反而是更准的接触面。
+/// 注：圆柱/胶囊/锥走**解析面**（真圆、真柱/锥面）——与本仓其它路径对这三族用的**多面化**近似
+/// 不同，对本片（顶点采样）反而是更准的接触面。
 fn point_shape(p: Vec3, shape: &Shape, c: Vec3, rot: Quat) -> Option<(Vec3, f32, Vec3)> {
     match *shape {
         Shape::Sphere { radius } => {
@@ -274,6 +278,67 @@ fn point_shape(p: Vec3, shape: &Shape, c: Vec3, rot: Quat) -> Option<(Vec3, f32,
                 let len = d.length();
                 let n_l = if len > 1e-6 { d * (1.0 / len) } else { rdir };
                 (n_l, -len, rim)
+            };
+            Some((r3.mul_vec3(n_l), depth, c + r3.mul_vec3(surf)))
+        }
+        // 有限圆锥（局部 +Y：底面 `y = −h` 半径 `r`，顶点 `y = +h`）：**解析锥面**。
+        // 口径与圆柱同款——本仓其它路径把锥**多面化**（16 边棱锥）进 GJK/EPA，这里用真锥面
+        // （对顶点采样更准，不引入棱面误差）。做法：把查询点投到**过轴的 2D 剖面** `(ρ, y)`
+        // （ρ = 径向距），锥的剖面是三角形（顶点 (0,h)、底圈 (r,−h)、轴底 (0,−h)），
+        // 最近点只会在**侧边**或**底边**上（轴边不是表面；"顶点正上方"退化为同一解）。
+        Shape::Cone {
+            half_height,
+            radius,
+        } => {
+            let r3 = Mat3::from_quat(rot);
+            let q = r3.transpose_mul_vec3(p - c);
+            let rho = (q.x * q.x + q.z * q.z).sqrt();
+            let rdir = if rho > 1e-6 {
+                Vec3::new(q.x / rho, 0.0, q.z / rho)
+            } else {
+                Vec3::X
+            };
+            // 剖面几何：侧边 P0=(0,h)→P1=(r,−h)，方向 d=(r,−2h)、|d|² = r²+4h²；外法线 (2h,r)/|d|。
+            let h2 = 2.0 * half_height;
+            let len2 = radius * radius + h2 * h2;
+            let len = len2.sqrt();
+            // 侧边最近点（t ∈ [0,1]）与法线：光滑段用解析外法线；夹到**顶点/底圈**（退化特征，
+            // 无唯一法线）用"表面点 → 查询点"方向（并列/退化都取确定分支）。
+            let t = ((rho * radius + (q.y - half_height) * (-h2)) / len2).clamp(0.0, 1.0);
+            let side_pt = rdir * (t * radius) + Vec3::Y * (half_height - h2 * t);
+            let side_n = if t > 0.0 && t < 1.0 {
+                (rdir * h2 + Vec3::Y * radius) * (1.0 / len)
+            } else {
+                let d = q - side_pt;
+                if d.length_squared() > 1e-12 {
+                    d.normalize()
+                } else {
+                    rdir
+                }
+            };
+            // 底边最近点：(min(ρ, r), −h)；法线 −Y。
+            let base_pt = rdir * rho.min(radius) + Vec3::Y * (-half_height);
+            let s_side = h2 * rho + radius * (q.y - half_height); // ×(1/|d|) 即带符号距离
+            let (n_l, depth, surf) = if s_side <= 0.0 && q.y >= -half_height {
+                // 锥内：侧面 / 底面取近（并列取侧面 ⇒ 确定性）
+                let d_side = -s_side / len;
+                let d_base = q.y + half_height;
+                if d_side <= d_base {
+                    (side_n, d_side, side_pt)
+                } else {
+                    (-Vec3::Y, d_base, base_pt)
+                }
+            } else {
+                // 锥外：两个候选取近者（并列取侧边 ⇒ 确定性）；深度取负 = 分离
+                let dy_s = q.y - (half_height - h2 * t);
+                let d2_side = (rho - t * radius) * (rho - t * radius) + dy_s * dy_s;
+                let dr_b = rho - rho.min(radius);
+                let d2_base = dr_b * dr_b + (q.y + half_height) * (q.y + half_height);
+                if d2_side <= d2_base {
+                    (side_n, -d2_side.sqrt(), side_pt)
+                } else {
+                    (-Vec3::Y, -d2_base.sqrt(), base_pt)
+                }
             };
             Some((r3.mul_vec3(n_l), depth, c + r3.mul_vec3(surf)))
         }

@@ -251,6 +251,103 @@ fn trimesh_never_penetrates_sphere() {
     );
 }
 
+/// **判据 ①（锥腿，T1b-5）· 三角网 × 静态圆锥**：**倒置**锥（底面朝上）⇒ 布片落在**底面圆盘**上
+/// ⇒ **被托住**。锥的正立姿态顶点朝上（点支撑不稳定，翻落是真物理）⇒ 用倒置姿态测"面支撑"。
+/// 注：本片走**解析锥面**（真锥/真圆），与本仓其它路径对锥的多面化（16 边棱锥）近似不同。
+#[test]
+fn trimesh_is_held_by_cone() {
+    const BASE: f32 = 0.5;
+    let (pts, tris) = plate(2, 0.5);
+    let mut w = World::new(PhysConfig::default());
+    let mesh = w.add_trimesh(pts, tris);
+    // 倒置：绕 Z 转 180° ⇒ 局部底面（y=−h）朝上，落在世界 y = +h。
+    let upside_down = Quat::from_axis_angle(Vec3::Z, std::f32::consts::PI);
+    w.add_static(
+        Shape::Cone {
+            half_height: BASE,
+            radius: 1.0,
+        },
+        Vec3::ZERO,
+        upside_down,
+    );
+    let b =
+        w.spawn_trimesh_body(mesh, Vec3::new(0.0, 2.0, 0.0), Quat::IDENTITY, 1000.0, 0.01) as usize;
+    let mut vsum = 0.0f32;
+    let mut n = 0.0f32;
+    for tick in 0..600 {
+        w.step();
+        if tick + 60 >= 600 {
+            vsum += w.bodies.linvel[b].length();
+            n += 1.0;
+        }
+    }
+    let y = w.bodies.position[b].y;
+    let v = vsum / n;
+    println!("[判据①-cone] y={y:+.5}（锥底面 {BASE}） |v|末窗均值={v:.5}");
+    assert!(
+        (y - BASE).abs() < 0.05,
+        "布片应被托在锥底面（体心 y 实得 {y:+.5}，底面 {BASE}）"
+    );
+    assert!(v < 0.1, "末窗 |v| 均值 {v:.5} 未收敛");
+}
+
+/// **判据 ①（复合体腿，T1b-5）· 三角网 × 静态复合体**：布片落到**双盒拼台**上 ⇒ **被托住**。
+///
+/// 这条腿**没有新代码**：复合体在窄相 `process_pair_shaped` 的**最前部**就展开成子对
+/// （`tag_child_features` 给每条子流形打上子序号），子形状（盒）× 三角网走 T1b-2 的既有路径。
+/// 判据的价值 = 把"免费能力"钉进矩阵（展开顺序若被改动，这里先红）。
+///
+/// ⚠️ **子形状必须围绕体原点分布**（既有语义，本判据首版就栽在这）：`compound_half_extents`
+/// 只保留并集**半长**、**丢弃并集中心**，宽相 AABB = 体位姿 ± 半长 ⇒ 顶重/偏置的复合体
+/// （如子盒全体 +1y）的宽相盒**罩不住真实几何** ⇒ 宽相漏对 ⇒ 布片直接穿过（实测：首版把
+/// 子盒放在 y=+1，布片 600 tick 纯自由落体 y=−487 ≈ ½g·t²）。本测试故取**居中**子形状；
+/// "宽相带并集中心"是既有引擎的潜在改进（记在支持矩阵，不在本片动）。
+#[test]
+fn trimesh_is_held_by_compound() {
+    const TOP: f32 = 0.5;
+    let (pts, tris) = plate(2, 0.5);
+    let mut w = World::new(PhysConfig::default());
+    let mesh = w.add_trimesh(pts, tris);
+    // 双盒拼台（**居中**）：两个半长 0.5 的盒并排在 y=0 ⇒ 顶面 y=0.5、x ∈ [−1,1]。
+    let kids = vec![
+        CompoundChild {
+            shape: Shape::Box {
+                half: Vec3::splat(0.5),
+            },
+            offset: Vec3::new(-0.5, 0.0, 0.0),
+            rot: Quat::IDENTITY,
+        },
+        CompoundChild {
+            shape: Shape::Box {
+                half: Vec3::splat(0.5),
+            },
+            offset: Vec3::new(0.5, 0.0, 0.0),
+            rot: Quat::IDENTITY,
+        },
+    ];
+    let comp = w.add_compound(kids);
+    w.add_compound_static(comp, Vec3::ZERO, Quat::IDENTITY);
+    let b =
+        w.spawn_trimesh_body(mesh, Vec3::new(0.0, 2.0, 0.0), Quat::IDENTITY, 1000.0, 0.01) as usize;
+    let mut vsum = 0.0f32;
+    let mut n = 0.0f32;
+    for tick in 0..600 {
+        w.step();
+        if tick + 60 >= 600 {
+            vsum += w.bodies.linvel[b].length();
+            n += 1.0;
+        }
+    }
+    let y = w.bodies.position[b].y;
+    let v = vsum / n;
+    println!("[判据①-compound] y={y:+.5}（台面 {TOP}） |v|末窗均值={v:.5}");
+    assert!(
+        (y - TOP).abs() < 0.05,
+        "布片应被托在复合体台面上（体心 y 实得 {y:+.5}，台面 {TOP}）"
+    );
+    assert!(v < 0.1, "末窗 |v| 均值 {v:.5} 未收敛");
+}
+
 /// **判据 ①（凸体腿扩展，T1b-4）· 三角网 × 静态圆柱**：布片落在**柱顶圆盘**上 ⇒ **被托住**。
 /// 圆柱半径 1.0 > 布片半对角 ≈ 0.707 ⇒ 完全落在端面内（避开"滑出边缘"这类与接触无关的失败）。
 /// 注：本片走**解析柱面**（真圆端面），与本仓其它路径对圆柱用的多面化近似不同。
