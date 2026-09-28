@@ -95,7 +95,7 @@ impl DefaultNarrowPhase {
         // **凸体外壳参与的对**（多边形域）：外壳 × {盒|球|外壳} → GJK/EPA。
         // 与提供者的组合已在上面的 provider 分支处理；与高度场暂不受理。
         if matches!(*sa, Shape::ConvexHull { .. }) || matches!(*sb, Shape::ConvexHull { .. }) {
-            self.hull_pair(a, b, sa, sb, pa, ra, pb, rb, heightfields, out);
+            self.hull_pair(a, b, bodies, sa, sb, pa, ra, pb, rb, heightfields, out);
             return;
         }
 

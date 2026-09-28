@@ -201,6 +201,162 @@ impl DefaultNarrowPhase {
         }
         self.select_contacts(self.min_point_sep)
     }
+
+    /// **外壳 × 三角网**（T2 第一片）：**外壳顶点** × **网面三角形**（解析点-三角）。
+    ///
+    /// 分发在 `support.rs::hull_pair`（外壳对在那里被截走，进不了 `pair_non_heightfield`）；
+    /// 外壳世界点已由调用方填好（`hull_pts[hull_side]`），本函数再填**网顶点**世界缓存
+    /// （`fill_mesh_world`，另一侧槽 ⇒ 不冲突）。采样方向只有一路：**外壳顶点查网面**
+    /// ——外壳是凸的点云、没有"面"可供反向查询（点-凸最近点要走 GJK 距离，另立片）；
+    /// 反作用由求解器经同一条流形回给两体 ⇒ 双向耦合不丢。
+    ///
+    /// **法线口径**：取**网面三角的环绕法线**（`plate` 类网格 = +Y 朝上）——顶点从环绕侧压入
+    /// ⇒ `depth > 0`、`n_o` = 环绕法线（把外壳顶点推出去）⇒ 流形 a→b 按外壳在哪侧定号
+    /// （与 `mesh_pair` 同款）。⚠️ **单面**语义：从反面压入也算穿透、沿同一法线推出
+    /// （薄壳无厚度，"哪面朝外"由环绕序决定；双面/厚度口径属 T3 自碰撞那片）。
+    ///
+    /// **成本**：暴力 O(V_壳 × T_网)（石块 8 点 × 8 三角 = 64 对/帧，探针档无压力）；
+    /// 大网大壳要空间加速（与 T3 自碰撞的空间哈希同族，另立片）。
+    #[allow(clippy::too_many_arguments)] // 两侧体号/形状/位姿 + 接触带 + 出参（与 `process_pair` 同形）
+    pub(crate) fn hull_vs_mesh(
+        &mut self,
+        a: u32,
+        b: u32,
+        hull_is_a: bool,
+        hull_side: usize,
+        mesh: u32,
+        mesh_body: u32,
+        mesh_shape: &Shape,
+        mesh_pos: Vec3,
+        mesh_rot: Quat,
+        band: f32,
+        out: &mut Vec<Manifold>,
+    ) {
+        let mesh_side = 1 - hull_side;
+        if !self.fill_mesh_world(mesh_side, mesh_body, mesh_shape, mesh_pos, mesh_rot) {
+            return;
+        }
+        let n_hull = self.hull_pts[hull_side].len();
+        let n_tris = self.meshes.tris(mesh).len();
+        if n_hull == 0 || n_tris == 0 {
+            return;
+        }
+        // ① 主导面 = 最深候选的法线（平面薄网上全部三角同法线 ⇒ 实际只有一组）
+        let mut dom: Option<(Vec3, f32)> = None;
+        for hi in 0..n_hull {
+            let p = self.hull_pts[hull_side][hi];
+            for ti in 0..n_tris {
+                let tri = self.meshes.tris(mesh)[ti];
+                let (w0, w1, w2) = (
+                    self.hull_pts[mesh_side][tri[0] as usize],
+                    self.hull_pts[mesh_side][tri[1] as usize],
+                    self.hull_pts[mesh_side][tri[2] as usize],
+                );
+                let Some((n_o, depth, _)) = point_triangle(p, w0, w1, w2) else {
+                    continue;
+                };
+                if depth > -band && dom.is_none_or(|(_, d)| depth > d) {
+                    dom = Some((n_o, depth));
+                }
+            }
+        }
+        let Some((n_dom, _)) = dom else {
+            return;
+        };
+        // ② 同面候选（顶点可能落在网格对角线等共享边上 ⇒ 邻三角法线相同，取其一即可）
+        self.cand.clear();
+        for hi in 0..n_hull {
+            let p = self.hull_pts[hull_side][hi];
+            for ti in 0..n_tris {
+                let tri = self.meshes.tris(mesh)[ti];
+                let (w0, w1, w2) = (
+                    self.hull_pts[mesh_side][tri[0] as usize],
+                    self.hull_pts[mesh_side][tri[1] as usize],
+                    self.hull_pts[mesh_side][tri[2] as usize],
+                );
+                let Some((n_o, depth, hit)) = point_triangle(p, w0, w1, w2) else {
+                    continue;
+                };
+                if depth > -band && n_o.dot(n_dom) > 0.9 {
+                    self.cand.push(ContactPoint {
+                        point: hit,
+                        depth,
+                        feature: hi as u32 + 1, // 外壳顶点序稳定 ⇒ 跨帧可续接 warm
+                    });
+                }
+            }
+        }
+        if self.cand.is_empty() || !self.select_contacts(self.min_point_sep) {
+            return;
+        }
+        out.push(Manifold {
+            a,
+            b,
+            normal: if hull_is_a { -n_dom } else { n_dom },
+            points: ContactPoints::from_slice(&self.cand),
+        });
+    }
+}
+
+/// **点 × 三角**的解析最近点（Ericson《Real-Time Collision Detection》`ClosestPtPointTriangle`）：
+/// 返回 `(环绕法线 n_o, 深度, 三角上的最近点)`。
+///
+/// 深度 = **沿环绕法线的平面距离取负**（正 = 点在环绕背面 = 穿透）；平面上的投影落在
+/// 三角**内部**时这是精确距离，落在**边/顶点区**时是近似（真距离是到边/点的距离）——
+/// 平面薄网（全部三角共面）下两种区域给出的深度口径一致 ⇒ 判据不受影响。
+/// `None` = 退化三角（注册期已滤，此处兜底）。
+fn point_triangle(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<(Vec3, f32, Vec3)> {
+    let vn = (b - a).cross(c - a);
+    let len2 = vn.length_squared();
+    if len2 <= 1e-12 {
+        return None;
+    }
+    let n = vn * (1.0 / len2.sqrt());
+    let depth = -n.dot(p - a); // 正 = 点在环绕背面
+                               // —— 最近点（Voronoi 区判别；区分子式见 Ericson 5.1.5）——
+    let ab = b - a;
+    let ac = c - a;
+    let ap = p - a;
+    let d1 = ab.dot(ap);
+    let d2 = ac.dot(ap);
+    let hit = if d1 <= 0.0 && d2 <= 0.0 {
+        a
+    } else {
+        let bp = p - b;
+        let d3 = ab.dot(bp);
+        let d4 = ac.dot(bp);
+        if d3 >= 0.0 && d4 <= d3 {
+            b
+        } else {
+            let vc = d1 * d4 - d3 * d2;
+            if vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0 {
+                a + ab * (d1 / (d1 - d3))
+            } else {
+                let cp = p - c;
+                let d5 = ab.dot(cp);
+                let d6 = ac.dot(cp);
+                if d6 >= 0.0 && d5 <= d6 {
+                    c
+                } else {
+                    let vb = d5 * d2 - d1 * d6;
+                    if vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0 {
+                        a + ac * (d2 / (d2 - d6))
+                    } else {
+                        let va = d3 * d6 - d5 * d4;
+                        if va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0 {
+                            b + (c - b) * ((d4 - d3) / ((d4 - d3) + (d5 - d6)))
+                        } else {
+                            let denom = 1.0 / (va + vb + vc);
+                            let v = vb * denom;
+                            let w = vc * denom;
+                            a + ab * v + ac * w
+                        }
+                    }
+                }
+            }
+        }
+    };
+    Some((n, depth, hit))
 }
 
 /// 点 × {盒, 球, 胶囊, 圆柱, 锥} 的**解析最近点**：返回 `(对方外法线 n_o, 深度, 对方表面上的接触点)`。

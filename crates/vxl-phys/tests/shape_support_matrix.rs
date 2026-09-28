@@ -456,6 +456,61 @@ fn trimesh_is_held_by_heightfield() {
     assert!(v < 0.1, "末窗 |v| 均值 {v:.5} 未收敛");
 }
 
+/// **判据 ①（T2 第一片：点-三角）· 凸体外壳 × 三角网**：**石块**（盒壳点云，27 kg）落到
+/// 布片（1×1，10 kg，已躺在地板上）上 ⇒ **被布片托住**。
+///
+/// 这是**点-三角**的最小干净场景：石块顶点落在布片三角的**内部**（不对齐网格顶点——
+/// 这是顶点采样做不到、只有点-三角能给的接触）；布片是薄面、石块有体积 ⇒ 没有
+/// "两片零厚布互压"的口径难题（那属 T3 自碰撞那片）。流形 = `hull_vs_mesh`
+/// （分发在 `hull_pair`——外壳对在那里被截走）；法线取**网面环绕法线**（单面语义）。
+#[test]
+fn hull_is_held_by_trimesh_sheet() {
+    let (pts, tris) = plate(2, 0.5);
+    let mut w = World::new(PhysConfig::default());
+    let _floor = w.add_mesh(flat_mesh());
+    let mesh = w.add_trimesh(pts, tris);
+    let sheet = w.spawn_trimesh_body(mesh, Vec3::ZERO, Quat::IDENTITY, 1000.0, 0.01) as usize;
+    // 石块：半长 0.15 的盒壳点云（8 角点）⇒ 质量 = AABB 盒 1000·0.3³ ≈ 27 kg。
+    let mut corners = Vec::new();
+    for sx in [-1.0f32, 1.0] {
+        for sy in [-1.0f32, 1.0] {
+            for sz in [-1.0f32, 1.0] {
+                corners.push(Vec3::new(sx * 0.15, sy * 0.15, sz * 0.15));
+            }
+        }
+    }
+    let hull = w.add_hull(corners.clone());
+    let rock = w.spawn_hull_body(hull, Vec3::new(0.0, 1.5, 0.0), Quat::IDENTITY, 1000.0) as usize;
+    let mut vsum = 0.0f32;
+    let mut n = 0.0f32;
+    for tick in 0..600 {
+        w.step();
+        if tick + 60 >= 600 {
+            vsum += w.bodies.linvel[rock].length();
+            n += 1.0;
+        }
+    }
+    let (p, q) = (w.bodies.position[rock], w.bodies.rot(rock));
+    let lowest = corners
+        .iter()
+        .map(|c| (p + q.rotate_vec3(*c)).y)
+        .fold(f32::MAX, f32::min);
+    let v = vsum / n;
+    let sheet_y = w.bodies.position[sheet].y;
+    println!(
+        "[判据T2] 石块最低角 y={lowest:+.5}（布片面 ≈ 0） |v|末窗均值={v:.5} 布片 y={sheet_y:+.5}"
+    );
+    assert!(
+        lowest > -0.06,
+        "石块应被布片托住（最低角 y 实得 {lowest:+.5}；深穿 ⇒ 点-三角接触没守住）"
+    );
+    assert!(v < 0.1, "石块末窗 |v| 均值 {v:.5} 未收敛");
+    assert!(
+        sheet_y.abs() < 0.05,
+        "布片应仍在地板附近（y 实得 {sheet_y:+.5}）——石块把布片压穿说明反作用腿有问题"
+    );
+}
+
 /// **判据 ①（provider 腿，T1b-1 已落地）· 三角网 × 提供者（三角网地板）**：
 /// 布片落到三角网地板上 ⇒ **被托住**（口径见下；与 `provider_shape_coverage.rs` 同族但**不卡绝对值**）。
 ///

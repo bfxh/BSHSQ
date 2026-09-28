@@ -560,9 +560,9 @@
   "max_type_members": 0
  },
  "crates/vxl-phys-narrow/src/mesh_pair.rs": {
-  "file_lines": 382,
+  "file_lines": 538,
   "max_fn_lines": 167,
-  "max_type_members": 4
+  "max_type_members": 5
  },
  "crates/vxl-phys-narrow/src/mesh_store.rs": {
   "file_lines": 316,
@@ -615,8 +615,8 @@
   "max_type_members": 5
  },
  "crates/vxl-phys-narrow/src/support.rs": {
-  "file_lines": 361,
-  "max_fn_lines": 109,
+  "file_lines": 392,
+  "max_fn_lines": 140,
   "max_type_members": 16
  },
  "crates/vxl-phys-narrow/src/tests.rs": {
@@ -1095,8 +1095,8 @@
   "max_type_members": 0
  },
  "crates/vxl-phys/tests/shape_support_matrix.rs": {
-  "file_lines": 536,
-  "max_fn_lines": 44,
+  "file_lines": 591,
+  "max_fn_lines": 46,
   "max_type_members": 2
  },
  "crates/vxl-phys/tests/sleep_wake_contract.rs": {

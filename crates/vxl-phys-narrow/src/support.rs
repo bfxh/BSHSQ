@@ -160,11 +160,12 @@ impl DefaultNarrowPhase {
     /// - `feature = 顶点序号 + 1`（点云序稳定 ⇒ 跨帧可续接）。
     /// - 外壳 × 高度场：**已支持**——走 `hull_heightfield`（逐顶点采样，与 `poly_heightfield`
     ///   同款），不再走本函数。
-    #[allow(clippy::too_many_arguments)] // 与 process_pair 同形（两侧位姿 + 形状 + 出参）
+    #[allow(clippy::too_many_arguments)] // 与 process_pair 同形（两侧位姿 + 形状 + 出参 + 体表）
     pub(crate) fn hull_pair(
         &mut self,
         a: u32,
         b: u32,
+        bodies: &vxl_phys_core::BodySet,
         sa: &Shape,
         sb: &Shape,
         pa: Vec3,
@@ -222,6 +223,36 @@ impl DefaultNarrowPhase {
                 normal,
                 points: ContactPoints::from_slice(&self.cand),
             });
+            return;
+        }
+
+        // —— 对方是三角网（T2）：外壳顶点 × 网面三角形（解析点-三角；非凸 ⇒ 不进 GJK/EPA，
+        //    `support_of` 对三角网本就返回 None）——实现在 `mesh_pair.rs::hull_vs_mesh`。
+        //    **接触带按相对速度自适应**（与 `provider_pair` 同款口径——实测不加带会让高速
+        //    外壳首次检测就深穿 ⇒ 巨大冲量把薄壳轰出对方的接触带 ⇒ 双双掉穿）。
+        if let Shape::TriMesh { mesh, .. } = *other_shape {
+            let vrel = if a_is_hull {
+                bodies.linvel[a as usize] - bodies.linvel[b as usize]
+            } else {
+                bodies.linvel[b as usize] - bodies.linvel[a as usize]
+            };
+            let band = self
+                .skin
+                .max(vrel.length() * (1.0 / 60.0) * 1.5 + self.skin);
+            let (mesh_body, mesh_pos, mesh_rot) = if a_is_hull { (b, pb, rb) } else { (a, pa, ra) };
+            self.hull_vs_mesh(
+                a,
+                b,
+                a_is_hull,
+                side,
+                mesh,
+                mesh_body,
+                other_shape,
+                mesh_pos,
+                mesh_rot,
+                band,
+                out,
+            );
             return;
         }
 
