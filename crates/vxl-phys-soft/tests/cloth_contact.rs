@@ -58,7 +58,7 @@ fn cloth_rests_on_flat_floor() {
     }
     let floor = flat_mesh();
     for _ in 0..600 {
-        sheet.step(1.0 / 60.0, Vec3::new(0.0, -9.81, 0.0), &floor, 1);
+        sheet.step(1.0 / 60.0, Vec3::new(0.0, -9.81, 0.0), &floor, 1, &[]);
     }
     let (mut lo, mut hi) = (f32::MAX, f32::MIN);
     for p in &sheet.pos {
@@ -102,7 +102,7 @@ fn slope_drift(theta_deg: f32, ticks: usize) -> f32 {
     let floor = slope_mesh(theta_deg);
     let x0: f32 = sheet.pos.iter().map(|p| p.x).sum::<f32>() / sheet.pos.len() as f32;
     for _ in 0..ticks {
-        sheet.step(1.0 / 60.0, Vec3::new(0.0, -9.81, 0.0), &floor, 1);
+        sheet.step(1.0 / 60.0, Vec3::new(0.0, -9.81, 0.0), &floor, 1, &[]);
     }
     let x1: f32 = sheet.pos.iter().map(|p| p.x).sum::<f32>() / sheet.pos.len() as f32;
     x1 - x0
@@ -139,7 +139,7 @@ fn zero_providers_means_free_fall_through() {
         p.y += 1.0;
     }
     for _ in 0..600 {
-        sheet.step(1.0 / 60.0, Vec3::new(0.0, -9.81, 0.0), &NoProviders, 0);
+        sheet.step(1.0 / 60.0, Vec3::new(0.0, -9.81, 0.0), &NoProviders, 0, &[]);
     }
     let lo = sheet.pos.iter().map(|p| p.y).fold(f32::MAX, f32::min);
     println!("[金丝雀] 零提供者 ⇒ 最低点 y = {lo:+.2}（应自由落体 ≈ −47）");

@@ -11,6 +11,7 @@
 //! 刚体/自碰撞属后续切片）、无撕裂、无弯曲、无气动消费（`vxl-phys-aero` 的 `face_force`
 //! 已备，接线属后续切片）。
 use crate::params::Stiffness;
+use crate::rigid::RigidProxy;
 use std::collections::HashSet;
 use vxl_phys_core::interop::{InteropContact, ProviderColliders};
 use vxl_phys_core::Vec3;
@@ -185,13 +186,16 @@ impl ClothSheet {
     }
 
     /// 推进一个 `dt`（内部按 `substeps` 细分）。接触 = **提供者**球采样 + 库仑锥
-    /// （`provider_count = 0` 或 `radius < 0` ⇒ 零成本跳过；与 rope 同款口径）。
+    /// （`provider_count = 0` 或 `radius < 0` ⇒ 零成本跳过）+ **刚体代理**
+    /// （切片 2b-i：**静态/睡眠代理 = 墙**（投影，无反作用）；动态代理的反应两腿
+    /// `body_dv`/`body_dx` 属 2b-ii，§8.4.20 同款——此处如实跳过，不是漏）。
     pub fn step(
         &mut self,
         dt: f32,
         gravity: Vec3,
         providers: &dyn ProviderColliders,
         provider_count: u32,
+        bodies: &[RigidProxy],
     ) {
         if self.prev.len() != self.pos.len() {
             self.prev = self.pos.clone();
@@ -201,7 +205,7 @@ impl ClothSheet {
         }
         let h = dt / self.substeps.max(1) as f32;
         for _ in 0..self.substeps.max(1) {
-            self.substep(h, gravity, providers, provider_count);
+            self.substep(h, gravity, providers, provider_count, bodies);
         }
     }
 
@@ -212,6 +216,7 @@ impl ClothSheet {
         gravity: Vec3,
         providers: &dyn ProviderColliders,
         provider_count: u32,
+        bodies: &[RigidProxy],
     ) {
         let n = self.pos.len();
         // ① 预测（钉住粒子原地不动、速度清零；与 rope 同款）。
@@ -273,6 +278,46 @@ impl ClothSheet {
                 provider_count,
                 buf,
             );
+        }
+        // ③.5 布片 ↔ 刚体（切片 2b-i）：**静态/睡眠代理 = 墙**——逐粒子解析穿透
+        // （`rigid::shape_penetration`，Sphere/Box/Capsule 受理）+ 库仑锥
+        // （滑移量取**相对体**的：`dp − v_body·h`——提供者是静态地形这一项恒为零，
+        // 体在动时布才不会被"粘"在原地；与 rope 同款口径）。**动态代理跳过**
+        // （反应两腿 `body_dv`/`body_dx` 属 2b-ii，此处如实不受理）。
+        if self.radius >= 0.0 {
+            for b in bodies.iter() {
+                if b.inv_mass > 0.0 {
+                    continue; // 动态代理：2b-ii
+                }
+                for i in 0..self.pos.len() {
+                    if self.inv_mass[i] == 0.0 {
+                        continue;
+                    }
+                    let Some((n, depth, _)) = crate::rigid::shape_penetration(
+                        &b.shape,
+                        b.pos,
+                        b.rot,
+                        self.pos[i],
+                        self.radius,
+                    ) else {
+                        continue;
+                    };
+                    if depth <= 0.0 {
+                        continue; // 带内预判不推（无恢复系数的位置口径）
+                    }
+                    self.pos[i] += n * depth;
+                    if self.friction > 0.0 {
+                        let dp = self.pos[i] - self.prev[i] - b.linvel * h;
+                        let t = dp - n * dp.dot(n);
+                        let slip = t.length();
+                        if slip > 0.0 {
+                            let budget = self.friction * depth;
+                            let removed = if slip < budget { slip } else { budget };
+                            self.pos[i] -= t * (removed / slip);
+                        }
+                    }
+                }
+            }
         }
         // ④ 速度回写 + 阻尼。
         let inv_h = 1.0 / h;

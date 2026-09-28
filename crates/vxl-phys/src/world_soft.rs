@@ -78,27 +78,20 @@ impl World {
         self.soft.cloths.get(i)
     }
 
-    /// **域通道**（每 tick 一次、体子步全部完成之后）：液体域 → 软体域。
+    /// **域通道**（每 tick 一次、体子步全部完成之后）：液体域 → 软体域（绳 → 布）。
     /// 顺序固定 ⇒ 确定性不受影响（各条通道互不读对方状态）。
+    /// 刚体代理在**进域前重建一次**（绳/布共用同一份快照；任一域非空才建）。
     pub(crate) fn domain_pass(&mut self) {
         self.fluid_pass();
+        if !self.soft.ropes.is_empty() || !self.soft.cloths.is_empty() {
+            self.rebuild_soft_proxies();
+        }
         self.rope_pass();
         self.cloth_pass();
     }
 
-    /// **软体域通道**：每条绳索按自身 `substeps` 推进一个 `config.dt`；接触走统一提供者通道
-    /// （`0..providers.len()` 全量 id）与**刚体代理**（粒子↔刚体，Akinci 式最小实现）。
-    /// 反作用回填：`bodies.linvel += body_dv`（速度增量）、`bodies.torque += τ/dt`（角冲量 → 力矩口径，
-    /// 与 2b 流体反作用同段位）。**空集 ⇒ 零成本短路**。
-    pub(crate) fn rope_pass(&mut self) {
-        if self.soft.ropes.is_empty() {
-            return;
-        }
-        let dt = self.config.dt;
-        let gravity = self.config.gravity;
-        let count = self.providers.len() as u32;
-        // 刚体代理（每 tick 重建：体在动）。**地形类形状跳过**（`Provider`/`HeightField` 走提供者
-        // 通道；`Compound` 本片不支持 ⇒ 直接跳过，别让它悄悄不清碰）。
+    /// **重建刚体代理快照**（每 tick 一次：体在动；从 `rope_pass` 提取，绳/布共用）。
+    fn rebuild_soft_proxies(&mut self) {
         self.soft.rope_proxies.clear();
         for i in 0..self.bodies.len() {
             let shape = self.bodies.shape[i];
@@ -121,18 +114,14 @@ impl World {
                 } else {
                     Vec3::ZERO
                 },
-                // 本体系逆惯量（开角反作用时绳要用它推进"虚拟角速度"；关时不用，填 0 也行，但保持一致更好）。
                 local_inv_inertia: if self.bodies.is_dynamic(i) && self.bodies.awake[i] {
                     self.bodies.local_inv_inertia[i]
                 } else {
                     Vec3::ZERO
                 },
-                // **睡眠体对软体域呈现为"静态"**（§8.4.27）：与 2b 流体同口径——流体那边睡眠体
-                // 照样生成边界粒子（"让静态几何可感"）但**不接收反作用**（`fluid_reaction_pass`
-                // 判 `awake`）。这里用更省的等价写法：`inv_mass = 0` ⇒ 绳索把它当墙（接触照做），
-                // 而门面既有的"静态体不收反作用"那条自动跳过回填。
-                // ⚠️ 不这么做的话：反作用会**静默累进睡眠体的 `linvel`**（体在睡、位置不积分）
-                // ⇒ 醒来瞬间被弹出。判据：`rope_scene::rope_does_not_disturb_a_sleeping_body`。
+                // **睡眠体对软体域呈现为"静态"**（§8.4.27）：`inv_mass = 0` ⇒ 软体把它当墙
+                // （接触照做、反作用自动跳过）。不这么做的话反作用会**静默累进睡眠体的
+                // `linvel`** ⇒ 醒来瞬间被弹出（判据 `rope_scene::rope_does_not_disturb_a_sleeping_body`）。
                 inv_mass: if self.bodies.is_dynamic(i) && self.bodies.awake[i] {
                     self.bodies.inv_mass[i]
                 } else {
@@ -140,6 +129,22 @@ impl World {
                 },
             });
         }
+    }
+
+    /// **软体域通道**：每条绳索按自身 `substeps` 推进一个 `config.dt`；接触走统一提供者通道
+    /// （`0..providers.len()` 全量 id）与**刚体代理**（粒子↔刚体，Akinci 式最小实现）。
+    /// 反作用回填：`bodies.linvel += body_dv`（速度增量）、`bodies.torque += τ/dt`（角冲量 → 力矩口径，
+    /// 与 2b 流体反作用同段位）。**空集 ⇒ 零成本短路**。
+    pub(crate) fn rope_pass(&mut self) {
+        if self.soft.ropes.is_empty() {
+            return;
+        }
+        let dt = self.config.dt;
+        let gravity = self.config.gravity;
+        let count = self.providers.len() as u32;
+        // 刚体代理已在 `domain_pass` 重建（`rebuild_soft_proxies`，绳/布共用同一份快照）。
+        // **睡眠体对软体域呈现为"静态"**（§8.4.27）：代理里 `inv_mass = 0` ⇒ 软体把它当墙
+        // （接触照做、反作用自动跳过）；判据 `rope_scene::rope_does_not_disturb_a_sleeping_body`。
         let proxies = std::mem::take(&mut self.soft.rope_proxies);
         let providers = &self.providers;
         for rope in &mut self.soft.ropes {
@@ -207,8 +212,11 @@ impl World {
         let gravity = self.config.gravity;
         let count = self.providers.len() as u32;
         let providers = &self.providers;
+        // 刚体代理：与 rope 同一份快照（`domain_pass` 已重建；借出免借用冲突）。
+        let proxies = std::mem::take(&mut self.soft.rope_proxies);
         for cloth in &mut self.soft.cloths {
-            cloth.step(dt, gravity, providers, count);
+            cloth.step(dt, gravity, providers, count, &proxies);
         }
+        self.soft.rope_proxies = proxies;
     }
 }

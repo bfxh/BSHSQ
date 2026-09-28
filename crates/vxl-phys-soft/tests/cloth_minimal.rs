@@ -48,7 +48,7 @@ fn free_fall_is_rigid_translation() {
     let dt = 1.0 / 60.0;
     let p0 = sheet.pos.clone();
     for _ in 0..ticks {
-        sheet.step(dt, Vec3::new(0.0, -G, 0.0), &NoProviders, 0);
+        sheet.step(dt, Vec3::new(0.0, -G, 0.0), &NoProviders, 0, &[]);
     }
     let (mut lo, mut hi) = (f32::MAX, f32::MIN);
     for (p, p_init) in sheet.pos.iter().zip(p0.iter()) {
@@ -83,7 +83,7 @@ fn pinned_corners_hold_and_sheet_sags() {
     sheet.set_pinned(0, true);
     sheet.set_pinned(2, true);
     for _ in 0..600 {
-        sheet.step(1.0 / 60.0, Vec3::new(0.0, -G, 0.0), &NoProviders, 0);
+        sheet.step(1.0 / 60.0, Vec3::new(0.0, -G, 0.0), &NoProviders, 0, &[]);
     }
     let strain = sheet.max_strain();
     let center_y = sheet.pos[4].y;
@@ -111,7 +111,7 @@ fn strain_residual_converges_with_substeps() {
         sheet.set_pinned(0, true);
         sheet.set_pinned(2, true);
         for _ in 0..600 {
-            sheet.step(1.0 / 60.0, Vec3::new(0.0, -G, 0.0), &NoProviders, 0);
+            sheet.step(1.0 / 60.0, Vec3::new(0.0, -G, 0.0), &NoProviders, 0, &[]);
         }
         readings.push(sheet.max_strain());
     }

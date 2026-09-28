@@ -49,7 +49,13 @@ fn cloth_in_world_matches_standalone_and_empty_world_is_unchanged() {
     let cfg = PhysConfig::default();
     let mut sheet = build();
     for _ in 0..600 {
-        sheet.step(cfg.dt, cfg.gravity, &vxl_phys_core::interop::NoProviders, 0);
+        sheet.step(
+            cfg.dt,
+            cfg.gravity,
+            &vxl_phys_core::interop::NoProviders,
+            0,
+            &[],
+        );
     }
     let a = &w.cloth(id).expect("just added").pos;
     let b = &sheet.pos;
