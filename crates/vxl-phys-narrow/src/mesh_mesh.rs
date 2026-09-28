@@ -9,28 +9,14 @@
 //! **口径 = 双面**（`SURVEY` §8.4.47②）：薄壳**无内外** ⇒ 法线取「**从网面最近点指向顶点**」、
 //! 接触距离 = 接触带 `skin`、**双向采样**。⚠️ 与父模块 `hull_vs_mesh` 的**单面**口径
 //! （固定环绕法线、反面压入会**推得更深**）不同，这是刻意的：那条口径自己登记过这个边界。
-use super::point_triangle;
 use crate::{ContactPoint, ContactPoints, DefaultNarrowPhase, Manifold};
 use vxl_phys_core::{Quat, Shape, Vec3};
 
-/// **一次"顶点 × 三角"候选**（**双面口径**）：`q` = 三角上的最近点、`d = p − q`，
-/// **法线 = 从网面最近点指向顶点**（顶点在哪侧就朝哪侧推）；`sgn` 把方向折到 **a→b** 约定。
-///
-/// 接触距离 = `band`、`depth = band − ‖d‖`；退化（`‖d‖ ≈ 0`）取环绕法线兜底。
-fn mesh_probe(p: Vec3, w: (Vec3, Vec3, Vec3), band: f32, sgn: f32) -> Option<(Vec3, f32, Vec3)> {
-    let (n_w, _, q) = point_triangle(p, w.0, w.1, w.2)?;
-    let d = p - q;
-    let dist = d.length();
-    if dist >= band {
-        return None;
-    }
-    let n = if dist > 1e-9 {
-        d * (sgn / dist)
-    } else {
-        n_w * sgn
-    };
-    Some((n, band - dist, q))
-}
+// **面侧三角的空间哈希 + 候选查询**在子模块 `mesh_grid`（拆出去的理由同 `mesh_pair.rs` → 本文件：
+// **文件行数棘轮**）。
+#[path = "mesh_grid.rs"]
+mod mesh_grid;
+use mesh_grid::{mesh_probe, TriGrid};
 
 impl DefaultNarrowPhase {
     /// **三角网参与的对的统一入口**：两个都是三角网 ⇒ [`Self::mesh_vs_mesh`]（T2 续）；
@@ -83,18 +69,25 @@ impl DefaultNarrowPhase {
         }
         let na = self.hull_pts[0].len();
         let band = self.skin;
-        // 两路扫描：(顶点侧, 面侧, 面仓库, a→b 的符号)。⚠️ `Manifold::normal` 的约定是
+        // **空间哈希**（两路各一张：0 路 = A 顶点 × **B 的三角** ⇒ 查 `grid_b`；1 路相反）。
+        // 建格 O(T)、查询 O(V) ⇒ 把 O(V·T) 降到 O(V+T+候选)；**候选序列与暴力同序** ⇒ 读数逐位不变。
+        let grid_b = TriGrid::build(&self.hull_pts[1], self.meshes.tris(mb), band);
+        let grid_a = TriGrid::build(&self.hull_pts[0], self.meshes.tris(ma), band);
+        // 两路扫描：(顶点侧, 面侧, 面仓库, 面侧的格子, a→b 的符号)。⚠️ `Manifold::normal` 的约定是
         // **从 a 指向 b**（`types.rs` 明写）⇒ 0 路（a 顶点 × b 面）的分离方向是 **−d**（`d` 指
         // 从 b 面到 a 顶点），1 路取反。**首版两路都取了 +1** ⇒ 实测两片被"**推拢**"（+0.01 的
         // 初始间隙被压到 0）—— "符号/约定要查档、别靠直觉" 的又一次。
-        let dirs = [(0usize, 1usize, mb, -1.0f32), (1, 0, ma, 1.0)];
+        let dirs = [
+            (0usize, 1usize, mb, &grid_b, -1.0f32),
+            (1, 0, ma, &grid_a, 1.0),
+        ];
         // ① 主导方向 = 最深候选的法线（两路一起）
         let mut dom: Option<(Vec3, f32)> = None;
-        for (vside, mside, mesh, sgn) in dirs {
+        for (vside, mside, mesh, grid, sgn) in dirs {
             for vi in 0..self.hull_pts[vside].len() {
                 let p = self.hull_pts[vside][vi];
-                for ti in 0..self.meshes.tris(mesh).len() {
-                    let tri = self.meshes.tris(mesh)[ti];
+                for &tj in grid.query(p) {
+                    let tri = self.meshes.tris(mesh)[tj as usize];
                     let w = (
                         self.hull_pts[mside][tri[0] as usize],
                         self.hull_pts[mside][tri[1] as usize],
@@ -112,32 +105,11 @@ impl DefaultNarrowPhase {
         let Some((n_dom, _)) = dom else {
             return;
         };
-        // ② 同向候选（`feature` 按方向错开 ⇒ 两路的顶点序各自稳定、不撞号 ⇒ 跨帧可续接 warm）
+        // ② 同向候选（抽出成 `mesh_collect`：本函数是本地最长函数）
         self.cand.clear();
-        for (vside, mside, mesh, sgn) in dirs {
+        for (vside, mside, mesh, grid, sgn) in dirs {
             let fbase = if vside == 0 { 0 } else { na as u32 };
-            for vi in 0..self.hull_pts[vside].len() {
-                let p = self.hull_pts[vside][vi];
-                for ti in 0..self.meshes.tris(mesh).len() {
-                    let tri = self.meshes.tris(mesh)[ti];
-                    let w = (
-                        self.hull_pts[mside][tri[0] as usize],
-                        self.hull_pts[mside][tri[1] as usize],
-                        self.hull_pts[mside][tri[2] as usize],
-                    );
-                    let Some((n, depth, q)) = mesh_probe(p, w, band, sgn) else {
-                        continue;
-                    };
-                    if n.dot(n_dom) > 0.9 {
-                        let feature = fbase + vi as u32 + 1;
-                        self.cand.push(ContactPoint {
-                            point: q,
-                            depth,
-                            feature,
-                        });
-                    }
-                }
-            }
+            self.mesh_collect(vside, mside, mesh, grid, sgn, band, n_dom, fbase);
         }
         if self.cand.is_empty() || !self.select_contacts(self.min_point_sep) {
             return;
@@ -148,5 +120,44 @@ impl DefaultNarrowPhase {
             normal: n_dom,
             points: ContactPoints::from_slice(&self.cand),
         });
+    }
+
+    /// **收集与主导法线同向的候选**（从 `mesh_vs_mesh` 抽出：那里是本地最长函数）。
+    ///
+    /// `feature = fbase + 顶点号 + 1`：两路的**顶点序各自稳定**、`fbase` 按方向错开 ⇒ 不撞号
+    /// ⇒ 跨帧可续接 warm（顶点序稳定是前提，见 `mesh_pair.rs` 的口径注）。
+    #[allow(clippy::too_many_arguments)] // 接触包：方向包（顶点侧/面侧/仓库/格子/符号）+ 带 + 法线 + 特征基址
+    fn mesh_collect(
+        &mut self,
+        vside: usize,
+        mside: usize,
+        mesh: u32,
+        grid: &TriGrid,
+        sgn: f32,
+        band: f32,
+        n_dom: Vec3,
+        fbase: u32,
+    ) {
+        for vi in 0..self.hull_pts[vside].len() {
+            let p = self.hull_pts[vside][vi];
+            for &tj in grid.query(p) {
+                let tri = self.meshes.tris(mesh)[tj as usize];
+                let w = (
+                    self.hull_pts[mside][tri[0] as usize],
+                    self.hull_pts[mside][tri[1] as usize],
+                    self.hull_pts[mside][tri[2] as usize],
+                );
+                let Some((n, depth, q)) = mesh_probe(p, w, band, sgn) else {
+                    continue;
+                };
+                if n.dot(n_dom) > 0.9 {
+                    self.cand.push(ContactPoint {
+                        point: q,
+                        depth,
+                        feature: fbase + vi as u32 + 1,
+                    });
+                }
+            }
+        }
     }
 }

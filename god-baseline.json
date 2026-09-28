@@ -559,10 +559,15 @@
   "max_fn_lines": 0,
   "max_type_members": 0
  },
- "crates/vxl-phys-narrow/src/mesh_mesh.rs": {
-  "file_lines": 153,
-  "max_fn_lines": 86,
+ "crates/vxl-phys-narrow/src/mesh_grid.rs": {
+  "file_lines": 125,
+  "max_fn_lines": 30,
   "max_type_members": 2
+ },
+ "crates/vxl-phys-narrow/src/mesh_mesh.rs": {
+  "file_lines": 164,
+  "max_fn_lines": 72,
+  "max_type_members": 3
  },
  "crates/vxl-phys-narrow/src/mesh_pair.rs": {
   "file_lines": 560,
