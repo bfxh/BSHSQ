@@ -7,11 +7,61 @@
 //! **质量 = 薄壳均分**：`m_i = ρ·t·Σ(incident A_tri)/3`——与窄相 `MeshStore::shell_props`
 //! 的薄壳总质量同口径（两者对同一张网给出的总质量一致）。
 //!
-//! **本片边界（写清，不是漏）**：无接触（提供者/刚体/自碰撞都属后续切片）、无撕裂、无弯曲、
-//! 无气动消费（`vxl-phys-aero` 的 `face_force` 已备，接线属后续切片）。
+//! **本片边界（写清，不是漏）**：接触只接**提供者**（球采样 + 库仑锥，与 rope 同款；
+//! 刚体/自碰撞属后续切片）、无撕裂、无弯曲、无气动消费（`vxl-phys-aero` 的 `face_force`
+//! 已备，接线属后续切片）。
 use crate::params::Stiffness;
 use std::collections::HashSet;
+use vxl_phys_core::interop::{InteropContact, ProviderColliders};
 use vxl_phys_core::Vec3;
+
+/// **球采样接触投影 + 库仑锥**（从 `rope.rs::project_contacts` **纯搬移**——rope 现委托本函数
+/// ⇒ 那边净缩、这边新增，口径逐字不变）：法向推出（只有真穿透才推 ⇒ 无恢复系数）+
+/// 切向锥（`budget = μ·depth`，锥内整段吃掉 = 黏住）。平面/缓坡判据同 rope 的
+/// 15° 黏 / 35° 滑（`tanθ` 对 μ）。
+#[allow(clippy::too_many_arguments)] // 提取自方法（self 摊平成参数）：pos/prev/inv_mass/半径/带/μ + 提供者 + 出参
+pub(crate) fn sphere_contacts_project(
+    pos: &mut [Vec3],
+    prev: &[Vec3],
+    inv_mass: &[f32],
+    radius: f32,
+    skin: f32,
+    friction: f32,
+    providers: &dyn ProviderColliders,
+    provider_count: u32,
+    buf: &mut Vec<InteropContact>,
+) {
+    for i in 0..pos.len() {
+        if inv_mass[i] == 0.0 {
+            continue;
+        }
+        for id in 0..provider_count {
+            buf.clear();
+            if !providers.contacts_sphere(id, pos[i], radius, skin, buf) {
+                continue;
+            }
+            for c in buf.iter() {
+                if c.depth <= 0.0 {
+                    continue; // 带内预判不推（无恢复系数的位置口径）
+                }
+                let n = c.normal;
+                // ① 法向：推到面上（位移 = 穿透量）。
+                pos[i] += n * c.depth;
+                // ② 切向：库仑锥（锥内整段吃掉 ⇒ 静摩擦黏住；只扣超出部分会恒定蠕变——rope 首版教训）。
+                if friction > 0.0 {
+                    let dp = pos[i] - prev[i];
+                    let t = dp - n * dp.dot(n);
+                    let slip = t.length();
+                    if slip > 0.0 {
+                        let budget = friction * c.depth;
+                        let removed = if slip < budget { slip } else { budget };
+                        pos[i] -= t * (removed / slip);
+                    }
+                }
+            }
+        }
+    }
+}
 
 /// **布片**（XPBD 三角网）：粒子 + 唯一边距离约束 + 逐子步投影。
 #[derive(Clone)]
@@ -37,6 +87,13 @@ pub struct ClothSheet {
     pub iterations: u32,
     /// 速度回写阻尼（1.0 = 无阻尼；同 [`crate::rope::Rope::damping`] 口径）。
     pub damping: f32,
+    /// 粒子**球采样半径**（提供者接触用；`< 0` = 关接触。默认 = 壳厚一半）。
+    pub radius: f32,
+    /// 库仑锥摩擦系数（`budget = μ·depth`；默认 0.5，与 rope 一致）。
+    pub friction: f32,
+    /// 接触带（预测接触用；默认 0.02）。
+    pub skin: f32,
+    pub(crate) buf: Vec<InteropContact>,
 }
 
 impl ClothSheet {
@@ -100,6 +157,10 @@ impl ClothSheet {
             substeps: 8,
             iterations: 1,
             damping: 1.0,
+            radius: t * 0.5,
+            friction: 0.5,
+            skin: 0.02,
+            buf: Vec::new(),
         }
     }
 
@@ -123,8 +184,15 @@ impl ClothSheet {
         };
     }
 
-    /// 推进一个 `dt`（内部按 `substeps` 细分；**无接触**——本片边界，见模块文档）。
-    pub fn step(&mut self, dt: f32, gravity: Vec3) {
+    /// 推进一个 `dt`（内部按 `substeps` 细分）。接触 = **提供者**球采样 + 库仑锥
+    /// （`provider_count = 0` 或 `radius < 0` ⇒ 零成本跳过；与 rope 同款口径）。
+    pub fn step(
+        &mut self,
+        dt: f32,
+        gravity: Vec3,
+        providers: &dyn ProviderColliders,
+        provider_count: u32,
+    ) {
         if self.prev.len() != self.pos.len() {
             self.prev = self.pos.clone();
         }
@@ -133,12 +201,18 @@ impl ClothSheet {
         }
         let h = dt / self.substeps.max(1) as f32;
         for _ in 0..self.substeps.max(1) {
-            self.substep(h, gravity);
+            self.substep(h, gravity, providers, provider_count);
         }
     }
 
-    /// 单个子步：预测 → 距离约束（XPBD）→ 速度回写 + 阻尼。
-    fn substep(&mut self, h: f32, gravity: Vec3) {
+    /// 单个子步：预测 → 距离约束（XPBD）→ 接触 → 速度回写 + 阻尼。
+    fn substep(
+        &mut self,
+        h: f32,
+        gravity: Vec3,
+        providers: &dyn ProviderColliders,
+        provider_count: u32,
+    ) {
         let n = self.pos.len();
         // ① 预测（钉住粒子原地不动、速度清零；与 rope 同款）。
         for i in 0..n {
@@ -176,7 +250,31 @@ impl ClothSheet {
                 self.pos[j] += dir * (self.inv_mass[j] * dl);
             }
         }
-        // ③ 速度回写 + 阻尼。
+        // ③ 接触：提供者球采样 + 库仑锥（`sphere_contacts_project`，与 rope 同款纯搬移）。
+        if self.radius >= 0.0 && provider_count > 0 {
+            let Self {
+                pos,
+                prev,
+                inv_mass,
+                radius,
+                skin,
+                friction,
+                buf,
+                ..
+            } = self;
+            sphere_contacts_project(
+                pos,
+                prev,
+                inv_mass,
+                *radius,
+                *skin,
+                *friction,
+                providers,
+                provider_count,
+                buf,
+            );
+        }
+        // ④ 速度回写 + 阻尼。
         let inv_h = 1.0 / h;
         for i in 0..n {
             self.vel[i] = if self.inv_mass[i] == 0.0 {

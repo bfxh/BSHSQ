@@ -45,10 +45,11 @@ fn cloth_in_world_matches_standalone_and_empty_world_is_unchanged() {
     }
     // B：软体侧单跑（同一推进口径：**直接读 `PhysConfig::default()` 的 dt/gravity**，
     //    别手抄数值——默认重力是 −9.81 不是 −9.8，手抄差 0.01 会在 2 s 悬垂里放大成 0.68 m）。
+    //    本场景没注册提供者 ⇒ 两侧都走"零接触"（切片 2 的 `provider_count = 0` 路径）。
     let cfg = PhysConfig::default();
     let mut sheet = build();
     for _ in 0..600 {
-        sheet.step(cfg.dt, cfg.gravity);
+        sheet.step(cfg.dt, cfg.gravity, &vxl_phys_core::interop::NoProviders, 0);
     }
     let a = &w.cloth(id).expect("just added").pos;
     let b = &sheet.pos;

@@ -196,8 +196,8 @@ impl World {
         self.soft.rope_proxies = proxies;
     }
 
-    /// **布料域通道**（T 软体切片 1）：每张布片按自身 `substeps` 推进一个 `config.dt`。
-    /// **本片边界**：无接触（提供者/刚体/自碰撞都属后续切片，见 `cloth.rs` 模块文档）。
+    /// **布料域通道**（软体切片 1/2）：每张布片按自身 `substeps` 推进一个 `config.dt`；
+    /// 接触走**统一提供者通道**（与 rope 同款：`0..providers.len()` 全量 id + 球采样 + 库仑锥）。
     /// 空集 ⇒ 零成本短路 ⇒ 默认档逐位不变。
     pub(crate) fn cloth_pass(&mut self) {
         if self.soft.cloths.is_empty() {
@@ -205,8 +205,10 @@ impl World {
         }
         let dt = self.config.dt;
         let gravity = self.config.gravity;
+        let count = self.providers.len() as u32;
+        let providers = &self.providers;
         for cloth in &mut self.soft.cloths {
-            cloth.step(dt, gravity);
+            cloth.step(dt, gravity, providers, count);
         }
     }
 }

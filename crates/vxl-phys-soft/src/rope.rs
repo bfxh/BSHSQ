@@ -405,44 +405,29 @@ impl Rope {
     /// 逐粒子把穿透推到面上（多接触按 Gauss-Seidel 顺序逐个推；带内预判不推），
     /// 并按**库仑锥**限制切向滑移（位置口径，见 [`Rope::friction`]）。
     fn project_contacts(&mut self, providers: &dyn ProviderColliders, provider_count: u32) {
-        // `buf` 借出去才能再借 `self.pos`（同窄相 `prims.rs` 的 `mem::take` 手法）。
-        let mut buf = std::mem::take(&mut self.buf);
-        for i in 0..self.pos.len() {
-            if self.inv_mass[i] == 0.0 {
-                continue;
-            }
-            for id in 0..provider_count {
-                buf.clear();
-                if !providers.contacts_sphere(id, self.pos[i], self.radius, self.skin, &mut buf) {
-                    continue;
-                }
-                for c in &buf {
-                    if c.depth <= 0.0 {
-                        continue; // 带内预判不推（无恢复系数的位置口径）
-                    }
-                    let n = c.normal;
-                    // ① 法向：推到面上（位移 = 穿透量）。
-                    self.pos[i] += n * c.depth;
-                    // ② 切向：库仑锥 —— 摩擦能"吃掉"的切向位移上限 = `μ·法向修正量`。
-                    //    （力的等效：切向位移 `d` 对应 `F = m·d/h²`，锥内 `F ≤ μN` ⇔ `d ≤ μ·法向位移`。）
-                    //    **锥内整段吃掉 ⇒ 完全黏住（静摩擦）**；超出 ⇒ 吃掉 `μ·法向`、余下按动摩擦滑掉。
-                    //    ⚠️ 只扣"超出部分"是错的（首版就这么写）：锥内不修正 ⇒ 每子步照落一格
-                    //    `g_t·h²` ⇒ **恒定蠕变**（实测率精确 ∝ h：子步 1/2/4/8/16 ⇒ 1.271/0.636/0.318/
-                    //    0.159/0.079 m/千步），且**两粒子（无链张力）情形同速率** ⇒ 模型本身的问题，不是张力。
-                    if self.friction > 0.0 {
-                        let dp = self.pos[i] - self.prev[i];
-                        let t = dp - n * dp.dot(n);
-                        let slip = t.length();
-                        if slip > 0.0 {
-                            let budget = self.friction * c.depth;
-                            let removed = if slip < budget { slip } else { budget };
-                            self.pos[i] -= t * (removed / slip);
-                        }
-                    }
-                }
-            }
-        }
-        self.buf = buf;
+        // 球采样投影 + 库仑锥**已提取为共享实现**（`cloth::sphere_contacts_project`，
+        // 2026-09-28 布料切片 2：rope 委托调用 ⇒ 本文件净缩、口径逐字不变）。
+        let Self {
+            pos,
+            prev,
+            inv_mass,
+            radius,
+            skin,
+            friction,
+            buf,
+            ..
+        } = self;
+        crate::cloth::sphere_contacts_project(
+            pos,
+            prev,
+            inv_mass,
+            *radius,
+            *skin,
+            *friction,
+            providers,
+            provider_count,
+            buf,
+        );
     }
 
     /// **粒子 ↔ 刚体**：逐粒子对每个代理做投影（与提供者那套同款：法向推出 + 库仑锥），

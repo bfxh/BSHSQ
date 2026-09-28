@@ -640,9 +640,9 @@
   "max_type_members": 3
  },
  "crates/vxl-phys-soft/src/cloth.rs": {
-  "file_lines": 201,
-  "max_fn_lines": 60,
-  "max_type_members": 13
+  "file_lines": 299,
+  "max_fn_lines": 78,
+  "max_type_members": 17
  },
  "crates/vxl-phys-soft/src/lib.rs": {
   "file_lines": 25,
@@ -660,7 +660,7 @@
   "max_type_members": 8
  },
  "crates/vxl-phys-soft/src/rope.rs": {
-  "file_lines": 635,
+  "file_lines": 620,
   "max_fn_lines": 108,
   "max_type_members": 23
  },
@@ -669,8 +669,13 @@
   "max_fn_lines": 57,
   "max_type_members": 0
  },
+ "crates/vxl-phys-soft/tests/cloth_contact.rs": {
+  "file_lines": 151,
+  "max_fn_lines": 38,
+  "max_type_members": 0
+ },
  "crates/vxl-phys-soft/tests/cloth_minimal.rs": {
-  "file_lines": 130,
+  "file_lines": 131,
   "max_fn_lines": 37,
   "max_type_members": 0
  },
@@ -1015,7 +1020,7 @@
   "max_type_members": 9
  },
  "crates/vxl-phys/src/world_soft.rs": {
-  "file_lines": 213,
+  "file_lines": 215,
   "max_fn_lines": 105,
   "max_type_members": 9
  },
@@ -1060,8 +1065,8 @@
   "max_type_members": 0
  },
  "crates/vxl-phys/tests/cloth_scene.rs": {
-  "file_lines": 69,
-  "max_fn_lines": 38,
+  "file_lines": 70,
+  "max_fn_lines": 39,
   "max_type_members": 0
  },
  "crates/vxl-phys/tests/compound_mass.rs": {
