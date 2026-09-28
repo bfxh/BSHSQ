@@ -36,7 +36,7 @@
 | 10 | `narrow/src/provider.rs::provider_shape_contacts` | `_ => false` | **✅ 已受理（T1b-1 落地）**：`mesh_provider_contacts` 逐顶点点查询（与 `hull_provider_contacts` 同构） | 已显式化 |
 | 11 | `narrow/src/support.rs::support_of` | `_ => None` | **显式列名**：三角网**非凸** ⇒ 不进 GJK/EPA（这是**语义决定**，不是"没写"） | 已显式化 |
 | 12 | `narrow/src/support.rs::poly_for` | `_ => None` | 保持：三角网不是**凸多面体**；调用方已按 `None` 分支处理（`pair_shaped` 各臂都查 `Some/None`） | — |
-| 13 | `narrow/src/pair_shaped.rs::pair_non_heightfield` | `_ => {}` | **✅ 已受理（T1b-2/4/5）**：三角网早分支 ⇒ `mesh_pair`（**盒/球/胶囊/圆柱/锥** 解析采样）；**复合体免费经展开**（子对最前部）；外壳/另一个三角网如实不受理（T2 领地） | 已显式化 |
+| 13 | `narrow/src/pair_shaped.rs::pair_non_heightfield` | `_ => {}` | **✅ 已受理（T1b-2/4/5 + T2 续）**：三角网早分支 ⇒ `mesh_dispatch`（新入口）⇒ `mesh_pair`（**盒/球/胶囊/圆柱/锥** 解析采样）或 `mesh_mesh::mesh_vs_mesh`（**另一个三角网**，双面口径，2026-09-29）；**复合体免费经展开**（子对最前部）；只剩**外壳**不受理 | 已显式化 |
 | 14 | `core/src/narrow_tier.rs::pack_bodies` | `_ => KIND_NONE` | 注释登记（**卡上不接** ⇒ 主机回填） | 注释 |
 | 15 | `fluid/src/boundary.rs::supports` | `matches!` 显式 | `false`（2b 不生成边界粒子 ⇒ 该体仍走 2a 介质场，**既不叠加也不留空**） | 已显式化 |
 | 16 | `fluid/src/boundary.rs::{min_half_extent, surface}` | `_` | 注释登记：**不生成**（"近似面片会给错体积，比没有更坏"——沿用该文件既有裁决） | 注释 |

@@ -321,9 +321,9 @@ impl DefaultNarrowPhase {
         out: &mut Vec<Manifold>,
     ) {
         // 三角网 × 其它：**逐顶点采样**（非凸 ⇒ 不进 GJK/EPA；实现在 `mesh_pair.rs`，
-        // 受理面 = 盒/球，其余如实不受理 ⇒ 该对不产接触）。
+        // 受理面 = 盒/球/胶囊/圆柱/锥 + **另一个三角网**（T2 续，双面口径），其余如实不受理）。
         if matches!(*sa, Shape::TriMesh { .. }) || matches!(*sb, Shape::TriMesh { .. }) {
-            self.mesh_pair(a, b, sa, sb, pa, ra, pb, rb, out);
+            self.mesh_dispatch(a, b, sa, sb, pa, ra, pb, rb, out);
             return;
         }
         match (*sa, *sb) {

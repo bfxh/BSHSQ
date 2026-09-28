@@ -395,107 +395,26 @@ fn point_shape(p: Vec3, shape: &Shape, c: Vec3, rot: Quat) -> Option<(Vec3, f32,
             let n_o = d * (1.0 / len);
             Some((n_o, radius - len, q + n_o * radius))
         }
-        // 有限圆柱（局部 +Y）：侧面 / 端面 / **边圈** 三分支（含柱内"最近面"选择）。
+        // 有限圆柱（局部 +Y）：侧面 / 端面 / **边圈** 三分支 —— 分支逻辑在 `cylinder_surface`
+        // （从本函数抽出：这里是**全文件最长函数**，god 门"合法交换"要求最长函数**严格下降**）。
         Shape::Cylinder {
             half_height,
             radius,
         } => {
             let r3 = Mat3::from_quat(rot);
             let q = r3.transpose_mul_vec3(p - c); // 局部坐标
-            let rho = (q.x * q.x + q.z * q.z).sqrt();
-            let ay = q.y.abs();
-            // 径向单位向量（局部；落在轴上时任取 +X ⇒ 确定性）
-            let rdir = if rho > 1e-6 {
-                Vec3::new(q.x / rho, 0.0, q.z / rho)
-            } else {
-                Vec3::X
-            };
-            let side = |y: f32| rdir * radius + Vec3::Y * y; // 侧面上的点
-            let cap = |s: f32| Vec3::new(q.x, s * half_height, q.z); // 端面上的点
-            let (n_l, depth, surf) = if rho <= radius && ay <= half_height {
-                // 柱内：最近的是侧面还是端面（并列取侧面 ⇒ 确定性）
-                let (d_side, d_cap) = (radius - rho, half_height - ay);
-                if d_side <= d_cap {
-                    (rdir, d_side, side(q.y))
-                } else {
-                    let s = if q.y < 0.0 { -1.0 } else { 1.0 };
-                    (Vec3::Y * s, d_cap, cap(s))
-                }
-            } else if rho > radius && ay <= half_height {
-                (rdir, radius - rho, side(q.y)) // 侧面外侧（depth ≤ 0）
-            } else if rho <= radius {
-                let s = if q.y < 0.0 { -1.0 } else { 1.0 };
-                (Vec3::Y * s, half_height - ay, cap(s)) // 端面外侧
-            } else {
-                // 侧面外侧 + 端面外 ⇒ 最近点是**边圈**
-                let s = if q.y < 0.0 { -1.0 } else { 1.0 };
-                let rim = Vec3::new(rdir.x * radius, s * half_height, rdir.z * radius);
-                let d = q - rim;
-                let len = d.length();
-                let n_l = if len > 1e-6 { d * (1.0 / len) } else { rdir };
-                (n_l, -len, rim)
-            };
+            let (n_l, depth, surf) = cylinder_surface(q, half_height, radius);
             Some((r3.mul_vec3(n_l), depth, c + r3.mul_vec3(surf)))
         }
-        // 有限圆锥（局部 +Y：底面 `y = −h` 半径 `r`，顶点 `y = +h`）：**解析锥面**。
-        // 口径与圆柱同款——本仓其它路径把锥**多面化**（16 边棱锥）进 GJK/EPA，这里用真锥面
-        // （对顶点采样更准，不引入棱面误差）。做法：把查询点投到**过轴的 2D 剖面** `(ρ, y)`
-        // （ρ = 径向距），锥的剖面是三角形（顶点 (0,h)、底圈 (r,−h)、轴底 (0,−h)），
-        // 最近点只会在**侧边**或**底边**上（轴边不是表面；"顶点正上方"退化为同一解）。
+        // 有限圆锥（局部 +Y：底面 `y = −h` 半径 `r`，顶点 `y = +h`）：**解析锥面** —— 分支逻辑在
+        // `cone_surface`（抽出理由同上）。
         Shape::Cone {
             half_height,
             radius,
         } => {
             let r3 = Mat3::from_quat(rot);
             let q = r3.transpose_mul_vec3(p - c);
-            let rho = (q.x * q.x + q.z * q.z).sqrt();
-            let rdir = if rho > 1e-6 {
-                Vec3::new(q.x / rho, 0.0, q.z / rho)
-            } else {
-                Vec3::X
-            };
-            // 剖面几何：侧边 P0=(0,h)→P1=(r,−h)，方向 d=(r,−2h)、|d|² = r²+4h²；外法线 (2h,r)/|d|。
-            let h2 = 2.0 * half_height;
-            let len2 = radius * radius + h2 * h2;
-            let len = len2.sqrt();
-            // 侧边最近点（t ∈ [0,1]）与法线：光滑段用解析外法线；夹到**顶点/底圈**（退化特征，
-            // 无唯一法线）用"表面点 → 查询点"方向（并列/退化都取确定分支）。
-            let t = ((rho * radius + (q.y - half_height) * (-h2)) / len2).clamp(0.0, 1.0);
-            let side_pt = rdir * (t * radius) + Vec3::Y * (half_height - h2 * t);
-            let side_n = if t > 0.0 && t < 1.0 {
-                (rdir * h2 + Vec3::Y * radius) * (1.0 / len)
-            } else {
-                let d = q - side_pt;
-                if d.length_squared() > 1e-12 {
-                    d.normalize()
-                } else {
-                    rdir
-                }
-            };
-            // 底边最近点：(min(ρ, r), −h)；法线 −Y。
-            let base_pt = rdir * rho.min(radius) + Vec3::Y * (-half_height);
-            let s_side = h2 * rho + radius * (q.y - half_height); // ×(1/|d|) 即带符号距离
-            let (n_l, depth, surf) = if s_side <= 0.0 && q.y >= -half_height {
-                // 锥内：侧面 / 底面取近（并列取侧面 ⇒ 确定性）
-                let d_side = -s_side / len;
-                let d_base = q.y + half_height;
-                if d_side <= d_base {
-                    (side_n, d_side, side_pt)
-                } else {
-                    (-Vec3::Y, d_base, base_pt)
-                }
-            } else {
-                // 锥外：两个候选取近者（并列取侧边 ⇒ 确定性）；深度取负 = 分离
-                let dy_s = q.y - (half_height - h2 * t);
-                let d2_side = (rho - t * radius) * (rho - t * radius) + dy_s * dy_s;
-                let dr_b = rho - rho.min(radius);
-                let d2_base = dr_b * dr_b + (q.y + half_height) * (q.y + half_height);
-                if d2_side <= d2_base {
-                    (side_n, -d2_side.sqrt(), side_pt)
-                } else {
-                    (-Vec3::Y, -d2_base.sqrt(), base_pt)
-                }
-            };
+            let (n_l, depth, surf) = cone_surface(q, half_height, radius);
             Some((r3.mul_vec3(n_l), depth, c + r3.mul_vec3(surf)))
         }
         Shape::Box { half } => {
@@ -535,3 +454,106 @@ fn point_shape(p: Vec3, shape: &Shape, c: Vec3, rot: Quat) -> Option<(Vec3, f32,
         _ => None,
     }
 }
+
+/// **点 × 有限圆柱**（局部系）：返回 `(局部外法线, 深度, 局部表面点)` —— 侧面 / 端面 / **边圈**
+/// 三分支（含柱内"最近面"选择）。从 `point_shape` 抽出：那里是**全文件最长函数**，而本仓 god 门
+/// 的"合法交换"要求 —— **加行数时最长函数必须严格下降**。
+fn cylinder_surface(q: Vec3, half_height: f32, radius: f32) -> (Vec3, f32, Vec3) {
+    let rho = (q.x * q.x + q.z * q.z).sqrt();
+    let ay = q.y.abs();
+    // 径向单位向量（局部；落在轴上时任取 +X ⇒ 确定性）
+    let rdir = if rho > 1e-6 {
+        Vec3::new(q.x / rho, 0.0, q.z / rho)
+    } else {
+        Vec3::X
+    };
+    let side = |y: f32| rdir * radius + Vec3::Y * y; // 侧面上的点
+    let cap = |s: f32| Vec3::new(q.x, s * half_height, q.z); // 端面上的点
+    if rho <= radius && ay <= half_height {
+        // 柱内：最近的是侧面还是端面（并列取侧面 ⇒ 确定性）
+        let (d_side, d_cap) = (radius - rho, half_height - ay);
+        if d_side <= d_cap {
+            (rdir, d_side, side(q.y))
+        } else {
+            let s = if q.y < 0.0 { -1.0 } else { 1.0 };
+            (Vec3::Y * s, d_cap, cap(s))
+        }
+    } else if rho > radius && ay <= half_height {
+        (rdir, radius - rho, side(q.y)) // 侧面外侧（depth ≤ 0）
+    } else if rho <= radius {
+        let s = if q.y < 0.0 { -1.0 } else { 1.0 };
+        (Vec3::Y * s, half_height - ay, cap(s)) // 端面外侧
+    } else {
+        // 侧面外侧 + 端面外 ⇒ 最近点是**边圈**
+        let s = if q.y < 0.0 { -1.0 } else { 1.0 };
+        let rim = Vec3::new(rdir.x * radius, s * half_height, rdir.z * radius);
+        let d = q - rim;
+        let len = d.length();
+        let n_l = if len > 1e-6 { d * (1.0 / len) } else { rdir };
+        (n_l, -len, rim)
+    }
+}
+
+/// **点 × 有限圆锥**（局部系；底面 `y = −h` 半径 `r`、顶点 `y = +h`）：**解析锥面**。
+/// 口径与圆柱同款 —— 本仓其它路径把锥**多面化**（16 边棱锥）进 GJK/EPA，这里用真锥面
+/// （对顶点采样更准，不引入棱面误差）。做法：把查询点投到**过轴的 2D 剖面** `(ρ, y)`
+/// （ρ = 径向距），锥的剖面是三角形（顶点 (0,h)、底圈 (r,−h)、轴底 (0,−h)），
+/// 最近点只会在**侧边**或**底边**上（轴边不是表面；"顶点正上方"退化为同一解）。
+fn cone_surface(q: Vec3, half_height: f32, radius: f32) -> (Vec3, f32, Vec3) {
+    let rho = (q.x * q.x + q.z * q.z).sqrt();
+    let rdir = if rho > 1e-6 {
+        Vec3::new(q.x / rho, 0.0, q.z / rho)
+    } else {
+        Vec3::X
+    };
+    // 剖面几何：侧边 P0=(0,h)→P1=(r,−h)，方向 d=(r,−2h)、|d|² = r²+4h²；外法线 (2h,r)/|d|。
+    let h2 = 2.0 * half_height;
+    let len2 = radius * radius + h2 * h2;
+    let len = len2.sqrt();
+    // 侧边最近点（t ∈ [0,1]）与法线：光滑段用解析外法线；夹到**顶点/底圈**（退化特征，
+    // 无唯一法线）用"表面点 → 查询点"方向（并列/退化都取确定分支）。
+    let t = ((rho * radius + (q.y - half_height) * (-h2)) / len2).clamp(0.0, 1.0);
+    let side_pt = rdir * (t * radius) + Vec3::Y * (half_height - h2 * t);
+    let side_n = if t > 0.0 && t < 1.0 {
+        (rdir * h2 + Vec3::Y * radius) * (1.0 / len)
+    } else {
+        let d = q - side_pt;
+        if d.length_squared() > 1e-12 {
+            d.normalize()
+        } else {
+            rdir
+        }
+    };
+    // 底边最近点：(min(ρ, r), −h)；法线 −Y。
+    let base_pt = rdir * rho.min(radius) + Vec3::Y * (-half_height);
+    let s_side = h2 * rho + radius * (q.y - half_height); // ×(1/|d|) 即带符号距离
+    if s_side <= 0.0 && q.y >= -half_height {
+        // 锥内：侧面 / 底面取近（并列取侧面 ⇒ 确定性）
+        let d_side = -s_side / len;
+        let d_base = q.y + half_height;
+        if d_side <= d_base {
+            (side_n, d_side, side_pt)
+        } else {
+            (-Vec3::Y, d_base, base_pt)
+        }
+    } else {
+        // 锥外：两个候选取近者（并列取侧边 ⇒ 确定性）；深度取负 = 分离
+        let dy_s = q.y - (half_height - h2 * t);
+        let d2_side = (rho - t * radius) * (rho - t * radius) + dy_s * dy_s;
+        let dr_b = rho - rho.min(radius);
+        let d2_base = dr_b * dr_b + (q.y + half_height) * (q.y + half_height);
+        if d2_side <= d2_base {
+            (side_n, -d2_side.sqrt(), side_pt)
+        } else {
+            (-Vec3::Y, -d2_base.sqrt(), base_pt)
+        }
+    }
+}
+
+// **三角网 × 三角网**（T2 续）与它的分派入口在**子模块** `mesh_mesh` 里（`#[path]` 指向同目录的
+// `mesh_mesh.rs`）。**为什么拆**：本文件受 god 门**文件行数棘轮**（基线 538 行）—— 新代码留在
+// 这里会让它涨到 691（超 `≤10%` 交换窗）。**为什么是子模块**（而不是 crate 级新文件）：子模块
+// 能直接看见父模块的私有 `point_triangle`；crate 级新文件则要把它提成 `pub(crate)` 并给
+// `narrow/lib.rs` 加 `mod` 声明，而那个文件只剩 1 行预算（48 行 / 基线 49）⇒ 加声明就顶棘轮。
+#[path = "mesh_mesh.rs"]
+mod mesh_mesh;

@@ -559,9 +559,14 @@
   "max_fn_lines": 0,
   "max_type_members": 0
  },
+ "crates/vxl-phys-narrow/src/mesh_mesh.rs": {
+  "file_lines": 153,
+  "max_fn_lines": 86,
+  "max_type_members": 2
+ },
  "crates/vxl-phys-narrow/src/mesh_pair.rs": {
-  "file_lines": 538,
-  "max_fn_lines": 167,
+  "file_lines": 560,
+  "max_fn_lines": 86,
   "max_type_members": 5
  },
  "crates/vxl-phys-narrow/src/mesh_store.rs": {
@@ -1153,6 +1158,11 @@
   "file_lines": 138,
   "max_fn_lines": 37,
   "max_type_members": 0
+ },
+ "crates/vxl-phys/tests/mesh_vs_mesh.rs": {
+  "file_lines": 190,
+  "max_fn_lines": 38,
+  "max_type_members": 4
  },
  "crates/vxl-phys/tests/provider_shape_coverage.rs": {
   "file_lines": 213,
