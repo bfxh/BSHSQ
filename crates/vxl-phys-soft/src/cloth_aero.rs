@@ -20,12 +20,18 @@ use vxl_phys_core::Vec3;
 ///
 /// **默认关的意义**：`predict` 首行短路 ⇒ 既有场景**逐位不变**（三条冻结哈希与 `gold` 门不动）
 /// ⇒ 与门面 `World::set_aero` 的 `Option` 槽、`angular_reaction` 的 `bool` 同款"0 = 关"先例。
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ClothAero {
     /// `false`（默认）⇒ 不消费风（零成本短路）。
     pub enabled: bool,
     /// 气动配置（**风在 `AeroConfig::wind` 里**，与门面气动域**同一个骨架**）。
     pub cfg: AeroConfig,
+    /// **子步开始时的速度快照**（Jacobi 用；复用缓冲 ⇒ **热路径零分配**）。
+    ///
+    /// 首版用的是**局部** `vel.clone()`（每子步一次分配）—— 当时 `ClothSheet` 成员棘轮顶格
+    /// 24/24、放不下这个 scratch，作为**欠账**登记在 §8.4.46；2026-09-29 把
+    /// `radius`/`friction`/`skin` 并成 [`crate::cloth::ContactTuning`] 腾出成员位后**已还**。
+    pub v0: Vec<Vec3>,
 }
 
 impl ClothSheet {
@@ -36,22 +42,20 @@ impl ClothSheet {
     /// 解析低 **0.63%**）。物理上各面元的力是**同时**作用的，所以这里先按**子步开始时的**顶点
     /// 速度把力全算出来（用 `v0` 快照），再一次性加到 `vel` 上。
     ///
-    /// ⚠️ **`v0` 是局部 `Vec`（每子步一次分配）**：`ClothSheet` 的成员棘轮**已顶格 24/24**
-    /// （见 `aero` 字段的注），放不下这个 scratch。代价只在 `enabled` 时发生（默认关 ⇒ 零成本）；
-    /// **下一片腾出成员时应把它并进某个组结构**（本仓反"热路径分配"的惯例）。
+    /// ⚠️ **快照存在 `aero.v0` 里复用**（**热路径零分配**；首版用局部 `vel.clone()` 是登记过的
+    /// 欠账，2026-09-29 已还 —— 见 `ClothAero::v0` 的注）。
     pub(crate) fn apply_aero(&mut self, h: f32) {
         let cfg = self.aero.cfg;
         let wind = Vec3::new(cfg.wind[0], cfg.wind[1], cfg.wind[2]);
-        let v0 = self.vel.clone();
+        self.aero.v0.clone_from(&self.vel); // `clone_from` **复用已分配容量** ⇒ 零分配
         for t in 0..self.tris.len() {
-            let [ia, ib, ic] = self.tris[t];
-            let (a, b, c) = (ia as usize, ib as usize, ic as usize);
+            let [a, b, c] = self.tris[t].map(|x| x as usize);
             let (pa, pb, pc) = (self.pos[a], self.pos[b], self.pos[c]);
             let area = (pb - pa).cross(pc - pa).length() * 0.5;
             if area <= 0.0 {
                 continue; // 退化面：法向无定义
             }
-            let v_c = (v0[a] + v0[b] + v0[c]) * (1.0 / 3.0);
+            let v_c = (self.aero.v0[a] + self.aero.v0[b] + self.aero.v0[c]) * (1.0 / 3.0);
             let f3 = face_force(wind - v_c, area, &cfg) * (1.0 / 3.0);
             for i in [a, b, c] {
                 if self.inv_mass[i] == 0.0 {

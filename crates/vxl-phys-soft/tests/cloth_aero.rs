@@ -56,6 +56,7 @@ fn free_sheet(wind: [f32; 3], enabled: bool) -> ClothSheet {
             wind,
             ..AeroConfig::default()
         },
+        ..ClothAero::default()
     };
     s
 }
@@ -133,23 +134,11 @@ fn in_plane_wind_pushes_along_the_wind_not_the_normal() {
 }
 
 /// ③ **零风金丝雀**：`wind = 0` **且无运动**（无重力）⇒ 与"气动关闭"**逐位相同**。
-///
-/// ⚠️ **"零风 ≠ 无气动力"**（本判据首版就栽在这条上，留档）：相对风是 `u = w − v` ——
-/// **一旦有运动，`u = −v ≠ 0`**，这正是**气动阻力**的本体（下落中的片会自己吃到阻力）。
-/// 所以金丝雀必须把"无运动"一起钉住（重力 = 0），否则测到的不是"口径为 0"，而是"阻力在起作用"。
 #[test]
 fn zero_wind_at_rest_is_bitwise_identical_to_aero_off() {
-    let still = Vec3::ZERO; // 无重力 ⇒ 无运动 ⇒ `u ≡ 0`
-    let mut on = free_sheet([0.0; 3], true);
-    let mut off = free_sheet([0.0; 3], false);
-    for _ in 0..120 {
-        on.step(DT, still, &NoProviders, 0, &[]);
-        off.step(DT, still, &NoProviders, 0, &[]);
-    }
-    let pos_same = on.pos.iter().zip(&off.pos).all(|(a, b)| bits_eq(*a, *b));
-    let vel_same = on.vel.iter().zip(&off.vel).all(|(a, b)| bits_eq(*a, *b));
+    let (pos_same, vel_same, y) = still_pair_bits(120);
     println!(
-        "[判据③零风金丝雀] 120 tick 逐位比较：pos {} / vel {}（中心 y = {:+.6}）",
+        "[判据③零风金丝雀] 120 tick 逐位比较：pos {} / vel {}（中心 y = {y:+.6}）",
         if pos_same {
             "相同 ✅"
         } else {
@@ -159,14 +148,32 @@ fn zero_wind_at_rest_is_bitwise_identical_to_aero_off() {
             "相同 ✅"
         } else {
             "**不同 ❌**"
-        },
-        on.pos[4].y
+        }
     );
     assert!(
         pos_same && vel_same,
         "零风该与气动关闭**逐位相同**（pos_same={pos_same} / vel_same={vel_same}）——\
          红了说明 `face_force(0)` 不再恰好是 0，或 `enabled` 短路漏了"
     );
+}
+
+/// 同一场景（**零风 + 无重力** ⇒ 无运动）跑 `ticks` 次：返回 (位置逐位同, 速度逐位同, 中心 y)。
+///
+/// ⚠️ **"零风 ≠ 无气动力"**（本判据首版就栽在这条上，留档）：相对风是 `u = w − v` ——
+/// **一旦有运动，`u = −v ≠ 0`**，这正是**气动阻力**的本体（下落中的片会自己吃到阻力）。
+/// 所以金丝雀必须把"**无运动**"一起钉住（重力 = 0），否则测到的不是"口径为 0"，而是"阻力在起作用"。
+fn still_pair_bits(ticks: usize) -> (bool, bool, f32) {
+    let (mut on, mut off) = (free_sheet([0.0; 3], true), free_sheet([0.0; 3], false));
+    for _ in 0..ticks {
+        on.step(DT, Vec3::ZERO, &NoProviders, 0, &[]);
+        off.step(DT, Vec3::ZERO, &NoProviders, 0, &[]);
+    }
+    let bits = |a: &[Vec3], b: &[Vec3]| a.iter().zip(b).all(|(x, y)| bits_eq(*x, *y));
+    (
+        bits(&on.pos, &off.pos),
+        bits(&on.vel, &off.vel),
+        on.pos[4].y,
+    )
 }
 
 /// ④ **长窗读数**：自由片在风里加速；速度**有界**（< 风速）且**单调增**（`u = w − v` 衰减）。
@@ -195,3 +202,6 @@ fn sheet_accelerates_toward_the_wind_speed() {
     );
     assert!(monotone, "速度该**单调增**（阻力式只朝风速逼近，不该回头）");
 }
+
+// ⑤（**欠账已还**：`aero.v0` 是不是复用缓冲）搬到 `cloth_aero_scratch.rs` —— 那条判据测的是
+// **实现细节**，与"气动力学对不对"是两件事；另立文件也顺带避开 god 门对本文件"只准减"的行数棘轮。

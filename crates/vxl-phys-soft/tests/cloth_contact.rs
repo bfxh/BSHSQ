@@ -68,19 +68,19 @@ fn cloth_rests_on_flat_floor() {
     let strain = sheet.max_strain();
     println!(
         "[判据①平地] 粒子中心 y ∈ [{lo:+.4}, {hi:+.4}]（球半径 {}；应 ≈ 半径高度）最大应变 = {strain:.4}",
-        sheet.radius
+        sheet.contact.radius
     );
     assert!(
         sheet.pos.iter().all(|p| p.is_finite()),
         "平地落定出现非有限值"
     );
     assert!(
-        lo > sheet.radius - 0.05,
+        lo > sheet.contact.radius - 0.05,
         "粒子最低点 {lo:.4} 深穿地板（球中心应 ≈ 半径高度 {}）",
-        sheet.radius
+        sheet.contact.radius
     );
     assert!(
-        hi < sheet.radius + 0.1,
+        hi < sheet.contact.radius + 0.1,
         "粒子最高点 {hi:.4} 仍悬空 ⇒ 没落定（或接触没建上）"
     );
     assert!(
@@ -97,7 +97,7 @@ fn slope_drift(theta_deg: f32, ticks: usize) -> f32 {
     let k = theta_deg.to_radians().tan();
     let ny = 1.0 / (1.0 + k * k).sqrt(); // 坡面法线的 y 分量（朝上）
     for p in &mut sheet.pos {
-        p.y = -k * p.x + ny * sheet.radius;
+        p.y = -k * p.x + ny * sheet.contact.radius;
     }
     let floor = slope_mesh(theta_deg);
     let x0: f32 = sheet.pos.iter().map(|p| p.x).sum::<f32>() / sheet.pos.len() as f32;

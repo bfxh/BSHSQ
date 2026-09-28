@@ -11,7 +11,7 @@
 //!   §8.4.20 三条使能条件一条不缺。**唯一偏离**见 `body_contacts_dynamic` 的注。
 use crate::cloth::ClothSheet;
 use crate::rigid::RigidProxy;
-use vxl_phys_core::Vec3;
+use vxl_phys_core::{Quat, Shape, Vec3};
 
 /// **一次体接触的收集项**（切片 2b-ii；与 `rope::BodyHit` 同款）：
 /// 先收全部命中、按**几何序**排、再施加 ⇒ 施加顺序是**几何的函数**。
@@ -86,6 +86,39 @@ impl ClothSheet {
         }
     }
 
+    /// **本粒子对代理的穿透查询**（把 `contact.radius` 的取用收在一处）：语义/参数序与
+    /// `rigid::shape_penetration` **逐字相同**，只是把半径从 `self` 里取 —— 顺带让两个
+    /// `body_contacts_*` 的调用行不再被 rustfmt 折成 7 行（`self.contact.radius` 变长所致）。
+    fn pen(&self, shape: &Shape, pos: Vec3, rot: Quat, p: Vec3) -> Option<(Vec3, f32, Vec3)> {
+        crate::rigid::shape_penetration(shape, pos, rot, p, self.contact.radius)
+    }
+
+    /// **切向库仑锥**（从 `apply_body_hit` 抽出：那里是全目录最长函数）。**冲量口径** `μ·w_p·λ`：
+    /// 库仑锥本是 `|J_t| ≤ μ·J_n`，而本接触**实际**施加的法向冲量 ∝ `λ`、**不是**几何穿透量
+    /// `depth`（`μ·depth` 是偏大的预算，rope 实测**偏大不是承重而是棘轮源** ⇒ 轻载巡航逃逸）。
+    /// 滑移量取**相对体**的（`v_point` 含 `ω × r`，§8.4.19/§8.4.30 同一口径）。
+    fn apply_body_friction(
+        &mut self,
+        i: usize,
+        n: Vec3,
+        v_point: Vec3,
+        w_p: f32,
+        lam: f32,
+        h: f32,
+    ) {
+        if self.contact.friction <= 0.0 {
+            return;
+        }
+        let dp = self.pos[i] - self.prev[i] - v_point * h;
+        let t = dp - n * dp.dot(n);
+        let slip = t.length();
+        if slip > 0.0 {
+            let budget = self.contact.friction * (w_p * lam);
+            let removed = if slip < budget { slip } else { budget };
+            self.pos[i] -= t * (removed / slip);
+        }
+    }
+
     /// **静态/睡眠代理 = 墙**（切片 2b-i）：逐粒子解析穿透（`rigid::shape_penetration`，
     /// Sphere/Box/Capsule 受理）+ 法向推出 + 库仑锥（滑移量取**相对体**的：`dp − v_body·h`
     /// —— 提供者是静态地形这一项恒为零，体在动时布才不会被"粘"在原地；与 rope 同款口径）。
@@ -95,21 +128,19 @@ impl ClothSheet {
             if self.inv_mass[i] == 0.0 {
                 continue;
             }
-            let Some((n, depth, _)) =
-                crate::rigid::shape_penetration(&b.shape, b.pos, b.rot, self.pos[i], self.radius)
-            else {
+            let Some((n, depth, _)) = self.pen(&b.shape, b.pos, b.rot, self.pos[i]) else {
                 continue;
             };
             if depth <= 0.0 {
                 continue; // 带内预判不推（无恢复系数的位置口径）
             }
             self.pos[i] += n * depth;
-            if self.friction > 0.0 {
+            if self.contact.friction > 0.0 {
                 let dp = self.pos[i] - self.prev[i] - b.linvel * h;
                 let t = dp - n * dp.dot(n);
                 let slip = t.length();
                 if slip > 0.0 {
-                    let budget = self.friction * depth;
+                    let budget = self.contact.friction * depth;
                     let removed = if slip < budget { slip } else { budget };
                     self.pos[i] -= t * (removed / slip);
                 }
@@ -151,9 +182,7 @@ impl ClothSheet {
             if self.inv_mass[i] == 0.0 {
                 continue;
             }
-            let Some((n, depth, q)) =
-                crate::rigid::shape_penetration(&b.shape, vpos, b.rot, self.pos[i], self.radius)
-            else {
+            let Some((n, depth, q)) = self.pen(&b.shape, vpos, b.rot, self.pos[i]) else {
                 continue;
             };
             if depth <= 0.0 {
@@ -235,19 +264,7 @@ impl ClothSheet {
         let before = self.pos[i];
         // 法向推出（位移 = `w_p·λ`）。
         self.pos[i] += n * (w_p * lam);
-        // 切向：库仑锥（锥内整段吃掉 = 静摩擦；超出按动摩擦滑）。**冲量口径** `μ·w_p·λ`：
-        // 库仑锥本是 `|J_t| ≤ μ·J_n`，而本接触**实际**施加的法向冲量 ∝ `λ`、**不是**几何穿透量
-        // `depth`（`μ·depth` 是偏大的预算，rope 实测**偏大不是承重而是棘轮源** ⇒ 轻载巡航逃逸）。
-        if self.friction > 0.0 {
-            let dp = self.pos[i] - self.prev[i] - v_point * h;
-            let t = dp - n * dp.dot(n);
-            let slip = t.length();
-            if slip > 0.0 {
-                let budget = self.friction * (w_p * lam);
-                let removed = if slip < budget { slip } else { budget };
-                self.pos[i] -= t * (removed / slip);
-            }
-        }
+        self.apply_body_friction(i, n, v_point, w_p, lam, h);
         // **反作用两腿**（§8.4.20 条件①③）：粒子的动量变化取反 = 体所受冲量。
         // **角反作用停用**（条件②）：接触模型看不见转动（`disp` 只跟平移、`crossed_face` 用冻结
         // 朝向）⇒ 回填角动量后体转起来的运动会完全落在模型之外（rope 实测 1 kg 薄盒 `|ω|` 一 tick

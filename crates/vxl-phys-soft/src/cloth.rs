@@ -70,6 +70,32 @@ pub(crate) fn sphere_contacts_project(
     }
 }
 
+/// **世界接触的调参组**（`radius`/`friction`/`skin` 三个散字段收成一个）。
+///
+/// **为什么并组**：`ClothSheet` 受 god 门**成员棘轮**（2026-09-29 顶格 24/24）—— 气动那片要加一个
+/// **复用暂存**（还掉"热路径分配"那笔欠账）⇒ 先腾位。三者的共同点本来就成立：都是"**世界接触**
+/// （提供者/刚体）的旋钮"，与自碰撞（`SelfContacts`）、气动（`ClothAero`）的参数分属三个域。
+#[derive(Clone, Copy, Debug)]
+pub struct ContactTuning {
+    /// 粒子**球采样半径**（提供者/刚体接触用；`< 0` = **关世界接触**。默认 = 壳厚一半）。
+    pub radius: f32,
+    /// 库仑锥摩擦系数（`budget = μ·w_p·λ`；默认 0.5，与 rope 一致）。
+    pub friction: f32,
+    /// 接触带（预测接触用；默认 0.02）。
+    pub skin: f32,
+}
+
+impl ContactTuning {
+    /// 布片默认档：`radius` = 壳厚一半、`friction` = 0.5（与 rope 一致）、`skin` = 0.02。
+    pub fn new(radius: f32) -> Self {
+        Self {
+            radius,
+            friction: 0.5,
+            skin: 0.02,
+        }
+    }
+}
+
 /// **布片**（XPBD 三角网）：粒子 + 唯一边距离约束 + 逐子步投影。
 #[derive(Clone)]
 pub struct ClothSheet {
@@ -100,12 +126,9 @@ pub struct ClothSheet {
     pub iterations: u32,
     /// 速度回写阻尼（1.0 = 无阻尼；同 [`crate::rope::Rope::damping`] 口径）。
     pub damping: f32,
-    /// 粒子**球采样半径**（提供者接触用；`< 0` = 关接触。默认 = 壳厚一半）。
-    pub radius: f32,
-    /// 库仑锥摩擦系数（`budget = μ·depth`；默认 0.5，与 rope 一致）。
-    pub friction: f32,
-    /// 接触带（预测接触用；默认 0.02）。
-    pub skin: f32,
+    /// **世界接触的调参组**（原为 `radius`/`friction`/`skin` 三个散字段 —— 2026-09-29 并组腾位，
+    /// 见 [`ContactTuning`]）。
+    pub contact: ContactTuning,
     pub(crate) buf: Vec<InteropContact>,
     /// **粒子↔刚体耦合状态**（反作用两腿 `dv`/`dx`；与 `step` 的 `bodies` 同序）。
     pub body: BodyCoupling,
@@ -161,9 +184,7 @@ impl ClothSheet {
             substeps: 8,
             iterations: 1,
             damping: 1.0,
-            radius: t * 0.5,
-            friction: 0.5,
-            skin: 0.02,
+            contact: ContactTuning::new(t * 0.5),
             buf: Vec::new(),
             body: BodyCoupling::default(),
             self_contacts,
@@ -338,7 +359,7 @@ impl ClothSheet {
         if self.self_contacts.cfg.enabled {
             self.project_self_contacts();
         }
-        if self.radius < 0.0 {
+        if self.contact.radius < 0.0 {
             return;
         }
         if provider_count > 0 {
@@ -346,9 +367,7 @@ impl ClothSheet {
                 pos,
                 prev,
                 inv_mass,
-                radius,
-                skin,
-                friction,
+                contact,
                 buf,
                 ..
             } = self;
@@ -356,9 +375,9 @@ impl ClothSheet {
                 pos,
                 prev,
                 inv_mass,
-                *radius,
-                *skin,
-                *friction,
+                contact.radius,
+                contact.skin,
+                contact.friction,
                 providers,
                 provider_count,
                 buf,

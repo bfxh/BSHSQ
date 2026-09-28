@@ -71,7 +71,7 @@ fn cloth_rests_on_static_box() {
     let strain = sheet.max_strain();
     println!(
         "[判据①盒顶] 粒子 y ∈ [{lo:+.4}, {hi:+.4}]（盒顶 1.0 + 球半径 {}）；应变 = {strain:.4}",
-        sheet.radius
+        sheet.contact.radius
     );
     assert!(
         sheet.pos.iter().all(|p| p.is_finite()),
