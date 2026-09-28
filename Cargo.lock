@@ -1129,6 +1129,7 @@ dependencies = [
 name = "vxl-phys-soft"
 version = "0.1.0"
 dependencies = [
+ "vxl-phys-aero",
  "vxl-phys-core",
  "vxl-phys-terrain",
 ]

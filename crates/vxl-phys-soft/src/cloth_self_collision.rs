@@ -46,25 +46,21 @@ pub struct SelfContacts {
 }
 
 impl SelfContacts {
-    /// 默认**关**；`particle_radius` 由 `ClothSheet::new` 按壳厚给（见字段注）。
-    pub(crate) fn new(particle_radius: f32) -> Self {
+    /// 默认**关**；`particle_radius` 由 `ClothSheet::new` 按壳厚给（见字段注），
+    /// `forbidden` 一次填好（结构/剪切 + 弯曲；排序去重 ⇒ 二分）。
+    pub(crate) fn new(particle_radius: f32, cons: &[[u32; 2]], bend: &[[u32; 2]]) -> Self {
+        let mut f: Vec<[u32; 2]> = cons.iter().chain(bend.iter()).copied().collect();
+        f.sort_unstable();
+        f.dedup();
         Self {
             cfg: SelfCollision {
                 enabled: false,
                 particle_radius,
             },
-            forbidden: Vec::new(),
+            forbidden: f,
             cells: BTreeMap::new(),
             pairs: 0,
         }
-    }
-
-    /// 登记"不许自碰撞解算"的对（结构/剪切 + 弯曲；排序去重 ⇒ 二分）。
-    pub(crate) fn set_forbidden(&mut self, cons: &[[u32; 2]], bend: &[[u32; 2]]) {
-        let mut f: Vec<[u32; 2]> = cons.iter().chain(bend.iter()).copied().collect();
-        f.sort_unstable();
-        f.dedup();
-        self.forbidden = f;
     }
 
     /// 该对是否**不可解算**（网格邻居；判据也用同一份集合）。

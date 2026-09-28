@@ -13,6 +13,7 @@
 //! **边界（写清，不是漏）**：无自碰撞、无撕裂、无塑性、无气动消费（`vxl-phys-aero` 的
 //! `face_force` 已备，接线属后续切片）；接触几何走"最近面"（`rigid::shape_penetration`），
 //! **没有** rope 那套"入口面"缓存 —— 布片命中点多、面法线不像绳那样在底面↔侧面↔顶面之间翻转。
+use crate::cloth_aero::ClothAero;
 use crate::cloth_coupling::BodyCoupling;
 use crate::cloth_self_collision::SelfContacts;
 use crate::params::Stiffness;
@@ -110,6 +111,11 @@ pub struct ClothSheet {
     pub body: BodyCoupling,
     /// **自碰撞状态**（空间哈希 + 禁止对；`cfg.enabled` 默认 `false` ⇒ 零成本）。
     pub self_contacts: SelfContacts,
+    /// **气动输入**（切片 T4 收尾；`enabled` 默认 `false` ⇒ 零成本短路）。
+    ///
+    /// ⚠️ **成员棘轮已顶格 24/24**（`god.gate.json` 的 `max_type_members`）⇒
+    /// **下一片再加状态必须先并组**（先例：`BodyCoupling` / `SelfContacts` / `SoftDomain`）。
+    pub aero: ClothAero,
 }
 
 impl ClothSheet {
@@ -128,22 +134,15 @@ impl ClothSheet {
         // 唯一边（结构+剪切）、弯曲二环对、薄壳均分质量 —— 三块各自抽成纯函数
         // （`new` 原 100 行，顶 god 门最长函数棘轮；2026-09-29 切片 T3 抽出的）。
         let cons = unique_edges(&tris);
-        let rest = cons
-            .iter()
-            .map(|[a, b]| (points[*b as usize] - points[*a as usize]).length())
-            .collect();
+        let rest = pair_lengths(&cons, &points);
         let bend = bend_pairs(&cons, n);
-        let bend_rest = bend
-            .iter()
-            .map(|[a, b]| (points[*b as usize] - points[*a as usize]).length())
-            .collect();
+        let bend_rest = pair_lengths(&bend, &points);
         let mass = shell_mass(&tris, &points, rho, t);
         let inv_mass = mass
             .iter()
             .map(|&m| if m > 0.0 { 1.0 / m } else { 0.0 })
             .collect();
-        let mut self_contacts = SelfContacts::new(t * 0.5);
-        self_contacts.set_forbidden(&cons, &bend);
+        let self_contacts = SelfContacts::new(t * 0.5, &cons, &bend);
         Self {
             pos: points,
             prev: Vec::new(),
@@ -168,6 +167,7 @@ impl ClothSheet {
             buf: Vec::new(),
             body: BodyCoupling::default(),
             self_contacts,
+            aero: ClothAero::default(),
         }
     }
 
@@ -239,7 +239,11 @@ impl ClothSheet {
     }
 
     /// ① 预测（钉住粒子原地不动、速度清零；与 rope 同款）。
+    /// **气动**（`enabled` 才跑）与重力**同段位**（都在预测阶段、逐子步）——见 `apply_aero`。
     fn predict(&mut self, h: f32, gravity: Vec3) {
+        if self.aero.enabled {
+            self.apply_aero(h);
+        }
         for i in 0..self.pos.len() {
             if self.inv_mass[i] == 0.0 {
                 self.prev[i] = self.pos[i];
@@ -286,27 +290,36 @@ impl ClothSheet {
                 self.pos[i] -= dir * (self.inv_mass[i] * dl);
                 self.pos[j] += dir * (self.inv_mass[j] * dl);
             }
-            for (k, [i, j]) in self.bend.iter().enumerate() {
-                if !a_tilde_bend.is_finite() {
-                    break; // **关弯曲**（`bend_compliance` 非有限）：`inf/inf = NaN` ⇒ 必须显式短路
-                }
-                let (i, j) = (*i as usize, *j as usize);
-                let w = self.inv_mass[i] + self.inv_mass[j];
-                if w <= 0.0 {
-                    continue;
-                }
-                let d = self.pos[j] - self.pos[i];
-                let len = d.length();
-                if len < 1e-9 {
-                    continue;
-                }
-                let dir = d * (1.0 / len);
-                let c = len - self.bend_rest[k];
-                let dl = (-c - a_tilde_bend * self.bend_lambda[k]) / (w + a_tilde_bend);
-                self.bend_lambda[k] += dl;
-                self.pos[i] -= dir * (self.inv_mass[i] * dl);
-                self.pos[j] += dir * (self.inv_mass[j] * dl);
+            self.project_bend(a_tilde_bend);
+        }
+    }
+
+    /// **弯曲对的距离投影**（一遍；从 `project_constraints` 抽出 —— 那里是全文件最长函数，
+    /// god 门"合法交换"要求：加成员/加行数时**最长函数必须严格下降**）。
+    ///
+    /// `a_tilde_bend` **非有限**（`bend_compliance = ∞` = 关弯曲）⇒ **显式短路**：
+    /// `inf/inf = NaN` 会毒化整场（弯曲金丝雀判据实测抓到过）。
+    fn project_bend(&mut self, a_tilde_bend: f32) {
+        if !a_tilde_bend.is_finite() {
+            return;
+        }
+        for (k, [i, j]) in self.bend.iter().enumerate() {
+            let (i, j) = (*i as usize, *j as usize);
+            let w = self.inv_mass[i] + self.inv_mass[j];
+            if w <= 0.0 {
+                continue;
             }
+            let d = self.pos[j] - self.pos[i];
+            let len = d.length();
+            if len < 1e-9 {
+                continue;
+            }
+            let dir = d * (1.0 / len);
+            let c = len - self.bend_rest[k];
+            let dl = (-c - a_tilde_bend * self.bend_lambda[k]) / (w + a_tilde_bend);
+            self.bend_lambda[k] += dl;
+            self.pos[i] -= dir * (self.inv_mass[i] * dl);
+            self.pos[j] += dir * (self.inv_mass[j] * dl);
         }
     }
 
@@ -431,6 +444,14 @@ fn bend_pairs(cons: &[[u32; 2]], n: usize) -> Vec<[u32; 2]> {
         }
     }
     bend
+}
+
+/// **各对的注册长度**（`rest = 当前长度` ⇒ 注册态即零应变态）。
+fn pair_lengths(pairs: &[[u32; 2]], points: &[Vec3]) -> Vec<f32> {
+    pairs
+        .iter()
+        .map(|[a, b]| (points[*b as usize] - points[*a as usize]).length())
+        .collect()
 }
 
 /// **薄壳均分质量**：每三角面积 × `ρt/3` 记到三个角上（与窄相 `MeshStore::shell_props` 同口径 ⇒

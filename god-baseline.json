@@ -640,9 +640,14 @@
   "max_type_members": 3
  },
  "crates/vxl-phys-soft/src/cloth.rs": {
-  "file_lines": 454,
-  "max_fn_lines": 55,
-  "max_type_members": 23
+  "file_lines": 475,
+  "max_fn_lines": 49,
+  "max_type_members": 24
+ },
+ "crates/vxl-phys-soft/src/cloth_aero.rs": {
+  "file_lines": 65,
+  "max_fn_lines": 22,
+  "max_type_members": 2
  },
  "crates/vxl-phys-soft/src/cloth_coupling.rs": {
   "file_lines": 261,
@@ -650,7 +655,7 @@
   "max_type_members": 5
  },
  "crates/vxl-phys-soft/src/cloth_self_collision.rs": {
-  "file_lines": 171,
+  "file_lines": 167,
   "max_fn_lines": 66,
   "max_type_members": 4
  },
@@ -677,6 +682,11 @@
  "crates/vxl-phys-soft/tests/angular_reaction_holds.rs": {
   "file_lines": 115,
   "max_fn_lines": 57,
+  "max_type_members": 0
+ },
+ "crates/vxl-phys-soft/tests/cloth_aero.rs": {
+  "file_lines": 198,
+  "max_fn_lines": 30,
   "max_type_members": 0
  },
  "crates/vxl-phys-soft/tests/cloth_bending.rs": {

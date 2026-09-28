@@ -7,6 +7,11 @@ description = "vxl_phys 软体/布料（XPBD）：绳索最小闭环已落地，
 
 [dependencies]
 vxl-phys-core = { workspace = true }
+# 气动域（切片 T4 收尾）：布片消费 `face_force`（Bridson 线化面元力）。
+# ⚠️ 这是软体 crate 的**第二条仓内边**（此前只挂 core —— `rigid.rs` 自带球-形状查询就是为了
+# 不引窄相）；本边是计划明确指定的（"气动放 `vxl-phys-aero`，把 28 行配置变成消费方"），
+# 且 `vxl-phys-aero` 自身只挂 core ⇒ 不产生新的外部依赖（`deps_lock` 只管外部）。
+vxl-phys-aero = { workspace = true }
 
 [dev-dependencies]
 # 判据要落在**真实三角网地形**上（`TriMesh` 自带 `ProviderColliders` 实现）——
