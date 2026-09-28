@@ -640,9 +640,9 @@
   "max_type_members": 3
  },
  "crates/vxl-phys-soft/src/cloth.rs": {
-  "file_lines": 344,
-  "max_fn_lines": 119,
-  "max_type_members": 17
+  "file_lines": 425,
+  "max_fn_lines": 149,
+  "max_type_members": 21
  },
  "crates/vxl-phys-soft/src/lib.rs": {
   "file_lines": 25,
@@ -667,6 +667,11 @@
  "crates/vxl-phys-soft/tests/angular_reaction_holds.rs": {
   "file_lines": 115,
   "max_fn_lines": 57,
+  "max_type_members": 0
+ },
+ "crates/vxl-phys-soft/tests/cloth_bending.rs": {
+  "file_lines": 109,
+  "max_fn_lines": 35,
   "max_type_members": 0
  },
  "crates/vxl-phys-soft/tests/cloth_body.rs": {

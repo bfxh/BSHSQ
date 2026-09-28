@@ -80,6 +80,12 @@ pub struct ClothSheet {
     pub(crate) cons: Vec<[u32; 2]>,
     pub(crate) rest: Vec<f32>,
     pub(crate) lambda: Vec<f32>,
+    /// **弯曲约束**（二环对；`[min, max]` 有序，插入序见 `new`）。
+    pub(crate) bend: Vec<[u32; 2]>,
+    pub(crate) bend_rest: Vec<f32>,
+    pub(crate) bend_lambda: Vec<f32>,
+    /// 弯曲 compliance（默认 `Soft` 档；`f32::INFINITY` ⇒ 关弯曲）。
+    pub bend_compliance: f32,
     /// 距离约束 compliance（m/N；`Stiffness::alpha`）。
     pub compliance: f32,
     /// 每 tick 子步数（判据收敛旋钮）。
@@ -126,6 +132,37 @@ impl ClothSheet {
             .iter()
             .map(|[a, b]| (points[*b as usize] - points[*a as usize]).length())
             .collect();
+        // **弯曲约束**（规格 `ClothConstraints.bending` 的落点）：取**二环对**（邻居的邻居，
+        // 排除直连与自身）——四边形网格上即"隔一格"的跨格距离约束，是最省的弯曲代理
+        // （与 XPBD 布料同族做法）。默认 compliance = `Soft` 档（弯曲通常比拉伸软一个量级）；
+        // 置 `f32::INFINITY` ⇒ 关弯曲。插入序 = i 升序 → 邻居表序 → k 升序（确定性）。
+        let mut adj: Vec<Vec<u32>> = vec![Vec::new(); n];
+        for [a, b] in &cons {
+            adj[*a as usize].push(*b);
+            adj[*b as usize].push(*a);
+        }
+        for v in adj.iter_mut() {
+            v.sort_unstable();
+        }
+        let mut bend: Vec<[u32; 2]> = Vec::new();
+        let mut seen2: HashSet<[u32; 2]> = HashSet::new();
+        for i in 0..n as u32 {
+            for &j in &adj[i as usize] {
+                for &k in &adj[j as usize] {
+                    if k == i || adj[i as usize].binary_search(&k).is_ok() {
+                        continue; // 自身 / 直连（直连已由结构+剪切覆盖）
+                    }
+                    let key = if i < k { [i, k] } else { [k, i] };
+                    if seen2.insert(key) {
+                        bend.push(key);
+                    }
+                }
+            }
+        }
+        let bend_rest = bend
+            .iter()
+            .map(|[a, b]| (points[*b as usize] - points[*a as usize]).length())
+            .collect();
         // 薄壳均分质量：每三角面积 ×ρt/3 记到三个角上。
         let mut mass = vec![0.0f32; n];
         for tri in &tris {
@@ -155,6 +192,10 @@ impl ClothSheet {
             rest,
             lambda: Vec::new(),
             compliance: stiffness.alpha(),
+            bend,
+            bend_rest,
+            bend_lambda: Vec::new(),
+            bend_compliance: Stiffness::Soft.alpha(),
             substeps: 8,
             iterations: 1,
             damping: 1.0,
@@ -203,6 +244,9 @@ impl ClothSheet {
         if self.lambda.len() != self.cons.len() {
             self.lambda = vec![0.0; self.cons.len()];
         }
+        if self.bend_lambda.len() != self.bend.len() {
+            self.bend_lambda = vec![0.0; self.bend.len()];
+        }
         let h = dt / self.substeps.max(1) as f32;
         for _ in 0..self.substeps.max(1) {
             self.substep(h, gravity, providers, provider_count, bodies);
@@ -231,10 +275,19 @@ impl ClothSheet {
             self.pos[i] += self.vel[i] * h;
         }
         // ② 距离约束（Gauss-Seidel；λ 每子步清零、子步内按迭代累加 = XPBD 口径）。
+        //    **结构/剪切**（唯一边，`compliance`）+ **弯曲**（二环对，`bend_compliance`）——
+        //    两组同段位求解：弯曲列在后（先满足强约束再让软约束让位，与"硬→软"的
+        //    Gauss-Seidel 顺序惯例一致）。`bend_compliance = ∞` ⇒ 该组自然退化为不动。
         for l in self.lambda.iter_mut() {
             *l = 0.0;
         }
+        for l in self.bend_lambda.iter_mut() {
+            *l = 0.0;
+        }
         let a_tilde = self.compliance / (h * h);
+        // **关弯曲**（非有限 compliance）⇒ `a_tilde_bend = inf` ⇒ 下方显式短路（`inf/inf = NaN`，
+        // 金丝雀判据实测抓到过：NaN 会毒化整场）。
+        let a_tilde_bend = self.bend_compliance / (h * h);
         for _ in 0..self.iterations.max(1) {
             for (k, [i, j]) in self.cons.iter().enumerate() {
                 let (i, j) = (*i as usize, *j as usize);
@@ -251,6 +304,27 @@ impl ClothSheet {
                 let c = len - self.rest[k];
                 let dl = (-c - a_tilde * self.lambda[k]) / (w + a_tilde);
                 self.lambda[k] += dl;
+                self.pos[i] -= dir * (self.inv_mass[i] * dl);
+                self.pos[j] += dir * (self.inv_mass[j] * dl);
+            }
+            for (k, [i, j]) in self.bend.iter().enumerate() {
+                if !a_tilde_bend.is_finite() {
+                    break; // **关弯曲**（`bend_compliance` 非有限）：`inf/inf = NaN` ⇒ 必须显式短路
+                }
+                let (i, j) = (*i as usize, *j as usize);
+                let w = self.inv_mass[i] + self.inv_mass[j];
+                if w <= 0.0 {
+                    continue;
+                }
+                let d = self.pos[j] - self.pos[i];
+                let len = d.length();
+                if len < 1e-9 {
+                    continue;
+                }
+                let dir = d * (1.0 / len);
+                let c = len - self.bend_rest[k];
+                let dl = (-c - a_tilde_bend * self.bend_lambda[k]) / (w + a_tilde_bend);
+                self.bend_lambda[k] += dl;
                 self.pos[i] -= dir * (self.inv_mass[i] * dl);
                 self.pos[j] += dir * (self.inv_mass[j] * dl);
             }
@@ -331,6 +405,8 @@ impl ClothSheet {
     }
 
     /// 当前**最大边应变** `max |len − rest| / rest`（判据仪器：收敛/悬垂判据用）。
+    /// **只统计结构/剪切**（唯一边）——弯曲约束按设计更软、应变天然更大，混进来会让
+    /// 既有的收敛判据失去分辨力（两条曲线的口径不同）。
     pub fn max_strain(&self) -> f32 {
         let mut worst = 0.0f32;
         for (k, [a, b]) in self.cons.iter().enumerate() {
@@ -339,5 +415,10 @@ impl ClothSheet {
             worst = worst.max(s);
         }
         worst
+    }
+
+    /// 弯曲对的条数（判据/诊断用）。
+    pub fn bend_count(&self) -> usize {
+        self.bend.len()
     }
 }
