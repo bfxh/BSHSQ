@@ -166,7 +166,7 @@ pub(crate) fn make_params(device: &wgpu::Device, cfg: &PacketCfg, n: u32, total:
             n,
             total,
             cfg.cap,
-            0,
+            n, // 末两字段 = 两类格表的 `n_fluid`/`class_lo`；**本档单类** ⇒ 类 0 覆盖全量、写 `n`（写 0 ⇒ `cls_hi=0` 空转；写 `cfg.n_fluid` ⇒ 边界粒子不入格）
             0,
         ] {
             b.extend_from_slice(&x.to_le_bytes());
