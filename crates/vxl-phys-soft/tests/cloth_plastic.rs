@@ -14,6 +14,8 @@
 //!    关塑性 / `rate = 0` 两个对照都**该撕**（次序 + 机制各一条证据）；
 //! ⑤ **默认 = 显式关（逐位）** + 动态场景 `rest` 逐位不变（金丝雀）；行为腿：拉过阈再
 //!    卸载 ⇒ **永久变长**，关塑性则弹回原长。
+//! ⑥⑦ **弯曲对（二环对）的子开关**（`Plastic::bend`，默认关）：⑥ 关 ⇒ 弯曲 `rest` 逐位不变；
+//!    ⑦ 开 ⇒ 压缩装置的**永久收缩兑现**，关 ⇒ 被弯曲 `rest` 拉住（上一片登记的边界，量化 1.24×）。
 use vxl_phys_core::interop::NoProviders;
 use vxl_phys_core::Vec3;
 use vxl_phys_soft::{cloth::plastic::Plastic, ClothSheet, Stiffness};
@@ -299,5 +301,88 @@ fn released_sheet_stays_permanently_longer() {
     assert!(
         on > off * 1.3,
         "**行为**：解钉静置后仍该更长（{on:.4} vs 对照 {off:.4}）——永久变形要看得见"
+    );
+}
+
+/// **面内均匀缩放**（x 与 z 同比例 ⇒ 结构边与弯曲二环对**同应变**）——弯曲对塑性的装置。
+fn pinned_scaled(scale: f32) -> ClothSheet {
+    let (pts, tris) = plate(N, SIZE);
+    let mut s = ClothSheet::new(pts, tris, 1000.0, 0.01, Stiffness::Hard);
+    for i in 0..s.pos.len() {
+        s.set_pinned(i, true);
+    }
+    for i in 0..s.pos.len() {
+        s.pos[i].x *= scale;
+        s.pos[i].z *= scale;
+    }
+    s
+}
+
+/// 判据⑥（弯曲对塑性）：**子开关默认关 ⇒ 二环对 `rest` 逐位不变**（结构边同时确实在流
+/// ⇒ 不是"整场都没动"）。
+#[test]
+fn bend_plasticity_off_keeps_bend_rest_bitwise() {
+    let mut s = pinned_scaled(0.5); // 面内压到一半 ⇒ 结构边与二环对同应变 0.5（压缩）
+    s.damage.plastic.yield_strain = YIELD;
+    s.damage.plastic.rate = RATE;
+    let before: Vec<f32> = (0..s.bend_count()).map(|k| s.bend_rest_of(k)).collect();
+    for _ in 0..60 {
+        s.step(DT, Vec3::ZERO, &NoProviders, 0, &[]);
+    }
+    for (k, &was) in before.iter().enumerate() {
+        assert!(
+            s.bend_rest_of(k) == was,
+            "弯曲子开关关（默认）⇒ 二环对 rest 该逐位不变（对 {k}）"
+        );
+    }
+    assert!(
+        (0..s.edge_count()).any(|k| s.plastic_of(k) > 0.0),
+        "结构/剪切边该已流动（对照：证明不是整场都没动）"
+    );
+    println!("[判据⑥] 弯曲子开关关：二环对 rest 逐位不变 ✅（结构边已流动）");
+}
+
+/// 判据⑦（弯曲对塑性）：**开 ⇒ 永久收缩兑现**；**关 ⇒ 被弯曲 `rest` 拉住**（上一片登记的边界）。
+#[test]
+fn bend_plasticity_lets_the_permanent_shrink_realize() {
+    let run = |bend: bool| -> (f32, f32) {
+        let mut s = pinned_scaled(0.5);
+        s.damage.plastic.yield_strain = YIELD;
+        s.damage.plastic.rate = RATE;
+        s.damage.plastic.bend = bend;
+        s.damping = 0.999; // 弯曲保持开（本判据的主对象）
+        for _ in 0..60 {
+            s.step(DT, Vec3::ZERO, &NoProviders, 0, &[]); // 成形（钉住 ⇒ 位置不动）
+        }
+        s.damage.plastic.yield_strain = f32::INFINITY; // 冻结
+        for i in 0..s.pos.len() {
+            s.set_pinned(i, false); // 解钉 ⇒ 松弛到新的 rest
+        }
+        for _ in 0..600 {
+            s.step(DT, Vec3::ZERO, &NoProviders, 0, &[]);
+        }
+        let lens: f32 = (0..s.edge_count())
+            .map(|k| {
+                let [i, j] = s.cons[k];
+                (s.pos[j as usize] - s.pos[i as usize]).length()
+            })
+            .sum();
+        let rests: f32 = (0..s.edge_count()).map(|k| s.rest_of(k)).sum();
+        (lens, rests)
+    };
+    let ((off_len, off_rest), (on_len, on_rest)) = (run(false), run(true));
+    println!(
+        "[判据⑦] 解钉静置后 Σ 结构边长：弯曲塑性**关** {off_len:.4}（rest {off_rest:.4}）| \
+         **开** {on_len:.4}（rest {on_rest:.4}）"
+    );
+    assert!(off_len.is_finite() && on_len.is_finite(), "出现非有限值");
+    assert!(
+        (on_len - on_rest).abs() < 0.02 * on_rest,
+        "开弯曲塑性 ⇒ 永久收缩该**兑现**（Σ 边长 {on_len:.4} vs Σ rest {on_rest:.4}）"
+    );
+    assert!(
+        off_len > on_len * 1.05,
+        "关弯曲塑性 ⇒ 弯曲 rest 把永久收缩拉住（{off_len:.4} vs 开档 {on_len:.4}）\
+         —— 这正是上一片登记的边界（`PLAN-plasticity` §五-1）"
     );
 }
