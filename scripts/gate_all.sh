@@ -17,6 +17,12 @@
 
 set -u
 
+# 中文 Windows 上 Python 的 stdout 走 cp936；本仓门脚本用 `>log 2>&1` 重定向（非控制台），
+# 打 `✅`/`❌` 会 UnicodeEncodeError ⇒ 把**通过的**门报成红（实测踩在 god --selftest 与
+# deps_lock 两处：审计本身 exit 0，只是打印崩）。CI 侧一直用 `python -X utf8` 所以没暴露。
+# 固定 UTF-8 输出，不改变任何判据。
+export PYTHONUTF8=1 PYTHONIOENCODING=utf-8
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(dirname "$here")"
 cd "$root" || {

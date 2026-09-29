@@ -349,6 +349,23 @@ fn collect_warm_update(
     warm_out.push((c.warm_slot, (c.a, c.b, c.warm_space), wm));
 }
 
+/// 一组求解旋钮（从 `PhaseParams` 构造，见 `PhaseParams::tuning`）。
+///
+/// **为什么并组**：`solve_island_group` 原先带 23 个形参，撞 args-gate 的硬禁（>20）。
+/// 这 7 个是同一族（迭代预算与匹配/安座阈值），且在函数内**只读** ⇒ 并成一个 `Copy`
+/// 结构体、在函数头解构回同名局部变量，函数体一字未改 ⇒ 数值路径与逐位哈希不受影响。
+/// 先例：`ContactTuning`（同为"旋钮并组"而非"改行为"）。
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct GroupTuning {
+    pub iters: u32,
+    pub e_threshold: f32,
+    pub match_dist: f32,
+    pub shock_iterations: u32,
+    pub normal_inner: u32,
+    pub settled_hold: u32,
+    pub hold_max_vn: f32,
+}
+
 /// 解算一组清醒岛（组内岛串行；岛间体集合不相交）。速度读写走组内 scratch
 /// （gather 已填充），warm 更新收集到 `warm_out`（调用方按组序合并）。
 #[allow(clippy::too_many_arguments)]
@@ -366,16 +383,19 @@ pub(crate) fn solve_island_group(
     av: &mut [Vec3],
     cbuf: &mut Vec<ContactConstraint>,
     warm_out: &mut Vec<WarmOutEntry>,
-    iters: u32,
-    e_threshold: f32,
-    match_dist: f32,
-    shock_iterations: u32,
-    normal_inner: u32,
+    tuning: GroupTuning,
     sp: &SolverParams,
-    settled_hold: u32,
-    hold_max_vn: f32,
     detail: &mut [u64; 5],
 ) {
+    let GroupTuning {
+        iters,
+        e_threshold,
+        match_dist,
+        shock_iterations,
+        normal_inner,
+        settled_hold,
+        hold_max_vn,
+    } = tuning;
     for &ii in awake {
         let isl = &islands[ii];
         // 每岛构建约束（岛内流形序 = 全局流形序，§4.14）。

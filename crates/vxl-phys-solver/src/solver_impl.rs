@@ -382,14 +382,8 @@ impl ImpulseSolver {
                         av,
                         cbuf,
                         wout,
-                        p.iters,
-                        p.e_threshold,
-                        p.match_dist,
-                        p.shock,
-                        p.normal_inner,
+                        p.tuning(),
                         sp_ref,
-                        p.settled_hold,
-                        p.hold_max_vn,
                         det,
                     );
                     *t_slot = vxl_phys_core::probe::us(t0);
@@ -445,14 +439,8 @@ impl ImpulseSolver {
             &mut bufs.av[0],
             &mut bufs.build[0],
             &mut bufs.warm_out[0],
-            p.iters,
-            p.e_threshold,
-            p.match_dist,
-            p.shock,
-            p.normal_inner,
+            p.tuning(),
             &p.sp,
-            p.settled_hold,
-            p.hold_max_vn,
             &mut det,
         );
         for (k, v) in det.iter().enumerate().take(3) {
@@ -729,6 +717,20 @@ struct PhaseParams {
 }
 
 impl PhaseParams {
+    /// 并组出 `solve_island_group` 要的旋钮包（存在理由见 `island::GroupTuning`：
+    /// 原先 23 个形参撞 args-gate 硬禁，这 7 个同族且只读 ⇒ 并组不动数值路径）。
+    fn tuning(&self) -> crate::island::GroupTuning {
+        crate::island::GroupTuning {
+            iters: self.iters,
+            e_threshold: self.e_threshold,
+            match_dist: self.match_dist,
+            shock_iterations: self.shock,
+            normal_inner: self.normal_inner,
+            settled_hold: self.settled_hold,
+            hold_max_vn: self.hold_max_vn,
+        }
+    }
+
     fn from_config(config: &PhysConfig, dt: f32, cleanup: bool, match_dist: f32) -> Self {
         // 准静态"安座"趟（`settled_hold_iterations`；0 = 关闭 = 不走该路径，逐位同旧）。
         // **两趟都跑**：睡眠判定看的是**带偏置趟**之后的速度（`solve_phase` 末尾逐岛判），

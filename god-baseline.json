@@ -865,7 +865,7 @@
   "max_type_members": 0
  },
  "crates/vxl-phys-solver/src/island.rs": {
-  "file_lines": 434,
+  "file_lines": 454,
   "max_fn_lines": 85,
   "max_type_members": 0
  },
@@ -895,8 +895,8 @@
   "max_type_members": 0
  },
  "crates/vxl-phys-solver/src/solver_impl.rs": {
-  "file_lines": 812,
-  "max_fn_lines": 93,
+  "file_lines": 814,
+  "max_fn_lines": 87,
   "max_type_members": 15
  },
  "crates/vxl-phys-solver/src/stats.rs": {
@@ -1180,7 +1180,7 @@
   "max_type_members": 2
  },
  "crates/vxl-phys/src/world_step/narrow_tier.rs": {
-  "file_lines": 305,
+  "file_lines": 308,
   "max_fn_lines": 118,
   "max_type_members": 12
  },
@@ -1405,8 +1405,8 @@
   "max_type_members": 0
  },
  "scripts/print_gate.py": {
-  "file_lines": 91,
-  "max_fn_lines": 38,
+  "file_lines": 112,
+  "max_fn_lines": 32,
   "max_type_members": 0
  },
  "scripts/rayon_gate.py": {

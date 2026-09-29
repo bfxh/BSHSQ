@@ -292,7 +292,10 @@ fn dump_words_if_asked(packed: &[u32], pairs: &[(u32, u32)], tick: u64) {
     let f = |i: usize, k: usize| f32::from_bits(packed[i * W + k]);
     let p3 = |i: usize, k: usize| [f(i, k), f(i, k + 1), f(i, k + 2)];
     let q4 = |i: usize, k: usize| [f(i, k), f(i, k + 1), f(i, k + 2), f(i, k + 3)];
-    eprintln!(
+    eprintln!(  // print:allow（env 门控的定点诊断：VXL_NARROW_DUMP 未设时上面已 return，
+        //  默认路径零输出；本仓不引日志门面依赖（deps_lock 只登记 xxhash 与 wgpu），
+        //  故按行级显式豁免登记。要撤这条例外就把 dump 整体挪到 CLI/bin 层，不是删掉——
+        //  它是 P1「窄相流形 churn」那条线的唯一取证工具。）
         "NARROW_DUMP tick={tick} 对({a},{b})：a.pos={:?} a.rot={:?} a.half={:?} | b.pos={:?} b.rot={:?} b.half={:?}",
         p3(a as usize, 0),
         q4(a as usize, 3),
