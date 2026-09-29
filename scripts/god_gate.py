@@ -464,7 +464,7 @@ def main() -> int:
         print(f"  …另有 {len(bad)-30} 条")
     if shrank:
         print(f"  （{len(shrank)} 条可收紧/可清理，跑 --write-baseline 更新）")
-    print(f"GOD-GATE {'FAIL' if bad else 'OK'} 超标/变胖={len(bad)}")
+    print(f"{'❌' if bad else '✅'} GOD-GATE {'FAIL' if bad else 'OK'} 超标/变胖={len(bad)}")
     return 1 if bad else 0
 
 

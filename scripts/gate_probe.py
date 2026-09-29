@@ -27,7 +27,10 @@ PROBES = {
     "linelen-gate": ("probe_linelen.rs", 'fn p() { ' + "a" * 240 + ' }\n'),
     "glob-gate":    ("probe_glob.rs",    'use std::collections::*;\n'),
     "todo-gate":    ("probe_todo.rs",    'fn p(){ todo!(); }\n'),
-    "god-gate":     ("probe_god.rs",     'fn p() {}\n'),
+    # god 是**尺寸棘轮**（>800 行文件 / >120 行函数 / >24 成员才红），"新文件即红"不是它的语义
+    # ⇒ 最小违规必须真的超阈：一个 125 行的函数（实测 max_fn_lines=125 > 120 命中）。
+    "god-gate":     ("probe_god.rs",
+        'fn p() {\n' + '    let _ = 1u32;\n' * 125 + '}\n'),
     "cyc-gate":     ("probe_cyc.rs",
         'fn p(a:i32,b:i32,c:i32,d:i32,e:i32,f:i32,g:i32,h:i32){'
         ' if a>0{1}else if b>0{2}else if c>0{3}else if d>0{4}'
@@ -84,8 +87,16 @@ def _probe_rs():
             os.makedirs(PROBE_DIR, exist_ok=True)
             with open(os.path.join(PROBE_DIR, fname), "w", encoding="utf-8") as f:
                 f.write(content)
+            pre = run_gate(gate)          # 注入前先跑一次：此时探针文件已被上一轮 remove
+            with open(os.path.join(PROBE_DIR, fname), "w", encoding="utf-8") as f:
+                f.write(content)
             out = run_gate(gate)
             os.remove(os.path.join(PROBE_DIR, fname))
+            if pre.returncode != 0:
+                # 基线未绿 ⇒ 这门无论注入不注入都是红，注入实验无法归因。别把它当"真门"放行。
+                print(f"⚠️ {gate}: 注入前已红（基线未绿）——本次无法判定它是否真门，先修基线")
+                fails.append(gate + "(基线未绿)")
+                continue
             caught = out.returncode != 0 and "❌" in out.stdout
             if caught:
                 print(f"✅ {gate}: 注入最小违规后转红（是真门）")
