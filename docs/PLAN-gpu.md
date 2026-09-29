@@ -2704,3 +2704,38 @@ m0 压力哈希 `0x417be20a…`、金样门 col45 45/45 / pile5 2000/2000 / towe
 ⇒ 平铺序本来就等于「**先流体段、后边界段**」⇒ 两段枚举的**累加序逐项相同** ⇒ 密度（两个累加器
 各自有序）与力（`a`/`xs` 的贡献依次为"流体项…边界项…"）都**逐位不变**。这也是 §26 那条
 "每格序列逐条相同"在数值层面的直接后果。
+
+#### 26.3.2 第 ①②③ 步的**实现与实测**（2026-09-30：设计已验证、整体未落地）
+
+**结论一句话**：两段核 + 两遍网格**写完并跑通判据** —— 真 2b 场景上末态哈希
+`0x9fae52a5be7ed274` 与 y_min（卡 −1.81740 / CPU 同源 −1.81726）**逐位不变**（§26.3.1 的 A/B 基线）
+⇒ 设计前提在**真引擎路径**上成立。**但整体撤回未提交**：一个诊断测试
+（`sorted_seed_localize::dens_or_vel_first_substep_that_diverges`，**walls 档**）报
+**`Parent device is lost`**（复现 2/2；把第二遍关掉即通过 ⇒ **第二遍是触发点**）。定位它之前不合。
+
+**已验证的实现要点（照抄即可；全部踩过一遍）**：
+1. **对齐是硬约束**：storage 绑定偏移须满足 `min_storage_buffer_offset_alignment`（本机 32 B）
+   ⇒ **表步长 = `align8(total+1)`**（`grid.wgsl::table_stride()`，主机同式）；三张表各
+   `2 × stride × 4` 字节（`counts`/`start`/`cursor`），`items`/`bins` 不变。
+2. **相位核的槽 9（类 1 表）必须用切片视图**：偏移/长度取 `start_b.size()/2`。绑**整段**会读到
+   类 0 的错区 ⇒ 边界段取到错界 ⇒ 实测症状 = `sorted_copies_bitwise` 红（幻影邻居）。
+3. **按段枚举写成单循环**（`q < seg1` 选段、`select` 取 `k`）：两段拼接序 = 平铺档的索引升序
+   （边界粒子全局索引恒 ≥ `n_fluid`）⇒ 累加序逐项相同 ⇒ **逐位不变**（已实测）。
+   `force` 侧：`seg2 = select(0u, g1-g0, !boundary)` ⇒ 边界 i 不吃边界段（等价于旧逐项 `continue`）。
+4. **布局的行数中性加法**：密度 spec 用**空格占位**跳过槽 8（`"ur_r_rrw r"` ⇒ 只声明 9）；
+   力布局显式加一行 `(9, Kind::Ro)`。
+5. **两类 uniform**：`grid_params_buf(device, cfg, n, total, class_lo)`；**两遍都用
+   `n_fluid = cfg.n_fluid`、只差 `class_lo`**；两遍各用一个绑定组（§26.2 坑②：中途
+   `write_buffer` 换 params 不生效）。`n_fluid == n` 时跳过第二遍。
+6. **棘轮三坑（这一片真正的成本所在）**：① `Packet` 是**登记债务**（32 字段 / 26 方法，只准减）
+   ⇒ **加字段、加方法都红** ⇒ 网格绑定组改 `[wgpu::BindGroup; 2]`（成员数不变）+ `encode_grid`
+   写成**自由函数**（`two_class::encode_grid(pk, ...)`）；② `pipeline.rs`（857 行，超 800 硬阈）与
+   `sorted.rs` 的**任何增长都要配同文件最长函数严格下降** ⇒ 先搬三块出去（`make_bind_groups`、
+   网格 uniform 序列化、网格分派）＋ sorted 的 EOS 绑定组，净缩之后才有空间；③ `gpu_types.rs`
+   的字段注释要**同行化**（行数净零）。
+
+**开口（下一会话第一件事）**：定位设备丢失。证据：`two = false` ⇒ 该测试过（注意那是"两边都退化"
+的假过，只取"第二遍会炸"这一条）。候选方向：class-1 `canon` 的段长与 `cap` 护栏（现护栏按
+**类内**计数 ✓ 需确认）、`items` 槽位、或 walls 档改 `dens` 与第二遍的交互。
+**验收**：`sorted_seed_localize` 转绿 + canary 哈希逐位不变 + `cargo test -p vxl-phys-gpu` 全绿
+（16 个二进制）+ 快门 25 道 + god 门 0 变胖。
