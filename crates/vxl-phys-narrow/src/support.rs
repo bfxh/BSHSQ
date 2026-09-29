@@ -64,7 +64,7 @@ impl DefaultNarrowPhase {
     }
 
     /// 填充「外壳世界点缓存」（side：0 = 对侧 a、1 = 侧 b）。
-    /// 返回 true = 该形状是外壳且缓存已就绪（点列在 `self.hull_pts[side]`）。
+    /// 返回 true = 该形状是外壳且缓存已就绪（点列在 `self.ws.hull_pts[side]`）。
     pub(crate) fn fill_hull_world(
         &mut self,
         side: usize,
@@ -77,14 +77,14 @@ impl DefaultNarrowPhase {
             return false;
         };
         let fp = rot_fp(rot);
-        if self.cached_hull[side] != (body, fp) {
+        if self.ws.cached_hull[side] != (body, fp) {
             let m = Mat3::from_quat(rot);
-            let out = &mut self.hull_pts[side];
+            let out = &mut self.ws.hull_pts[side];
             out.clear();
             if let Some(h) = self.hulls.get(hull) {
                 out.extend(h.points.iter().map(|p| pos + m.mul_vec3(*p)));
             }
-            self.cached_hull[side] = (body, fp);
+            self.ws.cached_hull[side] = (body, fp);
         }
         true
     }
@@ -192,14 +192,14 @@ impl DefaultNarrowPhase {
             let Some(hf) = heightfields.get(hf_id as usize) else {
                 return;
             };
-            self.cand.clear();
-            let n_pts = self.hull_pts[side].len();
+            self.ws.cand.clear();
+            let n_pts = self.ws.hull_pts[side].len();
             for idx in 0..n_pts {
-                let v = self.hull_pts[side][idx];
+                let v = self.ws.hull_pts[side][idx];
                 if let Some((h, _)) = hf.sample(v.x, v.z) {
                     let depth = h - v.y;
                     if depth > -self.skin {
-                        self.cand.push(ContactPoint {
+                        self.ws.cand.push(ContactPoint {
                             point: Vec3::new(v.x, h, v.z),
                             depth,
                             feature: idx as u32,
@@ -207,10 +207,10 @@ impl DefaultNarrowPhase {
                     }
                 }
             }
-            if self.cand.is_empty() || !self.select_contacts(self.min_point_sep) {
+            if self.ws.cand.is_empty() || !self.select_contacts(self.min_point_sep) {
                 return;
             }
-            let deepest = self.cand[0];
+            let deepest = self.ws.cand[0];
             let n_t = hf
                 .sample(deepest.point.x, deepest.point.z)
                 .map(|(_, n)| n)
@@ -221,7 +221,7 @@ impl DefaultNarrowPhase {
                 a,
                 b,
                 normal,
-                points: ContactPoints::from_slice(&self.cand),
+                points: ContactPoints::from_slice(&self.ws.cand),
             });
             return;
         }
@@ -268,9 +268,9 @@ impl DefaultNarrowPhase {
         let other: &dyn gjk::Support = if a_is_hull { &ub } else { &ua };
         let plane = n.dot(other.support(n));
         let mut cand: Vec<(f32, usize, Vec3)> = Vec::new();
-        let n_pts = self.hull_pts[side].len();
+        let n_pts = self.ws.hull_pts[side].len();
         for i in 0..n_pts {
-            let w = self.hull_pts[side][i];
+            let w = self.ws.hull_pts[side][i];
             let d = plane - n.dot(w);
             if d > -self.skin {
                 cand.push((d, i, w));
@@ -330,36 +330,40 @@ impl DefaultNarrowPhase {
             compounds: CompoundStore::default(),
             meshes: MeshStore::default(),
             kids_buf: Vec::new(),
-            skin,
             predict_dt: 0.0,
-            inflate: 0.0,
             min_point_sep: (skin * 2.0).max(0.01),
-            polys: Vec::new(),
-            poly_index: HashMap::new(),
-            poly_a: WorldPoly::default(),
-            poly_b: WorldPoly::default(),
-            cached_a: (u32::MAX, u64::MAX),
-            cached_b: (u32::MAX, u64::MAX),
-            axes: Vec::new(),
-            clip_in: Vec::new(),
-            clip_out: Vec::new(),
-            cand: Vec::new(),
-            kept_buf: Vec::new(),
-            box_a: None,
-            box_b: None,
-            box_axes_a: None,
-            box_axes_b: None,
-            hull_pts: [Vec::new(), Vec::new()],
-            cached_hull: [(u32::MAX, u64::MAX), (u32::MAX, u64::MAX)],
-            cached_ax_a: (u32::MAX, u64::MAX, [Vec3::ZERO; 3]),
-            cached_ax_b: (u32::MAX, u64::MAX, [Vec3::ZERO; 3]),
-            ref_v: Vec::new(),
-            out_hint: 256,
-            probe_clip_calls: 0,
-            probe_clip_iters: 0,
-            probe_clip_xings: 0,
-            probe_cand_pts: 0,
-            probe_clip_max: 0,
+            skin,
+            ws: PairWorkspace {
+                inflate: 0.0,
+                polys: Vec::new(),
+                poly_index: HashMap::new(),
+                poly_a: WorldPoly::default(),
+                poly_b: WorldPoly::default(),
+                cached_a: (u32::MAX, u64::MAX),
+                cached_b: (u32::MAX, u64::MAX),
+                axes: Vec::new(),
+                clip_in: Vec::new(),
+                clip_out: Vec::new(),
+                cand: Vec::new(),
+                kept_buf: Vec::new(),
+                box_a: None,
+                box_b: None,
+                box_axes_a: None,
+                box_axes_b: None,
+                hull_pts: [Vec::new(), Vec::new()],
+                cached_hull: [(u32::MAX, u64::MAX), (u32::MAX, u64::MAX)],
+                cached_ax_a: (u32::MAX, u64::MAX, [Vec3::ZERO; 3]),
+                cached_ax_b: (u32::MAX, u64::MAX, [Vec3::ZERO; 3]),
+                ref_v: Vec::new(),
+                out_hint: 256,
+            },
+            probe: ProbeCounters {
+                clip_calls: 0,
+                clip_iters: 0,
+                clip_xings: 0,
+                cand_pts: 0,
+                clip_max: 0,
+            },
         }
     }
 
@@ -368,7 +372,7 @@ impl DefaultNarrowPhase {
         if key == 0 {
             return None;
         }
-        if let Some(&idx) = self.poly_index.get(&key) {
+        if let Some(&idx) = self.ws.poly_index.get(&key) {
             return Some(idx);
         }
         let poly = match *shape {
@@ -383,9 +387,9 @@ impl DefaultNarrowPhase {
             } => ConvexPolytope::cone_polytope(radius, half_height, CYLINDER_SEGMENTS),
             _ => return None,
         };
-        self.polys.push(poly);
-        let idx = self.polys.len() - 1;
-        self.poly_index.insert(key, idx);
+        self.ws.polys.push(poly);
+        let idx = self.ws.polys.len() - 1;
+        self.ws.poly_index.insert(key, idx);
         Some(idx)
     }
 }

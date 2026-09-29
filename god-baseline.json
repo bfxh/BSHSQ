@@ -596,7 +596,7 @@
    "max_type_members": 3
   },
   "crates/vxl-phys-narrow/src/mesh_pair.rs": {
-   "file_lines": 560,
+   "file_lines": 561,
    "max_fn_lines": 86,
    "max_type_members": 5
   },
@@ -611,14 +611,14 @@
    "max_type_members": 1
   },
   "crates/vxl-phys-narrow/src/pair_shaped.rs": {
-   "file_lines": 875,
+   "file_lines": 879,
    "max_fn_lines": 101,
    "max_type_members": 10
   },
   "crates/vxl-phys-narrow/src/phase.rs": {
-   "file_lines": 98,
+   "file_lines": 119,
    "max_fn_lines": 9,
-   "max_type_members": 34
+   "max_type_members": 9
   },
   "crates/vxl-phys-narrow/src/polytope.rs": {
    "file_lines": 256,
@@ -636,7 +636,7 @@
    "max_type_members": 2
   },
   "crates/vxl-phys-narrow/src/sat.rs": {
-   "file_lines": 444,
+   "file_lines": 453,
    "max_fn_lines": 74,
    "max_type_members": 10
   },
@@ -651,7 +651,7 @@
    "max_type_members": 5
   },
   "crates/vxl-phys-narrow/src/support.rs": {
-   "file_lines": 392,
+   "file_lines": 396,
    "max_fn_lines": 140,
    "max_type_members": 16
   },
@@ -1984,7 +1984,7 @@
    "methods": 6
   },
   "crates/vxl-phys-narrow::DefaultNarrowPhase": {
-   "fields": 34,
+   "fields": 9,
    "methods": 62
   },
   "crates/vxl-phys-narrow::HeightField": {
@@ -2017,6 +2017,10 @@
   },
   "crates/vxl-phys-narrow::PrismSupport": {
    "fields": 6,
+   "methods": 0
+  },
+  "crates/vxl-phys-narrow::ProbeCounters": {
+   "fields": 5,
    "methods": 0
   },
   "crates/vxl-phys-narrow::SphereSupport": {

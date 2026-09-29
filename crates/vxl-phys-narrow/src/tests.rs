@@ -659,17 +659,17 @@ fn box_sat_fast_matches_vertex_reference() {
         let bx = Vec3::new(next() + 0.5, next() + 0.2, 1.0).normalize();
         let qa = Quat::from_axis_angle(ax, next() * core::f32::consts::TAU);
         let qb = Quat::from_axis_angle(bx, next() * core::f32::consts::TAU);
-        np.poly_a.fill(&np.polys[ia], pa, qa);
-        np.poly_b.fill(&np.polys[ib], pb, qb);
+        np.ws.poly_a.fill(&np.ws.polys[ia], pa, qa);
+        np.ws.poly_b.fill(&np.ws.polys[ib], pb, qb);
         let d = pb - pa;
         // 快路径（盒对 extents 公式）。
-        np.box_a = Some((ha, pa));
-        np.box_b = Some((hb, pb));
+        np.ws.box_a = Some((ha, pa));
+        np.ws.box_b = Some((hb, pb));
         let fast = np.sat(d);
         // 通用路径（逐顶点 min/max；轴序、取向、平局规则完全相同，
         // 唯一差异即投影计算方式）。
-        np.box_a = None;
-        np.box_b = None;
+        np.ws.box_a = None;
+        np.ws.box_b = None;
         let slow = np.sat(d);
         match (fast, slow) {
             (None, None) => {}
@@ -771,16 +771,16 @@ fn box_dedicated_matches_generic_full_chain() {
         let pb = pa + d;
 
         // 通用路径：多面体填充 + 盒对 extents 快路径。
-        np.poly_a.fill(&np.polys[ia], pa, qa);
-        np.poly_b.fill(&np.polys[ib], pb, qb);
-        np.box_axes_a = None;
-        np.box_axes_b = None;
-        np.box_a = Some((ha, pa));
-        np.box_b = Some((hb, pb));
+        np.ws.poly_a.fill(&np.ws.polys[ia], pa, qa);
+        np.ws.poly_b.fill(&np.ws.polys[ib], pb, qb);
+        np.ws.box_axes_a = None;
+        np.ws.box_axes_b = None;
+        np.ws.box_a = Some((ha, pa));
+        np.ws.box_b = Some((hb, pb));
         let generic = match np.sat(d) {
             Some((sep, n, src)) if sep <= np.skin => {
                 if np.clip(n, src) {
-                    Some((sep, n, src, np.cand.clone()))
+                    Some((sep, n, src, np.ws.cand.clone()))
                 } else {
                     Some((sep, n, src, Vec::new()))
                 }
@@ -791,12 +791,12 @@ fn box_dedicated_matches_generic_full_chain() {
         // 专用路径：体轴直生（不填多面体——与生产路径一致）。
         let aa = box_axes(qa);
         let ab = box_axes(qb);
-        np.box_axes_a = Some(aa);
-        np.box_axes_b = Some(ab);
+        np.ws.box_axes_a = Some(aa);
+        np.ws.box_axes_b = Some(ab);
         let dedicated = match np.sat(d) {
             Some((sep, n, src)) if sep <= np.skin => {
                 if np.clip(n, src) {
-                    Some((sep, n, src, np.cand.clone()))
+                    Some((sep, n, src, np.ws.cand.clone()))
                 } else {
                     Some((sep, n, src, Vec::new()))
                 }

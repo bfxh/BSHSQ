@@ -31,13 +31,13 @@ impl NarrowPhase for DefaultNarrowPhase {
     ) {
         out.clear();
         // 每对各自的充气量（`clip` 逐点过滤复用）；默认 0 ⇒ 逐位同现行。
-        self.inflate = 0.0;
+        self.ws.inflate = 0.0;
         // 世界多面体填充缓存跨帧失效（体在帧间移动；键只含体号+形状）。
-        self.cached_a = (u32::MAX, u64::MAX);
-        self.cached_b = (u32::MAX, u64::MAX);
-        self.cached_ax_a = (u32::MAX, u64::MAX, [Vec3::ZERO; 3]);
-        self.cached_ax_b = (u32::MAX, u64::MAX, [Vec3::ZERO; 3]);
-        self.cached_hull = [(u32::MAX, u64::MAX), (u32::MAX, u64::MAX)];
+        self.ws.cached_a = (u32::MAX, u64::MAX);
+        self.ws.cached_b = (u32::MAX, u64::MAX);
+        self.ws.cached_ax_a = (u32::MAX, u64::MAX, [Vec3::ZERO; 3]);
+        self.ws.cached_ax_b = (u32::MAX, u64::MAX, [Vec3::ZERO; 3]);
+        self.ws.cached_hull = [(u32::MAX, u64::MAX), (u32::MAX, u64::MAX)];
         let threads = jobs.threads();
         // 小规模串行（线程启动开销 > 收益）；并行 = 每块独立 clone + 按块序拼接 = pair 序（§5）。
         if threads <= 1 || pairs.len() < NARROW_MIN_PARALLEL {
@@ -50,7 +50,7 @@ impl NarrowPhase for DefaultNarrowPhase {
         let n_chunks = threads.min(pairs.len().div_ceil(NARROW_MIN_PARALLEL));
         let chunk = pairs.len().div_ceil(n_chunks);
         // 输出缓冲预分配（T3 结构项②的第一片）：8B 实测对/流形 ≈ 15:1；旧实现每块从空 Vec 逐次增长（~8 次重分配 + memcpy）且最终拼接再搬一遍 ⇒ 按下界预留即免掉这段。
-        let out_hint = self.out_hint.max(16);
+        let out_hint = self.ws.out_hint.max(16);
         let mut outs: Vec<Vec<Manifold>> = (0..n_chunks)
             .map(|_| Vec::with_capacity(out_hint / n_chunks + 8))
             .collect();
@@ -77,6 +77,6 @@ impl NarrowPhase for DefaultNarrowPhase {
             out.append(&mut co);
         }
         // 下一帧的容量提示（纯性能提示，不参与任何判定 ⇒ 确定性无关）。
-        self.out_hint = produced;
+        self.ws.out_hint = produced;
     }
 }

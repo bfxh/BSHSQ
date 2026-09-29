@@ -13,11 +13,11 @@ impl DefaultNarrowPhase {
         crot: Quat,
     ) -> Option<(Vec3, f32, Vec3)> {
         let idx = self.poly_for(convex)?;
-        self.poly_b.fill(&self.polys[idx], cpos, crot);
-        let (closest, d2, inside, in_n) = closest_point_on_poly(&self.poly_b, center);
+        self.ws.poly_b.fill(&self.ws.polys[idx], cpos, crot);
+        let (closest, d2, inside, in_n) = closest_point_on_poly(&self.ws.poly_b, center);
         if inside {
             // 球心在凸体内部：max_plane_d < 0，表面距 = -max_plane_d。
-            let max_d = max_plane_d_of(&self.poly_b, center);
+            let max_d = max_plane_d_of(&self.ws.poly_b, center);
             let depth = radius + max_d;
             if depth <= 0.0 {
                 return None;
@@ -58,15 +58,15 @@ impl DefaultNarrowPhase {
         orot: Quat,
     ) -> Option<(Vec3, Vec3)> {
         let idx = self.poly_for(other)?;
-        self.poly_b.fill(&self.polys[idx], opos, orot);
+        self.ws.poly_b.fill(&self.ws.polys[idx], opos, orot);
         let seg = s1 - s0;
         let seg_len2 = seg.length_squared();
         let mut p = (s0 + s1) * 0.5;
         for _ in 0..4 {
-            let (q, _d2, inside, in_n) = closest_point_on_poly(&self.poly_b, p);
+            let (q, _d2, inside, in_n) = closest_point_on_poly(&self.ws.poly_b, p);
             // 内部时同样把 q 拉到"朝最近面"的表面上，迭代方向才有效。
             let q = if inside {
-                p + in_n * -max_plane_d_of(&self.poly_b, p)
+                p + in_n * -max_plane_d_of(&self.ws.poly_b, p)
             } else {
                 q
             };
@@ -121,10 +121,10 @@ impl DefaultNarrowPhase {
     /// 展平多面体的同一顶点会以浮点噪声级差异重复出现，不去重会造成
     /// 单角多倍冲量 → 永续 rocking（能量泵）。
     pub(crate) fn select_contacts(&mut self, min_sep: f32) -> bool {
-        if self.cand.is_empty() {
+        if self.ws.cand.is_empty() {
             return false;
         }
-        self.cand.sort_by(|x, y| {
+        self.ws.cand.sort_by(|x, y| {
             y.depth
                 .total_cmp(&x.depth)
                 .then(x.point.x.total_cmp(&y.point.x))
@@ -134,9 +134,9 @@ impl DefaultNarrowPhase {
         let min2 = min_sep * min_sep;
         // 复用 scratch（T3：旧实现每调用一次 Vec::with_capacity(4) —— 8B 场景
         // ~22 万次/帧的堆分配）。语义逐位不变：按深度序取 ≤4 个非重复点。
-        let mut kept = std::mem::take(&mut self.kept_buf);
+        let mut kept = std::mem::take(&mut self.ws.kept_buf);
         kept.clear();
-        for &c in self.cand.iter() {
+        for &c in self.ws.cand.iter() {
             if kept.len() >= 4 {
                 break;
             }
@@ -147,9 +147,9 @@ impl DefaultNarrowPhase {
                 kept.push(c);
             }
         }
-        self.cand.clear();
-        self.cand.extend_from_slice(&kept);
-        self.kept_buf = kept;
-        !self.cand.is_empty()
+        self.ws.cand.clear();
+        self.ws.cand.extend_from_slice(&kept);
+        self.ws.kept_buf = kept;
+        !self.ws.cand.is_empty()
     }
 }

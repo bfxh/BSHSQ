@@ -18,7 +18,7 @@ use super::*;
 
 impl DefaultNarrowPhase {
     /// 填充**三角网的世界点缓存**（side：0 = 对侧 a、1 = 侧 b）。返回 `true` = 该形状是三角网
-    /// 且缓存已就绪（顶点列在 `self.hull_pts[side]`）。
+    /// 且缓存已就绪（顶点列在 `self.ws.hull_pts[side]`）。
     ///
     /// **与 `fill_hull_world` 共用 `hull_pts` 缓冲**（不新增字段 ⇒ 不碰 god 门成员棘轮）：
     /// 一个体的 `shape` 只有一种 ⇒ 同一体不可能同时以两种来源填同一槽；键含
@@ -35,14 +35,14 @@ impl DefaultNarrowPhase {
             return false;
         };
         let fp = rot_fp(rot);
-        if self.cached_hull[side] != (body, fp) {
+        if self.ws.cached_hull[side] != (body, fp) {
             let m = Mat3::from_quat(rot);
-            let out = &mut self.hull_pts[side];
+            let out = &mut self.ws.hull_pts[side];
             out.clear();
             for p in self.meshes.points(mesh) {
                 out.push(pos + m.mul_vec3(*p));
             }
-            self.cached_hull[side] = (body, fp);
+            self.ws.cached_hull[side] = (body, fp);
         }
         true
     }
@@ -73,8 +73,8 @@ impl DefaultNarrowPhase {
             return true;
         }
         let mut supported = false;
-        for k in 0..self.hull_pts[side].len() {
-            supported |= providers.contacts_point(id, self.hull_pts[side][k], band, buf);
+        for k in 0..self.ws.hull_pts[side].len() {
+            supported |= providers.contacts_point(id, self.ws.hull_pts[side][k], band, buf);
         }
         supported
     }
@@ -127,11 +127,11 @@ impl DefaultNarrowPhase {
         if !self.fill_mesh_world(side, body, mesh_shape, mpos, mrot) {
             return;
         }
-        let n_pts = self.hull_pts[side].len();
+        let n_pts = self.ws.hull_pts[side].len();
         // ① 主导面 = 最深候选的法线
         let mut dom: Option<(Vec3, f32)> = None;
         for k in 0..n_pts {
-            let Some((n_o, depth, _)) = point_shape(self.hull_pts[side][k], oshape, opos, orot)
+            let Some((n_o, depth, _)) = point_shape(self.ws.hull_pts[side][k], oshape, opos, orot)
             else {
                 continue;
             };
@@ -143,28 +143,29 @@ impl DefaultNarrowPhase {
             return;
         };
         // ② 同面候选（点-盒角点可能同时落在两张面上 ⇒ 只留主导面，免得多法线混进同一流形）
-        self.cand.clear();
+        self.ws.cand.clear();
         for k in 0..n_pts {
-            let Some((n_o, depth, hit)) = point_shape(self.hull_pts[side][k], oshape, opos, orot)
+            let Some((n_o, depth, hit)) =
+                point_shape(self.ws.hull_pts[side][k], oshape, opos, orot)
             else {
                 continue;
             };
             if depth > -self.skin && n_o.dot(n_dom) > 0.9 {
-                self.cand.push(ContactPoint {
+                self.ws.cand.push(ContactPoint {
                     point: hit,
                     depth,
                     feature: k as u32 + 1, // 顶点序稳定 ⇒ 跨帧可续接 warm
                 });
             }
         }
-        if self.cand.is_empty() || !self.select_contacts(self.min_point_sep) {
+        if self.ws.cand.is_empty() || !self.select_contacts(self.min_point_sep) {
             return;
         }
         out.push(Manifold {
             a,
             b,
             normal: if mesh_is_a { -n_dom } else { n_dom },
-            points: ContactPoints::from_slice(&self.cand),
+            points: ContactPoints::from_slice(&self.ws.cand),
         });
     }
 
@@ -172,7 +173,7 @@ impl DefaultNarrowPhase {
     ///
     /// 逐个**顶点**取世界点 → `hf.sample(x, z)` ⇒ `depth = h − v.y`（正 = 顶点在地形之下 = 穿透），
     /// 接触点落在地形面上（`(x, h, z)`）；法线与 sign 由调用方 `heightfield_pair` 按 a/b 侧决定
-    /// （那里是**形状无关**的：取最深样本的地形法线）⇒ 本函数只负责**填 `self.cand`**。
+    /// （那里是**形状无关**的：取最深样本的地形法线）⇒ 本函数只负责**填 `self.ws.cand`**。
     pub(crate) fn mesh_heightfield(
         &mut self,
         mesh: u32,
@@ -180,7 +181,7 @@ impl DefaultNarrowPhase {
         rot: Quat,
         hf: &HeightField,
     ) -> bool {
-        self.cand.clear();
+        self.ws.cand.clear();
         let r = Mat3::from_quat(rot);
         let pts = self.meshes.points(mesh);
         for (idx, &p) in pts.iter().enumerate() {
@@ -188,7 +189,7 @@ impl DefaultNarrowPhase {
             if let Some((h, _)) = hf.sample(v.x, v.z) {
                 let depth = h - v.y;
                 if depth > -self.skin {
-                    self.cand.push(ContactPoint {
+                    self.ws.cand.push(ContactPoint {
                         point: Vec3::new(v.x, h, v.z),
                         depth,
                         feature: idx as u32 + 1,
@@ -196,7 +197,7 @@ impl DefaultNarrowPhase {
                 }
             }
         }
-        if self.cand.is_empty() {
+        if self.ws.cand.is_empty() {
             return false;
         }
         self.select_contacts(self.min_point_sep)
@@ -236,7 +237,7 @@ impl DefaultNarrowPhase {
         if !self.fill_mesh_world(mesh_side, mesh_body, mesh_shape, mesh_pos, mesh_rot) {
             return;
         }
-        let n_hull = self.hull_pts[hull_side].len();
+        let n_hull = self.ws.hull_pts[hull_side].len();
         let n_tris = self.meshes.tris(mesh).len();
         if n_hull == 0 || n_tris == 0 {
             return;
@@ -244,13 +245,13 @@ impl DefaultNarrowPhase {
         // ① 主导面 = 最深候选的法线（平面薄网上全部三角同法线 ⇒ 实际只有一组）
         let mut dom: Option<(Vec3, f32)> = None;
         for hi in 0..n_hull {
-            let p = self.hull_pts[hull_side][hi];
+            let p = self.ws.hull_pts[hull_side][hi];
             for ti in 0..n_tris {
                 let tri = self.meshes.tris(mesh)[ti];
                 let (w0, w1, w2) = (
-                    self.hull_pts[mesh_side][tri[0] as usize],
-                    self.hull_pts[mesh_side][tri[1] as usize],
-                    self.hull_pts[mesh_side][tri[2] as usize],
+                    self.ws.hull_pts[mesh_side][tri[0] as usize],
+                    self.ws.hull_pts[mesh_side][tri[1] as usize],
+                    self.ws.hull_pts[mesh_side][tri[2] as usize],
                 );
                 let Some((n_o, depth, _)) = point_triangle(p, w0, w1, w2) else {
                     continue;
@@ -264,21 +265,21 @@ impl DefaultNarrowPhase {
             return;
         };
         // ② 同面候选（顶点可能落在网格对角线等共享边上 ⇒ 邻三角法线相同，取其一即可）
-        self.cand.clear();
+        self.ws.cand.clear();
         for hi in 0..n_hull {
-            let p = self.hull_pts[hull_side][hi];
+            let p = self.ws.hull_pts[hull_side][hi];
             for ti in 0..n_tris {
                 let tri = self.meshes.tris(mesh)[ti];
                 let (w0, w1, w2) = (
-                    self.hull_pts[mesh_side][tri[0] as usize],
-                    self.hull_pts[mesh_side][tri[1] as usize],
-                    self.hull_pts[mesh_side][tri[2] as usize],
+                    self.ws.hull_pts[mesh_side][tri[0] as usize],
+                    self.ws.hull_pts[mesh_side][tri[1] as usize],
+                    self.ws.hull_pts[mesh_side][tri[2] as usize],
                 );
                 let Some((n_o, depth, hit)) = point_triangle(p, w0, w1, w2) else {
                     continue;
                 };
                 if depth > -band && n_o.dot(n_dom) > 0.9 {
-                    self.cand.push(ContactPoint {
+                    self.ws.cand.push(ContactPoint {
                         point: hit,
                         depth,
                         feature: hi as u32 + 1, // 外壳顶点序稳定 ⇒ 跨帧可续接 warm
@@ -286,14 +287,14 @@ impl DefaultNarrowPhase {
                 }
             }
         }
-        if self.cand.is_empty() || !self.select_contacts(self.min_point_sep) {
+        if self.ws.cand.is_empty() || !self.select_contacts(self.min_point_sep) {
             return;
         }
         out.push(Manifold {
             a,
             b,
             normal: if hull_is_a { -n_dom } else { n_dom },
-            points: ContactPoints::from_slice(&self.cand),
+            points: ContactPoints::from_slice(&self.ws.cand),
         });
     }
 }

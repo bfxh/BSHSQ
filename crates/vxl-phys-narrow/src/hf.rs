@@ -9,7 +9,7 @@ impl DefaultNarrowPhase {
         radius: f32,
         hf: &HeightField,
     ) -> bool {
-        self.cand.clear();
+        self.ws.cand.clear();
         let r2 = radius * radius;
         let try_point = |cand: &mut Vec<ContactPoint>, px: f32, pz: f32, h: f32| {
             let dx = px - center.x;
@@ -30,7 +30,7 @@ impl DefaultNarrowPhase {
         };
         // 1) 投影点（双线性高度；覆盖球心位于格心/格间的一切情形）。
         if let Some((h, _)) = hf.sample(center.x, center.z) {
-            try_point(&mut self.cand, center.x, center.z, h);
+            try_point(&mut self.ws.cand, center.x, center.z, h);
         }
         // 2) 所在格 + 邻域 3×3 网格节点。
         let ix0 = ((center.x - hf.origin_x) / hf.spacing).floor() as i64;
@@ -45,10 +45,10 @@ impl DefaultNarrowPhase {
                 let h = hf.height_ix(ix as u32, iz as u32);
                 let px = hf.origin_x + ix as f32 * hf.spacing;
                 let pz = hf.origin_z + iz as f32 * hf.spacing;
-                try_point(&mut self.cand, px, pz, h);
+                try_point(&mut self.ws.cand, px, pz, h);
             }
         }
-        if self.cand.is_empty() {
+        if self.ws.cand.is_empty() {
             return false;
         }
         self.select_contacts(self.min_point_sep)
@@ -62,13 +62,13 @@ impl DefaultNarrowPhase {
         rot: Quat,
         hf: &HeightField,
     ) -> bool {
-        self.poly_a.fill(&self.polys[poly_idx], pos, rot);
-        self.cand.clear();
-        for (idx, &v) in self.poly_a.verts.iter().enumerate() {
+        self.ws.poly_a.fill(&self.ws.polys[poly_idx], pos, rot);
+        self.ws.cand.clear();
+        for (idx, &v) in self.ws.poly_a.verts.iter().enumerate() {
             if let Some((h, _)) = hf.sample(v.x, v.z) {
                 let depth = h - v.y;
                 if depth > -self.skin {
-                    self.cand.push(ContactPoint {
+                    self.ws.cand.push(ContactPoint {
                         point: Vec3::new(v.x, h, v.z),
                         depth,
                         // 特征 = 盒顶点序号（跨帧稳定；盒侧不置侧位）。
@@ -77,7 +77,7 @@ impl DefaultNarrowPhase {
                 }
             }
         }
-        if self.cand.is_empty() {
+        if self.ws.cand.is_empty() {
             return false;
         }
         self.select_contacts(self.min_point_sep)
@@ -95,7 +95,7 @@ impl DefaultNarrowPhase {
         hf: &HeightField,
     ) -> bool {
         const SAMPLES: u32 = 5;
-        self.cand.clear();
+        self.ws.cand.clear();
         let denom = (SAMPLES - 1) as f32;
         for k in 0..SAMPLES {
             let t = k as f32 / denom;
@@ -103,7 +103,7 @@ impl DefaultNarrowPhase {
             if let Some((hgt, _)) = hf.sample(s.x, s.z) {
                 let depth = hgt - s.y + radius;
                 if depth > -self.skin {
-                    self.cand.push(ContactPoint {
+                    self.ws.cand.push(ContactPoint {
                         point: Vec3::new(s.x, hgt, s.z),
                         depth,
                         feature: k + 1,
@@ -111,7 +111,7 @@ impl DefaultNarrowPhase {
                 }
             }
         }
-        if self.cand.is_empty() {
+        if self.ws.cand.is_empty() {
             return false;
         }
         self.select_contacts(self.min_point_sep)
@@ -128,7 +128,7 @@ impl DefaultNarrowPhase {
         rot: Quat,
         hf: &HeightField,
     ) -> bool {
-        self.cand.clear();
+        self.ws.cand.clear();
         let r = Mat3::from_quat(rot);
         let Some(h) = self.hulls.get(hull) else {
             return false;
@@ -138,7 +138,7 @@ impl DefaultNarrowPhase {
             if let Some((hgt, _)) = hf.sample(v.x, v.z) {
                 let depth = hgt - v.y;
                 if depth > -self.skin {
-                    self.cand.push(ContactPoint {
+                    self.ws.cand.push(ContactPoint {
                         point: Vec3::new(v.x, hgt, v.z),
                         depth,
                         feature: idx as u32 + 1,
@@ -146,7 +146,7 @@ impl DefaultNarrowPhase {
                 }
             }
         }
-        if self.cand.is_empty() {
+        if self.ws.cand.is_empty() {
             return false;
         }
         self.select_contacts(self.min_point_sep)

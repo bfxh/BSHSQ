@@ -24,8 +24,8 @@ impl DefaultNarrowPhase {
         out: &mut Vec<Manifold>,
     ) {
         // 盒对专用路径开关：每对先复位（非盒对 / 圆柱对一律走通用路径）。
-        self.box_axes_a = None;
-        self.box_axes_b = None;
+        self.ws.box_axes_a = None;
+        self.ws.box_axes_b = None;
 
         // —— 复合体：子形状展开为**子对**并递归本函数 ——
         //
@@ -287,7 +287,7 @@ impl DefaultNarrowPhase {
                 return true;
             }
             // 地形法线（取最深接触的采样法线）。
-            let deepest = self.cand[0];
+            let deepest = self.ws.cand[0];
             let n_t = hf
                 .sample(deepest.point.x, deepest.point.z)
                 .map(|(_, n)| n)
@@ -298,7 +298,7 @@ impl DefaultNarrowPhase {
                 a,
                 b,
                 normal,
-                points: ContactPoints::from_slice(&self.cand),
+                points: ContactPoints::from_slice(&self.ws.cand),
             });
             return true;
         }
@@ -443,29 +443,33 @@ impl DefaultNarrowPhase {
         // 轴由 (rot, half) 直生（每体 3 次旋转），供 SAT/clip 直接消费。
         // 【实验】不再调用分离预筛：其 15 轴是 SAT 21 轴的子集（面轴 ± 同解），
         // 预筛不拒的对必然要再做一遍同样的 15 轴测试 ⇒ 对真接触对是纯重复。
-        self.box_a = Some((ha, pa));
-        self.box_b = Some((hb, pb));
+        self.ws.box_a = Some((ha, pa));
+        self.ws.box_b = Some((hb, pb));
         // 体轴缓存（T3）：同体连续出现 ⇒ 每体每帧只算一次 3 次旋转。
         let fp_a = rot_fp(ra);
-        self.box_axes_a = Some(if self.cached_ax_a.0 == a && self.cached_ax_a.1 == fp_a {
-            self.cached_ax_a.2
-        } else {
-            let ax = box_axes(ra);
-            self.cached_ax_a = (a, fp_a, ax);
-            ax
-        });
+        self.ws.box_axes_a = Some(
+            if self.ws.cached_ax_a.0 == a && self.ws.cached_ax_a.1 == fp_a {
+                self.ws.cached_ax_a.2
+            } else {
+                let ax = box_axes(ra);
+                self.ws.cached_ax_a = (a, fp_a, ax);
+                ax
+            },
+        );
         let fp_b = rot_fp(rb);
-        self.box_axes_b = Some(if self.cached_ax_b.0 == b && self.cached_ax_b.1 == fp_b {
-            self.cached_ax_b.2
-        } else {
-            let ax = box_axes(rb);
-            self.cached_ax_b = (b, fp_b, ax);
-            ax
-        });
+        self.ws.box_axes_b = Some(
+            if self.ws.cached_ax_b.0 == b && self.ws.cached_ax_b.1 == fp_b {
+                self.ws.cached_ax_b.2
+            } else {
+                let ax = box_axes(rb);
+                self.ws.cached_ax_b = (b, fp_b, ax);
+                ax
+            },
+        );
         if let Some((sep, n, src)) = self.sat(pb - pa) {
             // 速度充气视野（见 `predict_dt` 字段注）：`0` ⇒ 逐位同现行。
-            self.inflate = self.predict_inflate(a, b, bodies, n);
-            if sep > self.skin + self.inflate {
+            self.ws.inflate = self.predict_inflate(a, b, bodies, n);
+            if sep > self.skin + self.ws.inflate {
                 return;
             }
             if self.clip(n, src) {
@@ -473,7 +477,7 @@ impl DefaultNarrowPhase {
                     a,
                     b,
                     normal: n,
-                    points: ContactPoints::from_slice(&self.cand),
+                    points: ContactPoints::from_slice(&self.ws.cand),
                 });
             }
         }
@@ -505,27 +509,27 @@ impl DefaultNarrowPhase {
         };
         // 世界多面体填充缓存（T3）：键 = (体号, 多面体序号)；pair 按
         // (a,b) 排序 ⇒ 同一体连续命中，每体每帧只填一次（纯函数）。
-        if self.cached_a != (a, ia as u64) {
-            self.poly_a.fill(&self.polys[ia], pa, ra);
-            self.cached_a = (a, ia as u64);
+        if self.ws.cached_a != (a, ia as u64) {
+            self.ws.poly_a.fill(&self.ws.polys[ia], pa, ra);
+            self.ws.cached_a = (a, ia as u64);
         }
-        if self.cached_b != (b, ib as u64) {
-            self.poly_b.fill(&self.polys[ib], pb, rb);
-            self.cached_b = (b, ib as u64);
+        if self.ws.cached_b != (b, ib as u64) {
+            self.ws.poly_b.fill(&self.ws.polys[ib], pb, rb);
+            self.ws.cached_b = (b, ib as u64);
         }
         // 盒对 SAT 快路径参数（圆柱 → None，走通用逐顶点路径）。
-        self.box_a = match sa {
+        self.ws.box_a = match sa {
             Shape::Box { half } => Some((*half, pa)),
             _ => None,
         };
-        self.box_b = match sb {
+        self.ws.box_b = match sb {
             Shape::Box { half } => Some((*half, pb)),
             _ => None,
         };
         if let Some((sep, n, src)) = self.sat(pb - pa) {
             // 速度充气视野（同盒对路径；见 `predict_dt` 字段注）。
-            self.inflate = self.predict_inflate(a, b, bodies, n);
-            if sep > self.skin + self.inflate {
+            self.ws.inflate = self.predict_inflate(a, b, bodies, n);
+            if sep > self.skin + self.ws.inflate {
                 return;
             }
             if self.clip(n, src) {
@@ -533,7 +537,7 @@ impl DefaultNarrowPhase {
                     a,
                     b,
                     normal: n,
-                    points: ContactPoints::from_slice(&self.cand),
+                    points: ContactPoints::from_slice(&self.ws.cand),
                 });
             }
         }
@@ -627,8 +631,8 @@ impl DefaultNarrowPhase {
         if local.is_empty() {
             return;
         }
-        self.cand.clear();
-        self.cand.extend_from_slice(&local);
+        self.ws.cand.clear();
+        self.ws.cand.extend_from_slice(&local);
         if !self.select_contacts(self.min_point_sep) {
             return;
         }
@@ -636,7 +640,7 @@ impl DefaultNarrowPhase {
             a,
             b,
             normal: n_ab,
-            points: ContactPoints::from_slice(&self.cand),
+            points: ContactPoints::from_slice(&self.ws.cand),
         });
     }
 
@@ -718,8 +722,8 @@ impl DefaultNarrowPhase {
         if local.is_empty() {
             return;
         }
-        self.cand.clear();
-        self.cand.extend_from_slice(&local);
+        self.ws.cand.clear();
+        self.ws.cand.extend_from_slice(&local);
         if !self.select_contacts(self.min_point_sep) {
             return;
         }
@@ -727,7 +731,7 @@ impl DefaultNarrowPhase {
             a,
             b,
             normal: n_ab,
-            points: ContactPoints::from_slice(&self.cand),
+            points: ContactPoints::from_slice(&self.ws.cand),
         });
     }
 }

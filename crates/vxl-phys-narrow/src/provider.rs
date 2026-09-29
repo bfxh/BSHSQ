@@ -100,8 +100,8 @@ impl DefaultNarrowPhase {
             return true;
         }
         let mut supported = false;
-        for k in 0..self.hull_pts[side].len() {
-            supported |= providers.contacts_point(id, self.hull_pts[side][k], band, buf);
+        for k in 0..self.ws.hull_pts[side].len() {
+            supported |= providers.contacts_point(id, self.ws.hull_pts[side][k], band, buf);
         }
         supported
     }

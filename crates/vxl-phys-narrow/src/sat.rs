@@ -7,7 +7,7 @@ type BoxAxes = Option<([Vec3; 3], [Vec3; 3])>;
 impl DefaultNarrowPhase {
     /// 盒对体轴 `(a, b)`：两侧都置了才走专用路径（盒×盒）。
     fn box_axes(&self) -> BoxAxes {
-        match (self.box_axes_a, self.box_axes_b) {
+        match (self.ws.box_axes_a, self.ws.box_axes_b) {
             (Some(aa), Some(ab)) => Some((aa, ab)),
             _ => None,
         }
@@ -35,7 +35,11 @@ impl DefaultNarrowPhase {
                 (bi, face_normal_of(&axes, BOX_FACES[bi].0))
             }
             None => {
-                let p = if ref_is_a { &self.poly_a } else { &self.poly_b };
+                let p = if ref_is_a {
+                    &self.ws.poly_a
+                } else {
+                    &self.ws.poly_b
+                };
                 let mut bi = 0;
                 let mut bd = f32::MIN;
                 for (i, &n) in p.face_normal.iter().enumerate() {
@@ -52,39 +56,39 @@ impl DefaultNarrowPhase {
 
     /// 参考面的世界顶点入 scratch，返回**全局基准号**（供侧平面特征号复用）。
     fn collect_ref_verts(&mut self, box_axes: BoxAxes, ref_is_a: bool, ref_face_idx: usize) -> u32 {
-        self.ref_v.clear();
+        self.ws.ref_v.clear();
         match box_axes {
             Some((aa, ab)) => {
                 let (axes, half, pos) = if ref_is_a {
-                    let (h, p) = self.box_a.expect("盒对专用路径必置 box_a");
+                    let (h, p) = self.ws.box_a.expect("盒对专用路径必置 box_a");
                     (aa, h, p)
                 } else {
-                    let (h, p) = self.box_b.expect("盒对专用路径必置 box_b");
+                    let (h, p) = self.ws.box_b.expect("盒对专用路径必置 box_b");
                     (ab, h, p)
                 };
                 for &sg in BOX_FACES[ref_face_idx].1.iter() {
-                    self.ref_v.push(face_vertex(pos, &axes, half, sg));
+                    self.ws.ref_v.push(face_vertex(pos, &axes, half, sg));
                 }
                 ref_face_idx as u32 * 4
             }
             None => {
                 let (s, e) = if ref_is_a {
-                    let p = &self.poly_a;
+                    let p = &self.ws.poly_a;
                     (
                         p.face_start[ref_face_idx] as usize,
                         p.face_start[ref_face_idx + 1] as usize,
                     )
                 } else {
-                    let p = &self.poly_b;
+                    let p = &self.ws.poly_b;
                     (
                         p.face_start[ref_face_idx] as usize,
                         p.face_start[ref_face_idx + 1] as usize,
                     )
                 };
                 if ref_is_a {
-                    self.ref_v.extend_from_slice(&self.poly_a.verts[s..e]);
+                    self.ws.ref_v.extend_from_slice(&self.ws.poly_a.verts[s..e]);
                 } else {
-                    self.ref_v.extend_from_slice(&self.poly_b.verts[s..e]);
+                    self.ws.ref_v.extend_from_slice(&self.ws.poly_b.verts[s..e]);
                 }
                 s as u32
             }
@@ -93,15 +97,15 @@ impl DefaultNarrowPhase {
 
     /// 入射面：与 n_ref 最逆平行的面；顶点带特征号入裁剪多边形。
     fn collect_incident(&mut self, box_axes: BoxAxes, ref_is_a: bool, n_ref: Vec3) {
-        self.clip_in.clear();
+        self.ws.clip_in.clear();
         let side_bit = if ref_is_a { FEAT_SIDE_B } else { 0 };
         match box_axes {
             Some((aa, ab)) => {
                 let (axes, half, pos) = if ref_is_a {
-                    let (h, p) = self.box_b.expect("盒对专用路径必置 box_b");
+                    let (h, p) = self.ws.box_b.expect("盒对专用路径必置 box_b");
                     (ab, h, p)
                 } else {
-                    let (h, p) = self.box_a.expect("盒对专用路径必置 box_a");
+                    let (h, p) = self.ws.box_a.expect("盒对专用路径必置 box_a");
                     (aa, h, p)
                 };
                 let mut inc_face = 0;
@@ -116,11 +120,15 @@ impl DefaultNarrowPhase {
                 let base = inc_face as u32 * 4;
                 for (i, &sg) in BOX_FACES[inc_face].1.iter().enumerate() {
                     let v = face_vertex(pos, &axes, half, sg);
-                    self.clip_in.push((v, side_bit | (base + i as u32)));
+                    self.ws.clip_in.push((v, side_bit | (base + i as u32)));
                 }
             }
             None => {
-                let inc_poly = if ref_is_a { &self.poly_b } else { &self.poly_a };
+                let inc_poly = if ref_is_a {
+                    &self.ws.poly_b
+                } else {
+                    &self.ws.poly_a
+                };
                 let mut inc_face = 0;
                 let mut inc_dot = f32::MAX;
                 for (i, &n) in inc_poly.face_normal.iter().enumerate() {
@@ -139,7 +147,7 @@ impl DefaultNarrowPhase {
                 };
                 for k in is_..ie {
                     let v = inc_poly.verts[k];
-                    self.clip_in.push((v, side_bit | (k as u32)));
+                    self.ws.clip_in.push((v, side_bit | (k as u32)));
                 }
             }
         }
@@ -148,19 +156,19 @@ impl DefaultNarrowPhase {
     /// 逐侧平面裁剪入射多边形（侧平面向量**不归一化**）；`false` = 已裁空。
     fn clip_by_side_planes(&mut self, n_ref: Vec3, ref_base: u32) -> bool {
         let mut centroid = Vec3::ZERO;
-        for &v in &self.ref_v {
+        for &v in &self.ws.ref_v {
             centroid += v;
         }
-        centroid *= 1.0 / self.ref_v.len() as f32;
+        centroid *= 1.0 / self.ws.ref_v.len() as f32;
 
         // 逐侧平面裁剪入射多边形。侧平面向量**不归一化**：保留判定
         // （`da <= 0`）、穿越判定（`da*db < 0`）与插值参数
         // （`t = da/(da−db)`）全部与平面向量尺度无关，故省掉每面一次
         // sqrt + 除法（旧实现每 clip 4 次）。
-        let nref_v = self.ref_v.len();
+        let nref_v = self.ws.ref_v.len();
         for k in 0..nref_v {
-            let w0 = self.ref_v[k];
-            let w1 = self.ref_v[if k + 1 == nref_v { 0 } else { k + 1 }];
+            let w0 = self.ws.ref_v[k];
+            let w1 = self.ws.ref_v[if k + 1 == nref_v { 0 } else { k + 1 }];
             let e = w1 - w0;
             let mut s = e.cross(n_ref);
             if s.length_squared() < 1e-16 {
@@ -170,29 +178,29 @@ impl DefaultNarrowPhase {
                 s = -s;
             }
             // keep: dot(v - w0, s) <= 0
-            self.clip_out.clear();
-            let m = self.clip_in.len();
-            self.probe_clip_iters += m as u64;
-            self.probe_clip_max = self.probe_clip_max.max(m as u64);
+            self.ws.clip_out.clear();
+            let m = self.ws.clip_in.len();
+            self.probe.clip_iters += m as u64;
+            self.probe.clip_max = self.probe.clip_max.max(m as u64);
             for i in 0..m {
-                let (va, fa) = self.clip_in[i];
-                let (vb, fb) = self.clip_in[(i + 1) % m];
+                let (va, fa) = self.ws.clip_in[i];
+                let (vb, fb) = self.ws.clip_in[(i + 1) % m];
                 let da = (va - w0).dot(s);
                 let db = (vb - w0).dot(s);
                 if da <= 0.0 {
-                    self.clip_out.push((va, fa));
+                    self.ws.clip_out.push((va, fa));
                 }
                 if da * db < 0.0 {
                     let t = da / (da - db);
-                    self.probe_clip_xings += 1;
-                    self.clip_out.push((
+                    self.probe.clip_xings += 1;
+                    self.ws.clip_out.push((
                         va + (vb - va) * t,
                         feat_intersect(fa, fb, ref_base as usize + k),
                     ));
                 }
             }
-            core::mem::swap(&mut self.clip_in, &mut self.clip_out);
-            if self.clip_in.is_empty() {
+            core::mem::swap(&mut self.ws.clip_in, &mut self.ws.clip_out);
+            if self.ws.clip_in.is_empty() {
                 return false;
             }
         }
@@ -203,10 +211,10 @@ impl DefaultNarrowPhase {
     fn build_axes(&mut self, box_axes: BoxAxes, na: usize, nb: usize) {
         if let Some((aa, ab)) = box_axes {
             for f in &BOX_FACES {
-                self.axes.push(face_normal_of(&aa, f.0));
+                self.ws.axes.push(face_normal_of(&aa, f.0));
             }
             for f in &BOX_FACES {
-                self.axes.push(face_normal_of(&ab, f.0));
+                self.ws.axes.push(face_normal_of(&ab, f.0));
             }
             let ea = [aa[1], aa[2], aa[0]];
             let eb = [ab[1], ab[2], ab[0]];
@@ -215,23 +223,23 @@ impl DefaultNarrowPhase {
                     let c = x.cross(y);
                     let l2 = c.length_squared();
                     if l2 > 1e-8 {
-                        self.axes.push(c * (1.0 / l2.sqrt()));
+                        self.ws.axes.push(c * (1.0 / l2.sqrt()));
                     }
                 }
             }
         } else {
             for i in 0..na {
-                self.axes.push(self.poly_a.face_normal[i]);
+                self.ws.axes.push(self.ws.poly_a.face_normal[i]);
             }
             for i in 0..nb {
-                self.axes.push(self.poly_b.face_normal[i]);
+                self.ws.axes.push(self.ws.poly_b.face_normal[i]);
             }
-            for &ea in &self.poly_a.edge_dirs {
-                for &eb in &self.poly_b.edge_dirs {
+            for &ea in &self.ws.poly_a.edge_dirs {
+                for &eb in &self.ws.poly_b.edge_dirs {
                     let c = ea.cross(eb);
                     let l2 = c.length_squared();
                     if l2 > 1e-8 {
-                        self.axes.push(c * (1.0 / l2.sqrt()));
+                        self.ws.axes.push(c * (1.0 / l2.sqrt()));
                     }
                 }
             }
@@ -246,9 +254,9 @@ impl DefaultNarrowPhase {
         n_face_b: usize,
     ) -> Option<(f32, Vec3, AxisSrc)> {
         let (aa, ab) = box_axes?;
-        let (ha, pa) = self.box_a.expect("盒对快路径必置 box_a");
-        let (hb, pb) = self.box_b.expect("盒对快路径必置 box_b");
-        let scanned = simd::sat_scan(&self.axes, ha, &aa, pa, hb, &ab, pb, self.skin);
+        let (ha, pa) = self.ws.box_a.expect("盒对快路径必置 box_a");
+        let (hb, pb) = self.ws.box_b.expect("盒对快路径必置 box_b");
+        let scanned = simd::sat_scan(&self.ws.axes, ha, &aa, pa, hb, &ab, pb, self.skin);
         scanned.map(|(sep, n, idx)| {
             let src = if idx < n_face_a {
                 AxisSrc::FaceA
@@ -269,7 +277,8 @@ impl DefaultNarrowPhase {
         let mut max_b = f32::MIN;
         // T3 快路径：盒对用 extents 投影公式（面法线 [0]/[2]/[4] 即体轴，
         // 与逐顶点 min/max 数学等价），轴序/取向/来源分类与通用路径同。
-        if let (Some((ha, pa)), Some((hb, pb)), Some((aa, ab))) = (self.box_a, self.box_b, box_axes)
+        if let (Some((ha, pa)), Some((hb, pb)), Some((aa, ab))) =
+            (self.ws.box_a, self.ws.box_b, box_axes)
         {
             let ra = ha.x * aa[0].dot(n0).abs()
                 + ha.y * aa[1].dot(n0).abs()
@@ -283,9 +292,9 @@ impl DefaultNarrowPhase {
             max_a = ca + ra;
             min_b = cb - rb;
             max_b = cb + rb;
-        } else if let (Some((ha, pa)), Some((hb, pb))) = (self.box_a, self.box_b) {
-            let ax = &self.poly_a.face_normal;
-            let bx = &self.poly_b.face_normal;
+        } else if let (Some((ha, pa)), Some((hb, pb))) = (self.ws.box_a, self.ws.box_b) {
+            let ax = &self.ws.poly_a.face_normal;
+            let bx = &self.ws.poly_b.face_normal;
             let ra = ha.x * ax[0].dot(n0).abs()
                 + ha.y * ax[2].dot(n0).abs()
                 + ha.z * ax[4].dot(n0).abs();
@@ -299,7 +308,7 @@ impl DefaultNarrowPhase {
             min_b = cb - rb;
             max_b = cb + rb;
         } else {
-            for &v in &self.poly_a.verts {
+            for &v in &self.ws.poly_a.verts {
                 let d = v.dot(n0);
                 if d < min_a {
                     min_a = d;
@@ -308,7 +317,7 @@ impl DefaultNarrowPhase {
                     max_a = d;
                 }
             }
-            for &v in &self.poly_b.verts {
+            for &v in &self.ws.poly_b.verts {
                 let d = v.dot(n0);
                 if d < min_b {
                     min_b = d;
@@ -326,9 +335,9 @@ impl DefaultNarrowPhase {
     /// 对每根轴同时测两个方向（A 在负侧 / B 在负侧），取较大分离度；
     /// 法线统一取向为 a→b。此前单侧公式的取向错误会造成深度失真（能量泵）。
     pub(crate) fn sat(&mut self, _hint: Vec3) -> Option<(f32, Vec3, AxisSrc)> {
-        let na = self.poly_a.face_normal.len();
-        let nb = self.poly_b.face_normal.len();
-        self.axes.clear();
+        let na = self.ws.poly_a.face_normal.len();
+        let nb = self.ws.poly_b.face_normal.len();
+        self.ws.axes.clear();
         // 轴表：盒对专用路径由体轴直生（面 6 轴 + 棱叉积 9 轴，顺序与通用
         // 路径逐条对应——面序 [±X,±Y,±Z]、棱序 [+Y,+Z,+X]×[+Y,+Z,+X]，后者由
         // polytope 测试钉死）；其余形状读多面体。
@@ -366,7 +375,7 @@ impl DefaultNarrowPhase {
         let mut best = f32::MIN;
         let mut best_n = Vec3::ZERO;
         let mut best_src = AxisSrc::Edge;
-        for (idx, &n0) in self.axes.iter().enumerate() {
+        for (idx, &n0) in self.ws.axes.iter().enumerate() {
             if n0.length_squared() < 0.5 {
                 continue;
             }
@@ -419,23 +428,23 @@ impl DefaultNarrowPhase {
             return false;
         }
         // 主平面过滤：保留 n_ref 方向距离 ≤ skin（+本对充气量）的点（depth = -dist）。
-        let p0 = self.ref_v[0];
-        self.cand.clear();
-        for &(v, feat) in &self.clip_in {
+        let p0 = self.ws.ref_v[0];
+        self.ws.cand.clear();
+        for &(v, feat) in &self.ws.clip_in {
             let d = (v - p0).dot(n_ref);
-            if d <= self.skin + self.inflate {
-                self.cand.push(ContactPoint {
+            if d <= self.skin + self.ws.inflate {
+                self.ws.cand.push(ContactPoint {
                     point: v,
                     depth: -d,
                     feature: feat,
                 });
             }
         }
-        if self.cand.is_empty() {
+        if self.ws.cand.is_empty() {
             return false;
         }
-        self.probe_clip_calls += 1;
-        self.probe_cand_pts += self.cand.len() as u64;
+        self.probe.clip_calls += 1;
+        self.probe.cand_pts += self.ws.cand.len() as u64;
 
         // 去重 + 取最深 ≤4 点（确定性排序见 select_contacts）。
         self.select_contacts(self.min_point_sep)
