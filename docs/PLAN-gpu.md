@@ -2671,3 +2671,36 @@ m0 压力哈希 `0x417be20a…`、金样门 col45 45/45 / pile5 2000/2000 / towe
 → ② 触点 4（两遍网格，先只服务平铺档，验 2b 平铺读数逐位不变）
 → ③ 触点 5（pmass gather，纯流体档须逐位不变：常量 vs 真 gather 在等质量下同值）
 → ④ 触点 6–8 + 判据 1/2/4。**每步都跑 `gate_all` 与纯流体回归**；③ 会动 perf 读数，单独记档。
+
+#### 26.3.1 执行期补记（2026-09-30，动核前勘察的第二步；**未动核**）
+
+**A/B 基线已取**（改线前后必须逐位相同）：`tests/packet_grid_canary.rs` 现在打印卡上末态哈希。
+2b 场景（晶格 8³ + 地板，60 tick × 4 子步）当前读数：
+**哈希 `0x9fae52a5be7ed274`**、流体最低 y 卡 **−1.81740** / CPU 同源 **−1.81726**（差 0.14 mm）。
+复跑：`cargo test -p vxl-phys-gpu --test packet_grid_canary -- --nocapture`。
+
+**门禁（棘轮）给这一片的硬约束**：`pipeline.rs` 已 **857 行**（超 800 硬阈、靠祖父条款在基线里）
+⇒ **任何增长都要求同文件最长函数严格下降**；`sorted.rs`（275 行）同理。⇒ 改法必须是
+「**把既有块搬进新文件（净缩）+ 新逻辑写在那边**」，顺序：
+① 新文件 `src/pipeline/two_class.rs`：搬 `make_bind_groups`（75 行）+ 网格 uniform 序列化
+（`make_params` 里那段 ~18 行 → 一次调用）+ `encode_substep` 里的网格分派块（~13 行）；
+② 新逻辑写在同一文件：`grid_params_buf(.., class_lo)`、类 1 绑定组、`impl Packet::encode_grid`；
+③ `pipeline.rs` 只留：`mod two_class;`（+1）、`Params`/`Binds`/`Packet` 各加一个字段（+3）、
+`start_b` 尺寸 `2*(total+1)`（同行改）、密度布局 spec 改 `"ur_r_rrw r"`（**空格占位跳过槽 8、
+声明槽 9 = 类 1 表**，同行改）、力布局加一行 `(9, Kind::Ro)`（+1）。
+`sorted.rs` 的 `make_sorted_binds` 也要补槽 9 的条目（布局共享 ⇒ 必给）⇒ 那两行同样要腾。
+
+**两遍的 uniform 语义（已核）**：**两遍都用 `n_fluid = cfg.n_fluid`**、只差 `class_lo`
+（类 0 写 0、类 1 写 `cfg.n_fluid`，非 0 ⇒ 核里判为边界类）⇒ 类 0 处理 `[0, n_fluid)`、
+类 1 处理 `[n_fluid, n)`。`n_fluid == n` 时**跳过第二遍**（类 1 为空）。
+⚠️ 这与我 2026-09-30 先在 `Packet` 里写的 `n`（单遍档的临时值）不同——**两遍落地时那格要改回
+`cfg.n_fluid`**，行内注释也一并改（`tests/packet_grid_canary.rs` 会红着提醒：它现在就是"类参数
+写对没有"的门）。
+⚠️ `bin_count`/`place` 的分派必须覆盖到**本类的 `cls_hi`**（§26.2 坑①）⇒ 两遍各按
+`cfg.n_fluid` / `n` 算 `groups_n`。
+
+**核的两段枚举（与平铺档逐位相同的理由，写下来备查）**：平铺档每格的序列 = 引擎 `canon` 的
+**索引升序**；而边界粒子的**全局索引恒 ≥ `n_fluid`**（`set_boundary_particles` 先截断再追加）
+⇒ 平铺序本来就等于「**先流体段、后边界段**」⇒ 两段枚举的**累加序逐项相同** ⇒ 密度（两个累加器
+各自有序）与力（`a`/`xs` 的贡献依次为"流体项…边界项…"）都**逐位不变**。这也是 §26 那条
+"每格序列逐条相同"在数值层面的直接后果。

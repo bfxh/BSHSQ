@@ -98,6 +98,18 @@ fn fluid_y_min(pos: &[f32], n_fluid: usize) -> f32 {
     m
 }
 
+/// 全量 `pos`/`vel` 的位级 FNV-1a（**A/B 对拍的强判据**：改线前后该逐位相同）。
+fn state_hash(pos: &[f32], vel: &[f32]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for v in pos.iter().chain(vel.iter()) {
+        for b in v.to_bits().to_le_bytes() {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x100_0000_01b3);
+        }
+    }
+    h
+}
+
 #[test]
 fn packet_sph_holds_the_fluid_on_the_floor() {
     if !have_adapter() {
@@ -116,7 +128,8 @@ fn packet_sph_holds_the_fluid_on_the_floor() {
     let y0 = fluid_y_min(&pos, n_fluid);
     let mut pk = Packet::new(0, pc, &pos, &vel, apmass).expect("建包失败");
     pk.run(&pc, TICKS, SUB, false);
-    let (pos1, _) = pk.snapshot();
+    let (pos1, vel1) = pk.snapshot();
+    let h = state_hash(&pos1, &vel1);
     let y1 = fluid_y_min(&pos1, n_fluid);
     // **CPU 同源对照**：新造一份同样的场景（确定性 ⇒ 与上面 `f` 的初值逐位相同）继续推 60 tick。
     // 判"Packet 对不对"要看**引擎自己的答案**，不能拿"我以为的物理"当期望。
@@ -135,7 +148,8 @@ fn packet_sph_holds_the_fluid_on_the_floor() {
     println!(
         "== 反空跑判据（晶格 {N}³ + 地板；重力开；{TICKS} tick × {SUB} 子步）==\n\
          \x20  网格 dims {:?} = total {} | 粒数 {}（流体 {n_fluid}）\n\
-         \x20  流体最低 y：初 {y0:+.5} → 卡 {y1:+.5} | **CPU 同源 {cy_min:+.5}** | 自由落体对照 −{free_fall:.3} m",
+         \x20  流体最低 y：初 {y0:+.5} → 卡 {y1:+.5} | **CPU 同源 {cy_min:+.5}** | 自由落体对照 −{free_fall:.3} m\n\
+         \x20  卡上末态哈希（A/B 逐位对拍用）：0x{h:016x}",
         pc.dims, pc.total, pc.n
     );
     assert!(
