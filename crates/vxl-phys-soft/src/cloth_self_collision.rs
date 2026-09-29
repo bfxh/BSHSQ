@@ -25,6 +25,10 @@ use vxl_phys_core::Vec3;
 #[path = "cloth_self_collide_pass.rs"]
 mod pass;
 
+// **点-边**（T3 进阶档）= 同名目录式子模块 `edge`（边接触 + 子开关 + `new` 的两个小构建器；
+// 父文件行数棘轮 ⇒ 构建器下沉后本文件回到基线以下）。
+mod edge;
+
 /// **自碰撞状态**（切片 T3：空间哈希 + 粒子-粒子位置投影；**默认关**）。
 ///
 /// **为什么收成一个结构**：`ClothSheet` 受 god 门**成员棘轮**（22 成员顶格，阈值 24）——
@@ -50,23 +54,20 @@ pub struct SelfContacts {
     cells: BTreeMap<(i32, i32, i32), Vec<u32>>,
     /// 最近一个子步实际解算的对数（诊断/判据读；不参与动力学）。
     pub pairs: u32,
+    /// **点-边子系统**（T3 进阶档；子开关默认关 ⇒ 零换代；见子模块 `edge`）。
+    pub(crate) edges: edge::PointEdge,
 }
 
 impl SelfContacts {
     /// 默认**关**；`particle_radius` 由 `ClothSheet::new` 按壳厚给（见字段注），
-    /// `forbidden` 一次填好（结构/剪切 + 弯曲；排序去重 ⇒ 二分）。
+    /// `forbidden` 一次填好（结构/剪切 + 弯曲；排序去重 ⇒ 二分）。构建器在子模块
+    /// `edge`（父文件行数棘轮）。
     pub(crate) fn new(particle_radius: f32, cons: &[[u32; 2]], bend: &[[u32; 2]]) -> Self {
-        let mut f: Vec<[u32; 2]> = cons.iter().chain(bend.iter()).copied().collect();
-        f.sort_unstable();
-        f.dedup();
         Self {
-            cfg: SelfCollision {
-                enabled: false,
-                particle_radius,
-                ..SelfCollision::default()
-            },
-            forbidden: f,
+            cfg: edge::default_cfg(particle_radius),
+            forbidden: edge::build_forbidden(cons, bend),
             cells: BTreeMap::new(),
+            edges: edge::PointEdge::new(cons),
             pairs: 0,
         }
     }

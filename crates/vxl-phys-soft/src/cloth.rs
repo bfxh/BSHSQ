@@ -109,8 +109,8 @@ pub struct ClothSheet {
     pub mass: Vec<f32>,
     /// 三角（索引指向 `pos`；注册序 = 确定性）。
     pub tris: Vec<[u32; 3]>,
-    /// 唯一边（`[min, max]` 有序对；插入序 = 三角扫描序 ⇒ 确定性）。
-    pub(crate) cons: Vec<[u32; 2]>,
+    /// 唯一边（`[min, max]` 有序对；插入序 = 三角扫描序 ⇒ 确定性；判据取边集用）。
+    pub cons: Vec<[u32; 2]>,
     pub(crate) rest: Vec<f32>,
     pub(crate) lambda: Vec<f32>,
     /// **弯曲约束**（二环对；`[min, max]` 有序，插入序见 `new`）。

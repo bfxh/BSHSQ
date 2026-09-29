@@ -96,6 +96,6 @@ impl ClothSheet {
                 }
             }
         }
-        self.self_contacts.pairs = pairs;
+        self.finish_self_contacts(pairs);
     }
 }
