@@ -85,9 +85,9 @@ def _probe_rs():
     try:
         for gate, (fname, content) in PROBES.items():
             os.makedirs(PROBE_DIR, exist_ok=True)
-            with open(os.path.join(PROBE_DIR, fname), "w", encoding="utf-8") as f:
-                f.write(content)
-            pre = run_gate(gate)          # 注入前先跑一次：此时探针文件已被上一轮 remove
+            # 先跑一次**干净态**：此时探针文件还没写。缺这步的话，一门本来判红也会被
+            # 当成"注入后转红"而误判成真门（本仓 2026-09-30 就靠这步量出 16 道门的 ✅ 不成立）。
+            pre = run_gate(gate)
             with open(os.path.join(PROBE_DIR, fname), "w", encoding="utf-8") as f:
                 f.write(content)
             out = run_gate(gate)

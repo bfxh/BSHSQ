@@ -1,1 +1,9 @@
-{}
+{
+  "crates/vxl-phys-gpu/examples/gpu_body_probe.rs": 1,
+  "crates/vxl-phys-gpu/examples/gpu_layout_probe.rs": 1,
+  "crates/vxl-phys-gpu/examples/gpu_narrow_probe/main.rs": 1,
+  "crates/vxl-phys-narrow/src/gjk.rs": 1,
+  "crates/vxl-phys-narrow/src/simd.rs": 1,
+  "crates/vxl-phys-narrow/src/tests.rs": 2,
+  "crates/vxl-phys/tests/debris_mass.rs": 1
+}

@@ -1,5 +1,16 @@
 {
-  "crates/vxl-phys-broad/src/lib.rs": 2,
-  "crates/vxl-phys-narrow/src/lib.rs": 1,
-  "crates/vxl-phys-solver/src/lib.rs": 1
+  "crates/vxl-phys-broad/src/bvh_phase.rs": 1,
+  "crates/vxl-phys-broad/src/grid_phase.rs": 1,
+  "crates/vxl-phys-fluid/src/fluid_density.rs": 2,
+  "crates/vxl-phys-fluid/src/fluid_force.rs": 1,
+  "crates/vxl-phys-gpu/examples/gpu_density_probe.rs": 1,
+  "crates/vxl-phys-narrow/src/gjk.rs": 1,
+  "crates/vxl-phys-narrow/src/mesh_pair.rs": 1,
+  "crates/vxl-phys-soft/src/cloth.rs": 1,
+  "crates/vxl-phys-soft/src/cloth_self_collide_pass.rs": 1,
+  "crates/vxl-phys-soft/src/cloth_self_collision/edge.rs": 1,
+  "crates/vxl-phys-terrain/src/mesh.rs": 1,
+  "crates/vxl-phys-terrain/src/voxel/voxel_contacts.rs": 1,
+  "crates/vxl-phys-terrain/src/voxel/voxel_volume.rs": 1,
+  "crates/vxl-phys/tests/float_quiet_probe.rs": 1
 }
