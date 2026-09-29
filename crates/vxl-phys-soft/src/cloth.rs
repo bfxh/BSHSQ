@@ -10,18 +10,20 @@
 //! **已有**：三组距离约束（结构/剪切/弯曲）、提供者接触、**刚体接触**——静态/睡眠代理 = 墙
 //! （切片 2b-i），动态代理 = 两体约束 + **反作用两腿** `body.dv`/`body.dx`（切片 2b-ii，
 //! 口径与 `rope::apply_body_hit` 同款，见 [`BodyCoupling`]）。
-//! **边界（写清，不是漏）**：无自碰撞、无撕裂、无塑性、无气动消费（`vxl-phys-aero` 的
-//! `face_force` 已备，接线属后续切片）；接触几何走"最近面"（`rigid::shape_penetration`），
-//! **没有** rope 那套"入口面"缓存 —— 布片命中点多、面法线不像绳那样在底面↔侧面↔顶面之间翻转。
+//! **域开关**（全部默认关 ⇒ 默认档逐位不变）：自碰撞（点-点/点-边/自摩擦）、撕裂、塑性、
+//! 气动（力/升力/逐面力矩）。**边界（写清，不是漏）**：接触几何走"最近面"
+//! （`rigid::shape_penetration`），**没有** rope 那套"入口面"缓存 —— 布片命中点多。
 use crate::cloth_aero::ClothAero;
 use crate::cloth_coupling::BodyCoupling;
 use crate::cloth_self_collision::SelfContacts;
-use crate::cloth_tear::Tearing;
 use crate::params::Stiffness;
 use crate::rigid::RigidProxy;
 use std::collections::HashSet;
 use vxl_phys_core::interop::{InteropContact, ProviderColliders};
 use vxl_phys_core::Vec3;
+
+pub mod damage;
+pub mod plastic;
 
 /// **球采样接触投影 + 库仑锥**（从 `rope.rs::project_contacts` **纯搬移**——rope 现委托本函数
 /// ⇒ 那边净缩、这边新增，口径逐字不变）：法向推出（只有真穿透才推 ⇒ 无恢复系数）+
@@ -136,12 +138,10 @@ pub struct ClothSheet {
     /// **自碰撞状态**（空间哈希 + 禁止对；`cfg.enabled` 默认 `false` ⇒ 零成本）。
     pub self_contacts: SelfContacts,
     /// **气动输入**（切片 T4 收尾；`enabled` 默认 `false` ⇒ 零成本短路）。
-    ///
-    /// ⚠️ **成员棘轮**：本字段之后 `ClothSheet` 是 **23/24**（再加一个状态就**必须先并组**，
-    /// 先例：`BodyCoupling` / `SelfContacts` / `ContactTuning`）。
     pub aero: ClothAero,
-    /// **撕裂状态**（`eps` 默认 `∞` = 关 ⇒ 既有场景逐位不变）。
-    pub tear: Tearing,
+    /// **损伤域**（撕裂 + 塑性**并组**：成员棘轮 23/24 顶格 ⇒ 按 `BodyCoupling` / `SelfContacts`
+    /// 先例合并；两子域各自默认关 ⇒ 默认档逐位不变。见 `cloth/damage.rs`）。
+    pub damage: damage::Damage,
 }
 
 impl ClothSheet {
@@ -189,7 +189,7 @@ impl ClothSheet {
             body: BodyCoupling::default(),
             self_contacts,
             aero: ClothAero::default(),
-            tear: Tearing::default(),
+            damage: damage::Damage::default(),
         }
     }
 
@@ -297,8 +297,8 @@ impl ClothSheet {
             self.project_edges(a_tilde);
             self.project_bend(a_tilde_bend);
         }
-        // **撕裂检查**（`eps = ∞` ⇒ 首行短路 ⇒ 默认档零成本、逐位不变）
-        self.tear_check();
+        // **损伤步**：塑性流动先、撕裂检查后（两子域默认关 ⇒ 首行短路、逐位不变）
+        self.damage_step();
     }
 
     // `project_edges`（唯一边投影，含"已撕裂跳过"）**定义在 `cloth_tear.rs`**（那里整块管撕裂）。
@@ -315,7 +315,7 @@ impl ClothSheet {
             return;
         }
         for (k, [i, j]) in self.bend.iter().enumerate() {
-            if self.tear.torn_bend.get(k).copied().unwrap_or(false) {
+            if self.damage.tear.torn_bend.get(k).copied().unwrap_or(false) {
                 continue; // **已撕裂**：撕口两侧的弯曲刚度也该消失（见 `Tearing::torn_bend`）
             }
             let (i, j) = (*i as usize, *j as usize);

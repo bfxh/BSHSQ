@@ -1,6 +1,6 @@
 //! **判据：布料撕裂**（`SPEC.md` §4.6 / 骨架 `TearStrain` 的落点）。
 //!
-//! **口径**：`ClothSheet.tear.eps` = **应变阈值**（`|len − rest| / rest`；骨架档位
+//! **口径**：`ClothSheet.damage.tear.eps` = **应变阈值**（`|len − rest| / rest`；骨架档位
 //! `E03/E05/E10/None` = 0.3 / 0.5 / 1.0 / **`∞`**）。超过阈值的**唯一边**被标记为**已撕裂**
 //! ⇒ 该边**不再是约束**（`project_edges` 跳过、`max_strain` 也不再统计它）。
 //!
@@ -42,7 +42,7 @@ fn plate(n: usize, size: f32) -> (Vec<Vec3>, Vec<[u32; 3]>) {
     (pts, tris)
 }
 
-/// 5×5 布片：**左列（`ix = 0`）钉住**。`eps` 用 `Option`：`None` = **完全不碰 `tear` 字段**
+/// 5×5 布片：**左列（`ix = 0`）钉住**。`eps` 用 `Option`：`None` = **完全不碰 `damage` 字段**
 /// （默认档）；`Some(v)` = 显式设阈值。
 ///
 /// **为什么 `Soft` 档**：拉伸本来很软才拉得出应变；`Hard`（α = 1e-6）下应变被压在 1e-6 量级
@@ -51,7 +51,7 @@ fn sheet(eps: Option<f32>) -> ClothSheet {
     let (pts, tris) = plate(N, 0.5);
     let mut s = ClothSheet::new(pts, tris, 1000.0, 0.01, Stiffness::Soft);
     if let Some(v) = eps {
-        s.tear.eps = v;
+        s.damage.tear.eps = v;
     }
     for iz in 0..W {
         s.set_pinned(iz * W, true);
@@ -120,7 +120,7 @@ fn stretching_past_the_threshold_tears_and_then_settles() {
 fn corner_pinned_sheet_detaches_after_tearing() {
     let (pts, tris) = plate(N, 0.5);
     let mut s = ClothSheet::new(pts, tris, 1000.0, 0.01, Stiffness::Soft);
-    s.tear.eps = 0.05;
+    s.damage.tear.eps = 0.05;
     s.set_pinned(W - 1, true); // 右上角
     let x0 = right_x(&s);
     pull(&mut s, TICKS);
@@ -187,7 +187,7 @@ fn no_tear_when_disabled() {
 #[test]
 fn default_tear_state_is_bit_identical_to_explicit_infinity() {
     let (mut a, mut b) = (sheet(Some(f32::INFINITY)), sheet(None));
-    assert!(b.tear.eps.is_infinite(), "默认必须是关（∞）");
+    assert!(b.damage.tear.eps.is_infinite(), "默认必须是关（∞）");
     pull(&mut a, 120);
     pull(&mut b, 120);
     let same = bits_eq(&a.pos, &b.pos);

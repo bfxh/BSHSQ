@@ -66,21 +66,21 @@ impl ClothSheet {
     /// **撕裂检查**（每子步一次、投影之后）：应变超阈 ⇒ 标记（**同一阈值同时作用于
     /// 结构/剪切边与弯曲对**）。`eps` 非有限 ⇒ **显式短路**（与 `bend_compliance = ∞` 同族先例）。
     pub(crate) fn tear_check(&mut self) {
-        if !self.tear.eps.is_finite() {
+        if !self.damage.tear.eps.is_finite() {
             return;
         }
-        let eps = self.tear.eps;
+        let eps = self.damage.tear.eps;
         let Self {
             pos,
             cons,
             rest,
             bend,
             bend_rest,
-            tear,
+            damage,
             ..
         } = self;
-        mark_torn(cons, rest, &mut tear.torn, pos, eps);
-        mark_torn(bend, bend_rest, &mut tear.torn_bend, pos, eps);
+        mark_torn(cons, rest, &mut damage.tear.torn, pos, eps);
+        mark_torn(bend, bend_rest, &mut damage.tear.torn_bend, pos, eps);
     }
 
     /// **唯一边（结构/剪切）的距离投影**（一遍；从 `project_constraints` 抽出 —— 那边是本地
@@ -111,22 +111,22 @@ impl ClothSheet {
 
     /// 第 `k` 条唯一边是否**已撕裂**（`torn` 未初始化/短于 `cons` ⇒ `false`）。
     pub fn is_torn(&self, k: usize) -> bool {
-        self.tear.torn.get(k).copied().unwrap_or(false)
+        self.damage.tear.torn.get(k).copied().unwrap_or(false)
     }
 
     /// 第 `k` 条**弯曲对**是否已撕裂。
     pub fn bend_is_torn(&self, k: usize) -> bool {
-        self.tear.torn_bend.get(k).copied().unwrap_or(false)
+        self.damage.tear.torn_bend.get(k).copied().unwrap_or(false)
     }
 
     /// **已撕裂的边数**（判据/诊断用；`0` = 没撕或撕裂功能关）。
     pub fn torn_count(&self) -> usize {
-        self.tear.torn.iter().filter(|t| **t).count()
+        self.damage.tear.torn.iter().filter(|t| **t).count()
     }
 
     /// 已撕裂的**弯曲对**数。
     pub fn bend_torn_count(&self) -> usize {
-        self.tear.torn_bend.iter().filter(|t| **t).count()
+        self.damage.tear.torn_bend.iter().filter(|t| **t).count()
     }
 
     /// 第 `k` 条**唯一边**的两端与注册长度（判据仪器：撕裂后的读数要能逐边取）。
