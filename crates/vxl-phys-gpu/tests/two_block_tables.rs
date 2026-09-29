@@ -7,81 +7,14 @@
 //! `n_fluid + total + 1` 项，10M 档（`n_fluid ≈ 10M`、`total ≈ 1.3M`）比 `2·(total+1)` 多 4.5×；
 //! 本布局下**分配 `2·(total+1)` 恒够**（与 `n_fluid` 无关）。
 //!
-//! 本文件与 `two_block_order.rs` **同源**（`scene_2b` / `count_sort_range` 各带一份副本）：
-//! god 门要求"新代码进新文件"（既有文件受行数/最长函数棘轮），故不共享模块。
+//! 本文件与 `two_block_order.rs` / `two_class_real_scene.rs` **共用 `support` 模块**的
+//! `scene_2b` / `count_sort_range`（三条判据同源同口径）。
 //!
 //! ✅ 不需要适配器 ⇒ **CI 上也真跑**。
-use vxl_phys_core::{Quat, Shape, Vec3};
-use vxl_phys_fluid::{BodyPose, FluidConfig, FluidSystem};
+mod support;
 
-const N: usize = 16;
-const SPACING: f32 = 0.05;
-
-/// 2b 场景：晶格 + 5 趟静置 + 一块地板；**之后再推一个子步** ⇒ 引擎的格表覆盖全量粒子（含边界）。
-fn scene_2b() -> FluidSystem {
-    let cfg = FluidConfig::default();
-    let h = cfg.smoothing_radius;
-    let mut f = FluidSystem::new(
-        cfg,
-        Vec3::new(
-            -(N as f32) * SPACING * 0.5,
-            0.5,
-            -(N as f32) * SPACING * 0.5,
-        ),
-        [N, N, N],
-        SPACING,
-    );
-    for _ in 0..5 {
-        f.step(1.0 / 60.0, &vxl_phys_core::interop::NoProviders);
-    }
-    let half = N as f32 * SPACING * 0.5 + 4.0 * h;
-    let bodies = vec![(
-        0u32,
-        Shape::Box {
-            half: Vec3::new(half, 2.0 * SPACING, half),
-        },
-        BodyPose {
-            pos: Vec3::new(0.0, -2.0 * h, 0.0),
-            rot: Quat::IDENTITY,
-            linvel: Vec3::ZERO,
-            angvel: Vec3::ZERO,
-        },
-    )];
-    assert!(f.set_boundary_particles(&bodies) > 0, "地板没造出边界粒子");
-    f.step(1.0 / 60.0, &vxl_phys_core::interop::NoProviders);
-    f
-}
-
-/// 对 `[lo, hi)` 这段粒子做计数排序：返回 `(每格起点, 按格分组的粒子下标)`（格内 = 索引升序）。
-fn count_sort_range(f: &FluidSystem, lo: usize, hi: usize) -> (Vec<u32>, Vec<u32>) {
-    let gd = f.neighbor_grid();
-    let (nx, ny, nz) = gd.dims;
-    let total = (nx as usize) * (ny as usize) * (nz as usize);
-    let bin = |p: Vec3| -> usize {
-        let ax = |o: f32, v: f32, n: u32| -> u32 {
-            (((v - o) * gd.inv).floor().max(0.0) as u32).min(n - 1)
-        };
-        let idx = (ax(gd.min.x, p.x, nx) * ny + ax(gd.min.y, p.y, ny)) * nz + ax(gd.min.z, p.z, nz);
-        (idx as usize).min(total - 1)
-    };
-    let apos = f.raw_particles().0;
-    let mut counts = vec![0u32; total + 1];
-    for p in &apos[lo..hi] {
-        counts[bin(*p) + 1] += 1;
-    }
-    for c in 0..total {
-        counts[c + 1] += counts[c];
-    }
-    let start = counts.clone();
-    let mut cur = counts;
-    let mut perm = vec![0u32; hi - lo];
-    for (i, p) in apos[lo..hi].iter().enumerate() {
-        let c = bin(*p);
-        perm[cur[c] as usize] = (i + lo) as u32;
-        cur[c] += 1;
-    }
-    (start, perm)
-}
+use support::{count_sort_range, scene_2b};
+use vxl_phys_fluid::FluidSystem;
 
 /// 两类方案的装置读数：两张类内表 + 两个类内置换 + 全局 `items`。
 struct TwoBlock {

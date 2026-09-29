@@ -484,15 +484,25 @@
   "max_fn_lines": 43,
   "max_type_members": 0
  },
+ "crates/vxl-phys-gpu/tests/support/mod.rs": {
+  "file_lines": 102,
+  "max_fn_lines": 33,
+  "max_type_members": 0
+ },
  "crates/vxl-phys-gpu/tests/two_block_order.rs": {
-  "file_lines": 172,
+  "file_lines": 101,
   "max_fn_lines": 74,
   "max_type_members": 0
  },
  "crates/vxl-phys-gpu/tests/two_block_tables.rs": {
-  "file_lines": 208,
+  "file_lines": 141,
   "max_fn_lines": 37,
   "max_type_members": 7
+ },
+ "crates/vxl-phys-gpu/tests/two_class_real_scene.rs": {
+  "file_lines": 108,
+  "max_fn_lines": 82,
+  "max_type_members": 0
  },
  "crates/vxl-phys-integrate/src/lib.rs": {
   "file_lines": 113,
