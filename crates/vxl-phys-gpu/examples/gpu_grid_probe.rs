@@ -239,8 +239,8 @@ fn main() {
         n: np as u32,
         total: total as u32,
         cap,
-        _pad0: 0,
-        _pad1: 0,
+        n_fluid: np as u32, // 纯流体档：类 0 覆盖全量粒子
+        class_lo: 0,
     };
     let out = grid::grid_on_adapter(
         adapter_index,

@@ -2590,3 +2590,38 @@ m0 压力哈希 `0x417be20a…`、金样门 col45 45/45 / pile5 2000/2000 / towe
 
 **为什么先做这步**：它**不碰任何核**（density/force/eos/integrate 一行不动）⇒ 零物理风险；
 核里"每格两段"是第 3 步，那一步的判据也现成（`two_block_order` + `sorted_copies_boundary`）。
+
+### 26.2 ✅ 第 1 步**已落地**（2026-09-29）：两类格表 + 两遍分派，判据逐位同表
+
+**落地**（`grid.wgsl` + `grid.rs` + 新探针 `examples/gpu_two_class_probe.rs`）：
+`GridParams` 的两个 pad 换成 **`n_fluid` + `class_lo`** ⇒ 核内**派生四个量**
+（`cls_lo/cls_hi/cls_off/cls_base`：类 0 = `[0,n_fluid)`/偏移 0/基址 0，类 1 = `[n_fluid,n)`/
+偏移 `total+1`/基址 `n_fluid`）⇒ **只用两个字段**（原设计要四个）。三张表就地翻倍
+（`counts`/`start`/`cursor` = `2·(total+1)`），`items` 不变；`place` 施加基址平移、`canon`
+用 `base + start[...]`。**纯流体档 = 类 0 覆盖全量**（`n_fluid = n`、`class_lo = 0`）⇒ 表仍在
+`[0, total+1)`、基址 0 ⇒ **逐位不变**（回归见下）。
+
+**判据（已过，本机适配器）**：
+- 新探针 `gpu_two_class_probe`（流体 1000 + 边界 400、箱 16³、**100 个混装格**）：
+  **类 0 表 / 类 1 表 / items 三件与 CPU 计数排序逐位相同（各差 0 项）**、`overflow = 0`；
+- 回归 `gpu_grid_probe`（纯流体档）：表哈希 **CPU ≡ GPU `0x69bd920ac578612d`**、
+  `start` 8001 项 / `items` 64000 项 / 逐粒 bin **0 项不同**；
+- `cargo test -p vxl-phys-gpu` 13 例全绿（含 §26 的纯 CPU 判据 + 本轮的 CPU oracle）。
+
+**⭐ 本轮踩的两个坑（都记下来，同族还会遇到）**：
+1. **分派必须覆盖到 `cls_hi`**：核里的索引是**全局粒子号**、范围检查在核内做 ⇒ 第二遍若只派
+   `n − n_fluid` 个 id，全部落在 `[n_fluid, n)` 之外 ⇒ **整遍空转**（实测症状：表全 0、items
+   全 0，"差值恰好 = 边界粒数"是它的指纹）。**判据要能区分"空转"与"算错"**。
+2. **两遍之间用 `queue.write_buffer` 换 params 不生效**（实测两次，改第二份 uniform 缓冲 +
+   第二个绑定组后立刻正确）⇒ **别在命令流中途改 uniform**，宁可多一份 48 字节的缓冲 + 一个
+   绑定组（`bl_grid` 的 8 槽位上限不受影响：绑定组不是"新绑定"）。
+
+**⭐ 门禁账（披露）**：本步让 `grid.rs` 432 → **577 行**、最长函数 89 → **95**
+（`make_grid_buffs` 加了两类表的分配/偏移），以及本会话新增的 5 个文件**首次记入**基线
+（它们此前只受硬阈管辖）⇒ 走"新增能力：该长大就长大 + 登记理由 + 重记基线"通道
+（`god-baseline.json` 同一提交内改动仅本会话触及的文件；无他人漂移被顺手吸收）。
+仍未超硬阈（文件 < 800 / 函数 < 120）⇒ 不是上帝对象，但 `grid.rs` 的余量已不多：
+**下一片若还要往里加东西，先按"新代码进新文件"拆**（`read_back_grid`/两类档函数都是候选）。
+
+**下一步（第 2–3 步）**：核里"每格两段"（density/force 按 `fstart`/`bstart` 各迭代一段，
+类判定提到循环外）+ `sorted_copies_boundary` 才真正压到格序档的两块路径。

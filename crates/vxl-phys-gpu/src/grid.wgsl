@@ -10,6 +10,14 @@
 //                  ⇒ 与 CPU 的"格内索引升序"完全一致，且**结果与原子顺序无关**
 //                  ⇒ 逐轮可复现 + 与 CPU 逐位同表
 //
+// **两类（`PLAN-gpu.md` §26.1/§26.2；2b 路径的格序档）**：类 0 = 粒子 `[0, n_fluid)`、
+// 类 1 = `[n_fluid, n)`（边界粒子的索引恒 ≥ `n_fluid`）。
+//   · **表布局**：类 c 的表在 `[c·(total+1), …)`，**表里存的是类内前缀**（0 基）；
+//   · **全局槽位** = `base_c + 类内值`（`base_0 = 0`、`base_1 = n_fluid`）——
+//     平移只在 `place`/`canon` 施加（⇒ 分配 `2·(total+1)` 恒够，与 `n_fluid` 无关）；
+//   · **纯流体档 = 类 0 覆盖全部粒子**（`n_fluid = n`、`class_lo = 0`）⇒ 表仍在 `[0, total+1)`、
+//     基址 0 ⇒ **与单类版逐位相同**（这是"不动默认档"的关键）。
+//
 // 为什么不做基数排序：见 `docs/PLAN-gpu.md` §10。LSD 基数排序每趟要"直方图 + **有序** rank +
 // 稳定散列"，是 O(n·趟) 的大工程；而"原子占位 + 逐格规范化"只要 O(Σ 格内元素²)，而 SPH 的格边 = h
 // ⇒ 每格典型 8–32 粒 ⇒ 成本可忽略。**代价 = 最坏情况无上界**（粒子挤在一格时退化）⇒ 用 `cap` 卡住：
@@ -30,8 +38,10 @@ struct GridParams {
     n: u32,
     total: u32,
     cap: u32,
-    _pad0: u32,
-    _pad1: u32,
+    /// 流体粒子个数（`[0, n_fluid)` = 类 0；**纯流体档 = `n`**）。
+    n_fluid: u32,
+    /// 本遍处理哪一类：`0` = 类 0（流体）、非 `0` = 类 1（边界）。
+    class_lo: u32,
 };
 
 @group(0) @binding(0) var<uniform> P: GridParams;
@@ -42,6 +52,24 @@ struct GridParams {
 @group(0) @binding(5) var<storage, read_write> items: array<u32>;
 @group(0) @binding(6) var<storage, read_write> cursor: array<atomic<u32>>;
 @group(0) @binding(7) var<storage, read_write> overflow: array<atomic<u32>>;
+
+/// 类别派生量（§26.2 定稿）：四个量都从 `(n_fluid, class_lo)` 推出 ⇒ **只用两个 pad 字段**。
+/// `n_fluid == 0` 时两类取到同一组值（`[0, n)` / 偏移 0 / 基址 0）⇒ 行为相同，无歧义。
+fn cls_boundary() -> bool {
+    return P.class_lo != 0u;
+}
+fn cls_lo() -> u32 {
+    return select(0u, P.n_fluid, cls_boundary());
+}
+fn cls_hi() -> u32 {
+    return select(P.n_fluid, P.n, cls_boundary());
+}
+fn cls_off() -> u32 {
+    return select(0u, P.total + 1u, cls_boundary());
+}
+fn cls_base() -> u32 {
+    return select(0u, P.n_fluid, cls_boundary());
+}
 
 /// 单轴分箱：与 CPU 的闭包逐字对应——
 /// `((v − o) · inv).floor().max(0.0) as u32`，再 `.min(n − 1)`。
@@ -58,8 +86,8 @@ fn axis_bin(o: f32, v: f32, n: u32) -> u32 {
 fn bin_count(@builtin(global_invocation_id) gid: vec3<u32>) {
     // 二维分派展平（见 `probe::split_2d`）：一维时 gid.y == 0 ⇒ 逐粒索引与旧式同（逐位不变）。
     let i = gid.x + gid.y * (65535u * 64u);
-    if (i >= P.n) {
-        return;
+    if (i < cls_lo() || i >= cls_hi()) {
+        return; // 只处理本类的粒子（纯流体档 = `[0, n)` ⇒ 与旧式同）
     }
     let p = vec3<f32>(pos[i * 3u], pos[i * 3u + 1u], pos[i * 3u + 2u]);
     let bx = axis_bin(P.gmin.x, p.x, P.nx);
@@ -68,7 +96,8 @@ fn bin_count(@builtin(global_invocation_id) gid: vec3<u32>) {
     let c = min((bx * P.ny + by) * P.nz + bz, P.total - 1u);
     bins[i] = c;
     // counts[k] = 格 k−1 的粒数（CPU 用 counts[c+1]++ 这一写法让前缀和天然是"独占起点"）
-    atomicAdd(&counts[c + 1u], 1u);
+    // 表在 `[cls_off(), cls_off()+total+1)` ⇒ 类 1 的计数不与类 0 混。
+    atomicAdd(&counts[cls_off() + c + 1u], 1u);
 }
 
 var<workgroup> s_scan: array<u32, 256>;
@@ -77,16 +106,17 @@ var<workgroup> s_scan: array<u32, 256>;
 /// ⚠️ 语义要与 CPU 对齐（这里**踩过一次**）：CPU 把"格 c 的计数"写在 `counts[c+1]`，
 /// 于是"`counts` 的**含尾**前缀和"恰好 = "格 k 的起点"。（我第一版写成**独占**前缀 ⇒
 /// 整体错一个格桶：`start[1]` 给成 `counts[0]`=0、而 CPU 给 8 ⇒ 表全错但形似。）
-/// 全整数运算 ⇒ 与顺序无关，任何调度下都逐位相同。
+/// 全整数运算 ⇒ 与顺序无关，任何调度下都逐位相同。**本遍只扫本类那一段表**。
 @compute @workgroup_size(256)
 fn scan(@builtin(local_invocation_index) lid: u32) {
     var running = 0u;
     let m = P.total + 1u;
+    let off = cls_off();
     let chunks = (m + 255u) / 256u;
     for (var ch = 0u; ch < chunks; ch = ch + 1u) {
-        let idx = ch * 256u + lid;
+        let idx = off + ch * 256u + lid;
         var own = 0u;
-        if (idx < m) {
+        if (ch * 256u + lid < m) {
             own = atomicLoad(&counts[idx]);
         }
         s_scan[lid] = own;
@@ -102,7 +132,7 @@ fn scan(@builtin(local_invocation_index) lid: u32) {
             workgroupBarrier();
             inc = inc * 2u;
         }
-        if (idx < m) {
+        if (ch * 256u + lid < m) {
             let s = running + s_scan[lid];
             start[idx] = s;
             // **同时写游标**：`place` 需要可变游标（= start 的副本），此前由调用方
@@ -119,12 +149,13 @@ fn scan(@builtin(local_invocation_index) lid: u32) {
 fn place(@builtin(global_invocation_id) gid: vec3<u32>) {
     // 二维分派展平（同 `bin_count`）。
     let i = gid.x + gid.y * (65535u * 64u);
-    if (i >= P.n) {
-        return;
+    if (i < cls_lo() || i >= cls_hi()) {
+        return; // 只处理本类的粒子
     }
     let c = bins[i];
-    let slot = atomicAdd(&cursor[c], 1u);
-    items[slot] = i;
+    let slot = atomicAdd(&cursor[cls_off() + c], 1u);
+    // **槽位基址平移**：类 1 的槽位接在类 0 之后（= `n_fluid + 类内槽位`）。
+    items[cls_base() + slot] = i;
 }
 
 @compute @workgroup_size(64)
@@ -134,8 +165,11 @@ fn canon(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (c >= P.total) {
         return;
     }
-    let a = start[c];
-    let b = start[c + 1u];
+    let off = cls_off();
+    let base = cls_base();
+    // 段边界 = 全局槽位（表值是本类前缀 ⇒ 这里加基址）。
+    let a = base + start[off + c];
+    let b = base + start[off + c + 1u];
     if (b - a < 2u) {
         return;
     }

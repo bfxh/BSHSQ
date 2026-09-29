@@ -140,8 +140,8 @@ fn probe(f: &FluidSystem, fresh_box: bool, tag: &str) -> (usize, u32, usize) {
         n: np as u32,
         total: nx * ny * nz,
         cap: 512,
-        _pad0: 0,
-        _pad1: 0,
+        n_fluid: np as u32, // 纯流体档：类 0 覆盖全量粒子
+        class_lo: 0,
     };
     let mut hs: Vec<u64> = Vec::new();
     let mut ovf = 0u32;
