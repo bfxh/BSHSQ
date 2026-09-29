@@ -34,7 +34,12 @@ import sys
 DEFAULT_CFG = {
     "max_file_lines": 800,
     "max_fn_lines": 120,
-    "max_type_members": 24,          # 类/Rust impl 的方法+字段数
+    "max_type_members": 24,          # 类/Rust impl 的方法+字段数（按文件，历史口径）
+    # 两轴分开才认得出上帝对象（2026-09-30）：字段多 = 数据记录，方法多 = 职责多，
+    # **双超**才是"状态和行为攥在一个类型里"。按**跨文件累计**的方法数判。
+    "max_type_fields": 24,
+    "max_type_methods": 24,
+    "god_pairs": {},                 # 双超类型的登记簿：{类型: 理由}，登记后只准减
     "include": ["**/*.py", "**/*.rs", "**/*.js", "**/*.ts", "**/*.tsx", "**/*.mjs", "**/*.cjs"],
     "exclude": ["**/.git/**", "**/node_modules/**", "**/target/**", "**/__pycache__/**",
                 "**/dist/**", "**/build/**", "**/.venv/**", "**/venv/**", "**/*.min.*"],
@@ -71,20 +76,20 @@ def included(rel: str, cfg: dict) -> bool:
     return any(hit(p) for p in cfg["include"])
 
 
-def py_metrics(src: str) -> list[tuple[str, int, str]]:
-    """Python：ast 精确 ⇒ [(名字, 行数, 种类)]（种类 ∈ fn/type）。"""
-    out: list[tuple[str, int, str]] = []
+def py_metrics(src: str) -> list[tuple[str, int, str, int]]:
+    """Python：ast 精确 ⇒ [(名字, 行数或成员数, 种类, 方法数)]（种类 ∈ fn/type）。"""
+    out: list[tuple[str, int, str, int]] = []
     try:
         tree = ast.parse(src)
     except SyntaxError:
         return out
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            out.append((node.name, (node.end_lineno or node.lineno) - node.lineno + 1, "fn"))
+            out.append((node.name, (node.end_lineno or node.lineno) - node.lineno + 1, "fn", 0))
         elif isinstance(node, ast.ClassDef):
-            members = sum(isinstance(b, (ast.FunctionDef, ast.AsyncFunctionDef)) for b in node.body)
-            members += sum(len(b.targets) for b in node.body if isinstance(b, ast.Assign))
-            out.append((node.name, members, "type"))
+            methods = sum(isinstance(b, (ast.FunctionDef, ast.AsyncFunctionDef)) for b in node.body)
+            fields = sum(len(b.targets) for b in node.body if isinstance(b, ast.Assign))
+            out.append((node.name, methods + fields, "type", methods))
     return out
 
 
@@ -206,6 +211,10 @@ def brace_metrics(src: str, js: bool = False) -> list[tuple[str, int, str]]:
             continue
         name = m.group(1) or m.group(2)
         kind = "fn" if m.group(1) else "type"
+        # `impl Trait for Type { … }` 记的是**trait 的实现**，不是 Type 自身的职责 ⇒ 不计入该类型
+        # （跨文件聚合按类型名相加，否则同名 trait 实现会把方法数虚计到类型头上）。
+        if kind == "type" and re.match(r"^\s*(?:pub\s+)?impl\b.*\bfor\b", line):
+            continue
         depth, started, end = 0, False, i
         for j in range(i, len(lines)):
             depth += lines[j].count("{") - lines[j].count("}")
@@ -215,14 +224,20 @@ def brace_metrics(src: str, js: bool = False) -> list[tuple[str, int, str]]:
                 end = j
                 break
         if kind == "fn":
-            out.append((name, end - i + 1, "fn"))
+            out.append((name, end - i + 1, "fn", 0))
         else:
             # 成员数：块内深度 1 的 fn / 字段行（启发式，量级正确即可）。
+            # ⚠️ **拆成两轴数**（2026-09-30）：原先只报 `字段+方法` 合计数，于是"34 个字段 + 62 个
+            # 方法"的 `DefaultNarrowPhase` 与"32 个纯字段"的数据记录在门眼里是同一回事 ⇒ 它自己的
+            # 豁免文档写着"只有方法数才是复杂度 / 字段+大量方法混在一起才是真上帝对象"，**却量不出
+            # 这个区别**。现在 fields 与 methods 分开累计，合计数仍保留给旧基线口径。
             # ⚠️ **多行函数签名的参数行不是字段**（实测踩到：`fn fill_hull_world(\n side: usize,\n …)`
             # 的参数行被当字段 ⇒ support.rs 的 16 个方法报成 **38 成员**（虚高））。做法：见到
             # 深度 1 的 `fn` 行就进入"签名态"，括号配平回 0 才退出，期间不数字段行。
             depth = 0
             members = 0
+            methods = 0
+            fields = 0
             in_sig = False
             paren = 0
             for j in range(i, end + 1):
@@ -232,6 +247,7 @@ def brace_metrics(src: str, js: bool = False) -> list[tuple[str, int, str]]:
                     continue
                 if d0 == 1 and fn_line.match(lines[j]):
                     members += 1
+                    methods += 1
                     paren = lines[j].count("(") - lines[j].count(")")
                     in_sig = paren > 0
                     continue
@@ -242,13 +258,21 @@ def brace_metrics(src: str, js: bool = False) -> list[tuple[str, int, str]]:
                     continue
                 if d0 == 1 and field_line.match(lines[j]):
                     members += 1
-            out.append((name, members, "type"))
+                    fields += 1
+            out.append((name, members, "type", methods))
     return out
 
 
-def scan(root: pathlib.Path, cfg: dict) -> dict:
-    """返回 {relpath: {"file_lines": n, "max_fn_lines": m, "max_type_members": k, "hot": "名字"}}。"""
+def scan(root: pathlib.Path, cfg: dict) -> tuple[dict, dict]:
+    """返回 (每文件指标, 每类型累计)。
+
+    每文件：`{file_lines, max_fn_lines, max_type_members, max_type_fields, max_type_methods, …}`
+    每类型（`f"{crate}::{类型名}"`）：**方法数跨文件相加、字段数取最大** —— 本仓把大类型按
+    职责拆成多文件的多份 impl（`World` 散在 10 个文件、`DefaultNarrowPhase` 11 个），只看
+    "单文件最大 impl 块"的门结构上看不到类型总量，2026-09-30 就是这么把上帝对象放过去的。
+    """
     files = {}
+    types: dict[str, dict] = {}
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in {".git", "node_modules", "target",
                                                         "__pycache__", "dist", "build", ".venv", "venv"}]
@@ -264,18 +288,31 @@ def scan(root: pathlib.Path, cfg: dict) -> dict:
             metrics = py_metrics(src) if fp.suffix in PY else (
                 brace_metrics(src, js=fp.suffix != ".rs") if fp.suffix in BRACE else [])
             fns = [m for m in metrics if m[2] == "fn"]
-            types = [m for m in metrics if m[2] == "type"]
+            tys = [m for m in metrics if m[2] == "type"]
+            parts = fp.relative_to(root).parts
+            crate = "/".join(parts[:2]) if parts[:1] == ("crates",) else "(root)"
+            for name, members, _kind, methods in tys:
+                fields = members - methods
+                t = types.setdefault(f"{crate}::{name}",
+                                     {"fields": 0, "methods": 0, "files": set()})
+                t["fields"] = max(t["fields"], fields)
+                t["methods"] += methods
+                if methods:
+                    t["files"].add(rel)
             files[rel] = {
                 "file_lines": src.count("\n") + 1,
-                "max_fn_lines": max((n for _, n, _ in fns), default=0),
-                "max_type_members": max((n for _, n, _ in types), default=0),
+                "max_fn_lines": max((n for _, n, _, _ in fns), default=0),
+                "max_type_members": max((n for _, n, _, _ in tys), default=0),
+                "max_type_methods": max((mm for _, _, _, mm in tys), default=0),
                 "hot": (max(metrics, key=lambda m: m[1])[0] if metrics else ""),
                 "heuristic": fp.suffix not in PY,
             }
-    return files
+    for t in types.values():
+        t["files"] = sorted(t["files"])
+    return files, types
 
 
-def evaluate(files: dict, base: dict, cfg: dict) -> tuple[list[str], list[str], list[str]]:
+def evaluate(files: dict, types: dict, base: dict, cfg: dict) -> tuple[list[str], list[str], list[str]]:
     """红/放行/可收紧三类。
 
     **拆函数放行**（S169）：把长函数拆成 helper 必然让**文件行数**变大。若 file_lines 涨、
@@ -285,8 +322,11 @@ def evaluate(files: dict, base: dict, cfg: dict) -> tuple[list[str], list[str], 
     """
     bad, grew, shrank = [], [], []
     pct = cfg.get("file_growth_with_fn_shrink_pct", 10)
+    # 基线新形状 {"files":…, "types":…}；旧的扁平形状按"只有文件账"处理（不因换格式而把存量全判红）
+    base_files = base.get("files", base) if isinstance(base, dict) else {}
+    base_types = base.get("types", {}) if isinstance(base, dict) else {}
     for rel, m in sorted(files.items()):
-        b = base.get(rel)
+        b = base_files.get(rel)
         for key, lim in (("file_lines", cfg["max_file_lines"]),
                          ("max_fn_lines", cfg["max_fn_lines"]),
                          ("max_type_members", cfg["max_type_members"])):
@@ -326,9 +366,28 @@ def evaluate(files: dict, base: dict, cfg: dict) -> tuple[list[str], list[str], 
                 bad.append(f"{rel}: {key} {bv} → {v}（不许变胖）")
             elif v < bv:
                 shrank.append(f"{rel}: {key} {bv} → {v}（可收紧基线）")
-    for rel in base:
+    for rel in base_files:
         if rel not in files:
             shrank.append(f"{rel}: 基线条目已消失（可清理）")
+
+    # ── 类型账（跨文件累计）：门的既有三轴都是**按文件**量的，而本仓把大类型按职责拆成多文件
+    #    的多份 impl ⇒ "单文件最大 impl 块"永远看不见类型总量。`DefaultNarrowPhase`（字段 34 /
+    #    方法 62 / 11 个文件）就是被这个盲区放过去的，而它的豁免理由写的是"纯数据记录"。
+    #    判据按豁免文档自己写的口径：**字段与方法双超 ⇒ 上帝对象**；登记进 `god_pairs` 的
+    #    转为"债务（只准减）"，但**方法数一变胖就红**，且必须带理由。
+    fl, ml = cfg.get("max_type_fields", 10 ** 9), cfg.get("max_type_methods", 10 ** 9)
+    pairs = cfg.get("god_pairs", {})
+    for name, t in sorted(types.items(), key=lambda kv: -kv[1]["methods"]):
+        if t["fields"] <= fl or t["methods"] <= ml:
+            continue                                   # 单轴超 = 数据记录或算法类型，不管
+        bt = base_types.get(name, {})
+        desc = f"{name} 字段 {t['fields']} / 方法 {t['methods']}（散在 {len(t['files'])} 个文件）"
+        if name not in pairs:
+            bad.append(f"上帝对象未登记：{desc} ⇒ 拆，或在 god.gate.json 的 god_pairs 写明理由")
+        elif t["methods"] > bt.get("methods", t["methods"]):
+            bad.append(f"上帝对象变胖：{desc} > 基线 {bt.get('methods')}（只准减）")
+        else:
+            grew.append(f"已登记债务：{desc} —— {pairs[name]}")
     return bad, grew, shrank
 
 
@@ -371,10 +430,19 @@ def selftest() -> int:
         "    pub fn b(&self) {}\n"
         "}\n"
     )
-    got = [n for n, k, kind in brace_metrics(s2) if kind == "type" and n == "X" for _ in [0]]
-    mem = max((k for n, k, kind in brace_metrics(s2) if kind == "type" and n == "X"), default=0)
+    got = [n for n, k, kind, mm in brace_metrics(s2) if kind == "type" and n == "X" for _ in [0]]
+    mem = max((k for n, k, kind, mm in brace_metrics(s2) if kind == "type" and n == "X"), default=0)
     if mem != 2:
         bad.append(f"成员数算错：多行签名的参数行被当字段（得 {mem}，期望 2）")
+    # ④ 两轴必须分开：这个 impl 是 **2 个方法 / 0 个字段**。合成一格数时，"34 字段 + 62 方法"
+    #    与"64 个纯字段"看不出区别 ⇒ 豁免文档说的"字段+大量方法才是上帝对象"无法执行。
+    one = [m for m in brace_metrics(s2) if m[0] == "X" and m[2] == "type"]
+    if not one or one[0][3] != 2 or (one[0][1] - one[0][3]) != 0:
+        bad.append(f"字段/方法两轴拆分失效：期望 (方法=2, 字段=0)，实得 {one}")
+    # ⑤ `impl Trait for Type` 记的是 trait 实现，不该算进 Type 的自身职责
+    s3 = "impl Drop for X {\n    fn drop(&mut self) {}\n    fn extra(&mut self) {}\n}\n"
+    if any(n == "X" for n, k, kind, mm in brace_metrics(s3) if kind == "type"):
+        bad.append("trait 实现被计进了类型自身的方法数（impl Trait for X 应跳过）")
     del got
 
     cfg = dict(DEFAULT_CFG)
@@ -388,7 +456,7 @@ def selftest() -> int:
         for b in bad:
             print(f"   · {b}")
         return 1
-    print("✅ GOD-GATE 自检通过（掩码双向 / 成员数 / 包含面三条金丝雀）")
+    print("✅ GOD-GATE 自检通过（掩码双向 / 成员数 / 字段-方法两轴 / trait 实现不计入 / 包含面 五条金丝雀）")
     return 0
 
 
@@ -424,7 +492,7 @@ def main() -> int:
     root = pathlib.Path(a.root).resolve()
     cfg = load_cfg(root, a.config)
     bpath = pathlib.Path(a.baseline) if a.baseline else root / cfg["baseline"]
-    files = scan(root, cfg)
+    files, types = scan(root, cfg)
     # 注意：**别在这里读基线**——`--write-baseline` 不需要旧基线，先读会让"基线坏了"变成自锁
     # （实测：一次中断写入把基线截断，于是连修复用的 --write-baseline 也被拒）。
     # 读取推迟到 evaluate 之前。
@@ -432,28 +500,43 @@ def main() -> int:
     hot = sorted(files.items(), key=lambda kv: -max(kv[1]["file_lines"] / cfg["max_file_lines"],
                                                    kv[1]["max_fn_lines"] / cfg["max_fn_lines"]))[:a.top]
     print(f"GOD-GATE root={root} 文件={len(files)} 阈值: file>{cfg['max_file_lines']}行 "
-          f"fn>{cfg['max_fn_lines']}行 type>{cfg['max_type_members']}成员 基线={bpath.name}"
+          f"fn>{cfg['max_fn_lines']}行 type>{cfg['max_type_members']}成员"
+          f"（字段>{cfg['max_type_fields']} 且 方法>{cfg['max_type_methods']} ⇒ 判为上帝对象）"
+          f" 基线={bpath.name}"
           f"{'(heuristic 语言已标注)' if any(m['heuristic'] for m in files.values()) else ''}")
     for rel, m in hot:
         flag = "H" if m["heuristic"] else " "
         print(f"  {flag} 文件{m['file_lines']:6d}行  最长函数{m['max_fn_lines']:5d}行  "
               f"最大类型{m['max_type_members']:3d}成员  {rel}  （最大块: {m['hot']}）")
 
+    # 跨文件聚合的类型总量：这才是"上帝对象"那一轴（单文件最大 impl 块看不到）
+    fl, ml = cfg["max_type_fields"], cfg["max_type_methods"]
+    gods = sorted(((t["methods"], t["fields"], k, t) for k, t in types.items()
+                   if t["fields"] > fl and t["methods"] > ml), reverse=True)
+    if gods:
+        print(f"  ── 双超（字段>{fl} 且 方法>{ml}）的类型，方法数按**跨文件累计**：")
+        for mm, ff, k, t in gods[:a.top]:
+            print(f"     {k}  字段 {ff} / 方法 {mm}  散在 {len(t['files'])} 个文件")
+
     if a.list:
         return 0
     if a.write_baseline:
-        payload = json.dumps({k: {kk: v[kk] for kk in
-                                  ("file_lines", "max_fn_lines", "max_type_members")}
-                              for k, v in sorted(files.items())},
-                             ensure_ascii=False, indent=1) + "\n"
+        payload = json.dumps(
+            {"files": {k: {kk: v[kk] for kk in
+                           ("file_lines", "max_fn_lines", "max_type_members")}
+                       for k, v in sorted(files.items())},
+             "types": {k: {"fields": t["fields"], "methods": t["methods"]}
+                       for k, t in sorted(types.items()) if t["methods"] or t["fields"]}},
+            ensure_ascii=False, indent=1) + "\n"
         tmp = bpath.with_suffix(bpath.suffix + ".tmp")
         tmp.write_text(payload, encoding="utf-8")
         os.replace(tmp, bpath)          # 原子替换：中断也不会留下半截基线
-        print(f"已写基线 {bpath}（{len(files)} 个文件）——此后只准减")
+        n_typ = sum(1 for t in types.values() if t["methods"] or t["fields"])
+        print(f"已写基线 {bpath}（{len(files)} 个文件、{n_typ} 个类型）——此后只准减")
         return 0
 
     base = load_baseline(bpath)          # 到这里才读（见上：写基线/列清单都不该被坏基线挡住）
-    bad, grew, shrank = evaluate(files, base, cfg)
+    bad, grew, shrank = evaluate(files, types, base, cfg)
     if not base:
         print("警告：尚无基线 ⇒ 只对「新文件」判阈值；先跑 --write-baseline 才会管住存量")
     for line in grew:
