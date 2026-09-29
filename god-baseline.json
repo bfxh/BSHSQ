@@ -650,9 +650,9 @@
   "max_type_members": 3
  },
  "crates/vxl-phys-soft/src/cloth.rs": {
-  "file_lines": 494,
-  "max_fn_lines": 47,
-  "max_type_members": 22
+  "file_lines": 507,
+  "max_fn_lines": 45,
+  "max_type_members": 23
  },
  "crates/vxl-phys-soft/src/cloth_aero.rs": {
   "file_lines": 69,
@@ -668,6 +668,11 @@
   "file_lines": 167,
   "max_fn_lines": 66,
   "max_type_members": 4
+ },
+ "crates/vxl-phys-soft/src/cloth_tear.rs": {
+  "file_lines": 152,
+  "max_fn_lines": 23,
+  "max_type_members": 8
  },
  "crates/vxl-phys-soft/src/lib.rs": {
   "file_lines": 25,
@@ -733,6 +738,11 @@
   "file_lines": 286,
   "max_fn_lines": 42,
   "max_type_members": 8
+ },
+ "crates/vxl-phys-soft/tests/cloth_tear.rs": {
+  "file_lines": 203,
+  "max_fn_lines": 22,
+  "max_type_members": 0
  },
  "crates/vxl-phys-soft/tests/crossed_face_probe.rs": {
   "file_lines": 105,

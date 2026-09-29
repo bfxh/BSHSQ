@@ -16,6 +16,7 @@
 use crate::cloth_aero::ClothAero;
 use crate::cloth_coupling::BodyCoupling;
 use crate::cloth_self_collision::SelfContacts;
+use crate::cloth_tear::Tearing;
 use crate::params::Stiffness;
 use crate::rigid::RigidProxy;
 use std::collections::HashSet;
@@ -136,9 +137,11 @@ pub struct ClothSheet {
     pub self_contacts: SelfContacts,
     /// **气动输入**（切片 T4 收尾；`enabled` 默认 `false` ⇒ 零成本短路）。
     ///
-    /// ⚠️ **成员棘轮已顶格 24/24**（`god.gate.json` 的 `max_type_members`）⇒
-    /// **下一片再加状态必须先并组**（先例：`BodyCoupling` / `SelfContacts` / `SoftDomain`）。
+    /// ⚠️ **成员棘轮**：本字段之后 `ClothSheet` 是 **23/24**（再加一个状态就**必须先并组**，
+    /// 先例：`BodyCoupling` / `SelfContacts` / `ContactTuning`）。
     pub aero: ClothAero,
+    /// **撕裂状态**（`eps` 默认 `∞` = 关 ⇒ 既有场景逐位不变）。
+    pub tear: Tearing,
 }
 
 impl ClothSheet {
@@ -154,12 +157,9 @@ impl ClothSheet {
         let n = points.len();
         let rho = if density > 0.0 { density } else { 1.0 };
         let t = if thickness > 0.0 { thickness } else { 1e-3 };
-        // 唯一边（结构+剪切）、弯曲二环对、薄壳均分质量 —— 三块各自抽成纯函数
-        // （`new` 原 100 行，顶 god 门最长函数棘轮；2026-09-29 切片 T3 抽出的）。
-        let cons = unique_edges(&tris);
-        let rest = pair_lengths(&cons, &points);
-        let bend = bend_pairs(&cons, n);
-        let bend_rest = pair_lengths(&bend, &points);
+        // 拓扑 + 注册长度（唯一边 = 结构+剪切、二环对 = 弯曲）+ 薄壳均分质量 —— 各自抽成纯函数
+        // （`new` 顶 god 门最长函数棘轮，2026-09-29 抽出）。
+        let (cons, rest, bend, bend_rest) = topology(&tris, &points, n);
         let mass = shell_mass(&tris, &points, rho, t);
         let inv_mass = mass
             .iter()
@@ -189,6 +189,7 @@ impl ClothSheet {
             body: BodyCoupling::default(),
             self_contacts,
             aero: ClothAero::default(),
+            tear: Tearing::default(),
         }
     }
 
@@ -293,27 +294,16 @@ impl ClothSheet {
         // （弯曲金丝雀判据实测抓到过）⇒ 下方**显式短路**，不是"靠数学自然退化"。
         let a_tilde_bend = self.bend_compliance / (h * h);
         for _ in 0..self.iterations.max(1) {
-            for (k, [i, j]) in self.cons.iter().enumerate() {
-                let (i, j) = (*i as usize, *j as usize);
-                let w = self.inv_mass[i] + self.inv_mass[j];
-                if w <= 0.0 {
-                    continue;
-                }
-                let d = self.pos[j] - self.pos[i];
-                let len = d.length();
-                if len < 1e-9 {
-                    continue;
-                }
-                let dir = d * (1.0 / len);
-                let c = len - self.rest[k];
-                let dl = (-c - a_tilde * self.lambda[k]) / (w + a_tilde);
-                self.lambda[k] += dl;
-                self.pos[i] -= dir * (self.inv_mass[i] * dl);
-                self.pos[j] += dir * (self.inv_mass[j] * dl);
-            }
+            self.project_edges(a_tilde);
             self.project_bend(a_tilde_bend);
         }
+        // **撕裂检查**（`eps = ∞` ⇒ 首行短路 ⇒ 默认档零成本、逐位不变）
+        self.tear_check();
     }
+
+    // `project_edges`（唯一边投影，含"已撕裂跳过"）**定义在 `cloth_tear.rs`**（那里整块管撕裂）。
+
+    // **撕裂检查**（每子步一次、投影之后）：定义在 `cloth_tear.rs`（`eps = ∞` ⇒ 首行短路）。
 
     /// **弯曲对的距离投影**（一遍；从 `project_constraints` 抽出 —— 那里是全文件最长函数，
     /// god 门"合法交换"要求：加成员/加行数时**最长函数必须严格下降**）。
@@ -325,6 +315,9 @@ impl ClothSheet {
             return;
         }
         for (k, [i, j]) in self.bend.iter().enumerate() {
+            if self.tear.torn_bend.get(k).copied().unwrap_or(false) {
+                continue; // **已撕裂**：撕口两侧的弯曲刚度也该消失（见 `Tearing::torn_bend`）
+            }
             let (i, j) = (*i as usize, *j as usize);
             let w = self.inv_mass[i] + self.inv_mass[j];
             if w <= 0.0 {
@@ -400,16 +393,23 @@ impl ClothSheet {
 
     /// 当前**最大边应变** `max |len − rest| / rest`（判据仪器：收敛/悬垂判据用）。
     /// **只统计结构/剪切**（唯一边）——弯曲约束按设计更软、应变天然更大，混进来会让
-    /// 既有的收敛判据失去分辨力（两条曲线的口径不同）。
+    /// 既有的收敛判据失去分辨力（两条曲线的口径不同）。**已撕裂的边跳过**（它们不再是约束，
+    /// 其"应变"已无意义；撕裂一旦发生，长度会远超阈值）。
     pub fn max_strain(&self) -> f32 {
         let mut worst = 0.0f32;
         for (k, [a, b]) in self.cons.iter().enumerate() {
+            if self.is_torn(k) {
+                continue;
+            }
             let len = (self.pos[*b as usize] - self.pos[*a as usize]).length();
             let s = ((len - self.rest[k]) / self.rest[k]).abs();
             worst = worst.max(s);
         }
         worst
     }
+
+    // `is_torn` / `torn_count` / `bend_is_torn` / `bend_torn_count` / `edge` / `edge_strain`
+    // 定义在 `cloth_tear.rs`（撕裂域的判据仪器）。
 
     /// 弯曲对的条数（判据/诊断用）。
     pub fn bend_count(&self) -> usize {
@@ -463,6 +463,19 @@ fn bend_pairs(cons: &[[u32; 2]], n: usize) -> Vec<[u32; 2]> {
         }
     }
     bend
+}
+
+/// **拓扑 + 注册长度**的返回包（`(cons, rest, bend, bend_rest)`）—— 取别名只为过 `clippy::type_complexity`。
+type Topology = (Vec<[u32; 2]>, Vec<f32>, Vec<[u32; 2]>, Vec<f32>);
+
+/// **拓扑 + 注册长度**：唯一边（结构+剪切）+ 二环对（弯曲），`rest` 取当前长度（注册态即零应变态）。
+/// 从 `new` 抽出（那里是全文件最长函数；god 门"合法交换"要求最长函数**严格下降**）。
+fn topology(tris: &[[u32; 3]], points: &[Vec3], n: usize) -> Topology {
+    let cons = unique_edges(tris);
+    let rest = pair_lengths(&cons, points);
+    let bend = bend_pairs(&cons, n);
+    let bend_rest = pair_lengths(&bend, points);
+    (cons, rest, bend, bend_rest)
 }
 
 /// **各对的注册长度**（`rest = 当前长度` ⇒ 注册态即零应变态）。
