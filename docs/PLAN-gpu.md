@@ -2634,3 +2634,40 @@ m0 压力哈希 `0x417be20a…`、金样门 col45 45/45 / pile5 2000/2000 / towe
 **下一步（第 2–3 步）**：核里"每格两段"（density/force 按 `fstart`/`bstart` 各迭代一段，
 类判定提到循环外）+ `sorted_copies_boundary` 才真正压到格序档的两块路径。**动核前先把
 「表在真场景上是对的」钉死**这件事已经做完了（见上一条）。
+
+### 26.3 §26.2 第 2–3 步的施工单（2026-09-30 勘察定稿；未动核）
+
+**目标**：把格序副本档（`PacketCfg::sort_copies`）对 **2b（流体 + 边界粒子）** 打开
+——今天被 `pipeline.rs` 的 `cfg.n_fluid == cfg.n` 守死（`sorted.rs` 头注写了原因：空间排序会把
+两类混在一起 ⇒ 核里 `j < P.n_fluid` 这条**标签**判断失效）。**收益**：2b 档拿到 §23 量过的
+−14.8%~−18% 邻域访存收益（这是"格序档只对纯流体生效"这个缺口的正面）。
+
+**机制（§26/§26.1/§26.2 已把表铺好，这里只用）**：两块方案 = 副本按"**流体块 ‖ 边界块**"摆
+⇒ 副本下标 < `n_fluid` 的恒是流体 ⇒ 标签判断在副本空间**重新成立**；每格两段（流体段 ‖ 边界段）
+的枚举序与平铺档逐条相同（§26 已证）⇒ 数值逐位不变。
+
+**触点（勘察核过，逐条给出）**：
+
+| # | 位置 | 改法 |
+|---|---|---|
+| 1 | `density.wgsl` / `force.wgsl` 的邻域循环（`cell_start[ci]..cell_start[ci+1]`） | 拆**两段**：流体段 `[f0, f1)`（= `cell_start` 视作类 0 表）、边界段 `[n_fluid + b0, n_fluid + b1)`（类 1 表）。`if (j < P.n_fluid)` / `if (boundary && j >= P.n_fluid)` 这两条**按段提到循环外**（该段整段同类） |
+| 2 | 两个核的**绑定**：加 `@group(0) @binding(9) var<storage, read> bstart: array<u32>` | 布局由 `bind_layout::spec(...)` 串声明 ⇒ 两处字符串 + 两处 `ent(9, …)`；**纯流体档绑 `start_b` 的类 1 段（全零）⇒ 边界段恒空**（`b0=b1=n_fluid`），无需 dummy 缓冲 |
+| 3 | `pipeline.rs`：`start_b` 尺寸 `total+1` → **`2*(total+1)`**（与 `grid.rs` 的 `make_grid_buffs` 对齐） | 一处尺寸 + 回读偏移 |
+| 4 | **网格两遍**：`Packet` 每子步跑 `p_bin/p_scan/p_place/p_canon` 各**两遍**（类 0 / 类 1），`n_fluid < n` 时才跑第二遍 | 两份 `grid_params` uniform + 两个 `bg_grid`（**别用两遍之间 `write_buffer` 换 params —— §26.2 坑② 实测无效**）；第二遍 dispatch 覆盖 `[0, n)`（§26.2 坑①：核索引是全局粒子号，只派 `n−n_fluid` 会整遍空转） |
+| 5 | ⚠️ **`sorted.rs` 的 `pmass_c` 必须改成"每子步 gather"** | 它现在**填常量** `mass`（头注写"纯流体场景里 pmass 全是常量"）。**实测不成立**：边界粒子体积是 **Akinci 自洽标定** `V_b = 1/ΣW`（`boundary.rs:8/86`），流体是 `s³` 量级 ⇒ **两边质量不同** ⇒ 沿用常量会让边界粒子的质量**静默用错**（力/反作用整片失真）。改法：`gather` 加一路 pmass（4 路），`CopyBufs.pmass_c` 每子步重排；顺带 `→ cost +1 路`（§22 的 2.54+2.15 ms/子步会涨，须重测） |
+| 6 | `sorted.rs` 的 `make_sorted_binds`：三个相位绑定组换成"两类表 + 恒等 items" | `bg_dens/bg_force/bg_eos` 里 `ent(5, start_b)`（类 0 表）+ `ent(9, bstart 切片)` + `ent(6, items_id)`（恒等表不变）；`gather` 用 `items_b`（**现在是两类置换** ⇒ 副本自动成两块）——**gather/scatter 一行不改** |
+| 7 | `pipeline.rs` 的门：`if want_sorted && cfg.n_fluid == cfg.n` → 放开到 2b（**保留**"与壁面档互斥"那条 ⇒ 同时开时仍退回平铺） | 一处条件 |
+| 8 | 回读/探针语义：`items_b` 变成**两类置换**（槽位 = 流体块 ‖ 边界块） | `sorted_copies_boundary.rs` 等"GPU 表 vs CPU 表"的比较要按两类口径重写（用 `grid_two_class_on_adapter` 的 CPU oracle：`tests/two_block_tables.rs` / `two_class_real_scene.rs` 已备） |
+
+**判据（先判据后实现）**：
+1. **2b 混合场景：格序档与平铺档逐位相同**（`pos/vel/dens/press` 全量回读逐位）——这是主判据，
+   与 §23 纯流体那条同式；
+2. **"格序档真在跑"**（否则绿=SKIP）：断言 `Packet` 在混合场景下**建了** sorted（暴露一个
+   `is_sorted()` 读点），且 overflow == 0；
+3. **纯流体回归**：既有 125k/10M 表哈希与逐位读数**一字不动**（`gpu_grid_probe` / `gpu_tick_probe`）；
+4. 壁面档 + 格序档同开 ⇒ 仍**退回平铺**（守死语义不许静默错）。
+
+**施工顺序**：① 触点 1–3（核两段 + 尺寸，纯流体档必须逐位不变——先用既有探针当回归门）
+→ ② 触点 4（两遍网格，先只服务平铺档，验 2b 平铺读数逐位不变）
+→ ③ 触点 5（pmass gather，纯流体档须逐位不变：常量 vs 真 gather 在等质量下同值）
+→ ④ 触点 6–8 + 判据 1/2/4。**每步都跑 `gate_all` 与纯流体回归**；③ 会动 perf 读数，单独记档。
