@@ -30,13 +30,28 @@ def repo_root():
     return os.getcwd()
 
 
+# 非引擎面（开发/对拍工具面）——**所有门的单一口径来源**，别在各门里各写一份（会漂移）。
+# `gold-sample/` 是自带 [workspace] 的独立包，**按 SPEC §0/§11 的设计就依赖 rapier3d**：
+# 它是金样对照仪（T5），不参与引擎构建、不发布。把它当引擎面扫会造成三类假红：
+#   license-gate 要它声明引擎的 MIT OR Apache-2.0、engine-dep-gate 因 rapier3d 判"引入既有引擎"
+#   违反 §0、f64-gate 因它的计时/统计量判违反 §5。
+# 同口径先例：god.gate.json 的 exclude 里就有 **/gold-sample/**；discipline_scan.sh 也把
+# examples/tests 排除在引擎纪律面外。
+DEV_ONLY_ROOTS = ("gold-sample/",)
+
+
+def in_engine_face(rel):
+    """rel 是否属于引擎纪律面（crates 及其根文件）。dev-only 包不算。"""
+    return not rel.replace("\\", "/").startswith(DEV_ONLY_ROOTS)
+
+
 def list_rs(root, git_tracked):
     if git_tracked:
         out = subprocess.run(
             ["git", "-C", root, "ls-files", "*.rs"],
             capture_output=True, text=True,
         )
-        return [l for l in out.stdout.splitlines() if l.endswith(".rs")]
+        return [l for l in out.stdout.splitlines() if l.endswith(".rs") and in_engine_face(l)]
     res = []
     for dp, _, fns in os.walk(root):
         base = os.path.basename(dp)
@@ -45,7 +60,8 @@ def list_rs(root, git_tracked):
         for fn in fns:
             if fn.endswith(".rs"):
                 rel = os.path.relpath(os.path.join(dp, fn), root).replace(os.sep, "/")
-                res.append(rel)
+                if in_engine_face(rel):
+                    res.append(rel)
     return res
 
 
@@ -55,6 +71,8 @@ def list_cargo_toml(root):
     注意：list_rs 只返回 .rs 文件，扫 Cargo.toml 依赖门（rayon/cpp/license）必须
     用本函数，不能用 list_rs 再过滤 Cargo.toml —— 那样会一个 manifest 都匹配不到，
     门变成「空门」（绿但什么都不查）。
+
+    dev-only 包（见 DEV_ONLY_ROOTS）不在此面内。
     """
     res = []
     for dp, _, fns in os.walk(root):
@@ -63,7 +81,8 @@ def list_cargo_toml(root):
             continue
         if "Cargo.toml" in fns:
             rel = os.path.relpath(os.path.join(dp, "Cargo.toml"), root).replace(os.sep, "/")
-            res.append(rel)
+            if in_engine_face(rel):
+                res.append(rel)
     return res
 
 

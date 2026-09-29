@@ -90,7 +90,7 @@ Diff in .../crates/vxl-phys-narrow/src/simd.rs:133
 
 ### 首发已完成（2026-09-21）
 
-**`v0.1.0-m1` 已发布**：<https://github.com/bfxh/RUST-WL/releases/tag/v0.1.0-m1>
+**`v0.1.0-m1` 已发布**：<https://github.com/bfxh/BSHSQ/releases/tag/v0.1.0-m1>
 （`prerelease: true`、`draft: false`、作者 `github-actions[bot]`）。
 附产物：`clippy.log` / `determinism.log` / `gold-col45.txt` / `gold-pile5.txt` /
 `gold-tower25.txt` / `m0.log` / `test.log` —— **门禁证据随版本存档**。

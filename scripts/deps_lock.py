@@ -45,7 +45,7 @@ from pathlib import Path
 
 DEP_TABLES = ("dependencies", "dev-dependencies")
 PATCH_SECTIONS = ("patch", "replace")
-PLACEHOLDER = "（待填：为什么需要它——引入它改变了什么契约？）"
+UNFILLED_REASON = "（待填：为什么需要它——引入它改变了什么契约？）"
 
 
 def _is_internal(spec) -> bool:
@@ -162,7 +162,7 @@ def main() -> int:
                     old = ((base.get(key) or {}).get(crate) or {}).get(dep)
                     why = old if isinstance(old, str) else (old or {}).get("why") if old else None
                     if not why:
-                        why = PLACEHOLDER
+                        why = UNFILLED_REASON
                         added.append(f"{crate} → {dep}")
                     entry = {"why": why}
                     if dep in lock_map:
@@ -170,7 +170,7 @@ def main() -> int:
                     merged[key][crate][dep] = entry
         bfile.write_text(json.dumps(merged, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         todo = [f"{c}→{d}" for c, dd in merged["deps"].items() for d, e in dd.items()
-                if PLACEHOLDER in e["why"]]
+                if UNFILLED_REASON in e["why"]]
         print(f"已重写基线：{bfile.relative_to(root)}")
         print(f"  新增需填理由：{len(added)} 项" + ("（" + "、".join(added) + "）" if added else ""))
         if todo:
@@ -188,7 +188,7 @@ def main() -> int:
                       f"   登记流程：确认它是否改变确定性契约 → 跑 --write-baseline → 填实理由 → 一起提交")
             else:
                 why = entry if isinstance(entry, str) else entry.get("why", "")
-                if not why or PLACEHOLDER in why:
+                if not why or UNFILLED_REASON in why:
                     fail = True
                     print(f"❌ {crate} → {dep} 的登记理由仍是占位符，请填实")
         for dep in sorted(set(known) - set(deps)):

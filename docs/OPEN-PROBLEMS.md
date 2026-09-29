@@ -1275,7 +1275,7 @@ ADR-0004 换代 + 全套门；且**动手前需要更干净的分母**（现有�
 
 **入口**（`RECIPES.md` §）：
 ```bash
-cd "/d/KF/RUST WL/gold-sample"
+cd "/d/KF/BSHSQ/gold-sample"
 CARGO_TARGET_DIR=C:/vxl-wl-target-gold cargo run --release -q -- col45  600 16 0.01 4 3.0 30 4
 CARGO_TARGET_DIR=C:/vxl-wl-target-gold cargo run --release -q -- pile5  600 16 0.01 4 3.0 30 4
 CARGO_TARGET_DIR=C:/vxl-wl-target-gold cargo run --release -q -- tower25 2400 16 0.01 1 3.0 30 16   # 塔要长跑（2400 tick）
@@ -1516,7 +1516,7 @@ y 分布：min -4201.078 | p05 -3.222 | p50 -1.762 | p95 -3.448 | max 3.980
 
   | 引擎 | pass/degraded/**fail** | 该探针 |
   |---|---|---|
-  | **vxl-phys (RUST WL)** | **20 / 0 / 0** | **pass（顶出）** |
+  | **vxl-phys (BSHSQ)** | **20 / 0 / 0** | **pass（顶出）** |
   | Rapier 3D | 19 / 0 / 1 | fail：y = **−66.37**（直接掉穿） |
   | Jolt Physics | 13 / 6 / 1 | fail |
   | NVIDIA PhysX 5 | 13 / 6 / 1 | fail |

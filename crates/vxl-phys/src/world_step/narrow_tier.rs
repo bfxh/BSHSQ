@@ -49,7 +49,7 @@ pub struct NarrowTierStats {
 ///
 /// 为什么包一层而不是给 `World` 加一个字段：`world_struct.rs` 是**零函数档**（加行即红）且
 /// `World` 的成员数正卡在棘轮上（23）⇒ 换字段类型不动行数与成员数。`Deref`/`DerefMut` 让
-/// 既有的 `self.narrow.xxx(...)` 调用点（16 处）**一行都不用改**。
+/// 既有的 `self.narrow.任意方法(...)` 调用点（16 处，如 `compound_half_extents`）**一行都不用改**。
 pub struct NarrowSlot {
     pub host: DefaultNarrowPhase,
     pub(crate) tier: Option<Box<dyn vxl_phys_core::narrow_tier::NarrowTierBackend>>,

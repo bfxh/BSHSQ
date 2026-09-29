@@ -15,7 +15,7 @@ test / vocab / discipline / god / deps_lock / ci_shape / typos）+ 行为门 + �
 下面展开的是它内部逐步跑的东西：
 
 ```bash
-cd "/d/KF/RUST WL"
+cd "/d/KF/BSHSQ"
 export CARGO_TARGET_DIR=C:/vxl-wl-target
 cargo fmt --all
 cargo test --release > /tmp/test.log 2>&1; echo "test=$?"
@@ -61,7 +61,7 @@ bash scripts/gate_gold.sh          # 一条命令；逐项打印退出码，失�
 `CARGO_TARGET_DIR_GOLD` 覆盖；日志落 `/tmp/g_*.log`，可用 `GOLD_LOG_DIR` 覆盖）：
 
 ```bash
-cd "/d/KF/RUST WL/gold-sample"
+cd "/d/KF/BSHSQ/gold-sample"
 export CARGO_TARGET_DIR=C:/vxl-wl-target-gold
 cargo fmt --all -- --check                              ; echo "gold_fmt=$?"
 cargo clippy --release -q -- -D warnings                 ; echo "gold_clippy=$?"
@@ -205,9 +205,9 @@ cargo run --release -q -p vxl-phys --example arena_bench pyramid
 ```bash
 cd /d/KF/physarena
 npm run build:vxl && cp public/vendor/vxl/vxl_phys_wasm.wasm out/new.wasm   # 新构建
-cd "/d/KF/RUST WL" && git stash push -- crates/vxl-phys-solver/src/lib.rs crates/vxl-phys/examples/arena_bench.rs
+cd "/d/KF/BSHSQ" && git stash push -- crates/vxl-phys-solver/src/lib.rs crates/vxl-phys/examples/arena_bench.rs
 cd /d/KF/physarena && npm run build:vxl && cp public/vendor/vxl/vxl_phys_wasm.wasm out/old.wasm  # 旧构建
-cd "/d/KF/RUST WL" && git stash pop
+cd "/d/KF/BSHSQ" && git stash pop
 cd /d/KF/physarena && node scripts/vxl-simd-ab.mjs out/old.wasm out/new.wasm   # 3 轮交替 + 位指纹
 ```
 
@@ -216,9 +216,9 @@ cd /d/KF/physarena && node scripts/vxl-simd-ab.mjs out/old.wasm out/new.wasm   #
 target 目录：
 
 ```bash
-cd "/d/KF/RUST WL"
-git worktree add "D:/KF/RUST-WL-old" <旧提交>
-cd "D:/KF/RUST-WL-old" && CARGO_TARGET_DIR=C:/vxl-wl-target-old \
+cd "/d/KF/BSHSQ"
+git worktree add "D:/KF/BSHSQ-old" <旧提交>
+cd "D:/KF/BSHSQ-old" && CARGO_TARGET_DIR=C:/vxl-wl-target-old \
   cargo build --release -q -p vxl-phys --example arena_bench
 # 交替跑两个二进制（3 轮），同温窗才有可比性：
 OLD=C:/vxl-wl-target-old/release/examples/arena_bench.exe
@@ -226,7 +226,7 @@ NEW=C:/vxl-wl-target/release/examples/arena_bench.exe
 for r in 1 2 3; do for s in pyramid ballpit; do
   echo "$s 旧 $($OLD $s | grep -o 'p50 [0-9.]*')  新 $($NEW $s | grep -o 'p50 [0-9.]*')"
 done; done
-git worktree remove "D:/KF/RUST-WL-old" --force   # 收尾
+git worktree remove "D:/KF/BSHSQ-old" --force   # 收尾
 ```
 
 A/B 跑完必须 `npm run build:vxl && npm run build` 把 `public/` 与 `dist/` 都刷成
@@ -258,7 +258,7 @@ cannon-es 15/4、Jolt 13/6、PhysX 13/6、Oimo 10/9。脚本另报 1 条资源�
 
 | 引擎 | pass / degraded / fail | boot |
 |---|---|---|
-| **vxl-phys (RUST WL)** | **21 / 0 / 0** | 20 ms |
+| **vxl-phys (BSHSQ)** | **21 / 0 / 0** | 20 ms |
 | Rapier 3D | 20 / 0 / 1 | 85 ms |
 | Crashcat | 19 / 1 / 1 | 13 ms |
 | Bullet (ammo.js) | 17 / 3 / 1 | 48 ms |
@@ -305,7 +305,7 @@ AABB 角点并集凸包）。那正是 `TECH-SURVEY.md` §6 的 **A9**，当日�
 **适用**：**高塔/高堆**（本仓的睡眠缺口场景）。**简单平堆不需要它**——见下面的对照。
 
 ```bash
-cd "/d/KF/RUST WL/gold-sample"
+cd "/d/KF/BSHSQ/gold-sample"
 CARGO_TARGET_DIR=C:/vxl-wl-target-gold cargo run --release -q -- tower25 2400 16 0.01 1 3.0 30 96 - 0
 # 注意：tower25 要**长跑**（2400 tick）才收敛；600 tick 时还在爬。
 ```
@@ -344,7 +344,7 @@ CARGO_TARGET_DIR=C:/vxl-wl-target-gold cargo run --release -q -- tower25 2400 16
 ## 金样（保真度门，换代哈希时必跑）
 
 ```bash
-cd "/d/KF/RUST WL/gold-sample"     # 独立 workspace：-p 要在这里用
+cd "/d/KF/BSHSQ/gold-sample"     # 独立 workspace：-p 要在这里用
 CARGO_TARGET_DIR=C:/vxl-wl-target-gold cargo run --release -q -- col45 600 16 0.01 1 3.0 30 16
 # **参考配方（2026-09-20 起）= iters 16 / inner 1 / substeps 16**（同总扫掠数 256 下，
 #   把预算从"重复扫"挪到"重新线性化"：残差与入睡两列同时变好，代价塔上 +30%）。

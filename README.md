@@ -97,7 +97,7 @@ MIT OR Apache-2.0（依赖审计禁 GPL 传染）。
 
 ## 本机注意事项
 
-- **仓库路径**：`D:\KF\RUST WL`（ASCII）。历史上仓库在 `D:\开发`，非 ASCII 路径会让
+- **仓库路径**：`D:\KF\BSHSQ`（ASCII）。历史上仓库在 `D:\开发`，非 ASCII 路径会让
   MinGW（`x86_64-pc-windows-gnu`）链接器无法解析目标文件路径，因此 `.cargo/config.toml`
   把 `target-dir` 固定到 `C:/vxl-wl-target`。
   **该规避的理由已随迁移消失**（2026-09-30 实测：`CARGO_TARGET_DIR=<仓库>/target`

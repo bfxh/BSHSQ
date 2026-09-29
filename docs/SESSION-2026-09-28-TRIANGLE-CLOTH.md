@@ -121,7 +121,7 @@
 ## 五、接手第一件事（新会话）
 
 ```bash
-cd "D:/KF/RUST WL" && git branch --show-current && git log --oneline -3
+cd "D:/KF/BSHSQ" && git branch --show-current && git log --oneline -3
 export CARGO_TARGET_DIR=C:/vxl-wl-target && bash scripts/gate_all.sh   # 先确认基线仍绿（≈10 min，可后台）
 ```
 
