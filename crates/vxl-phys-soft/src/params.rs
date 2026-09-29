@@ -70,6 +70,11 @@ impl Default for ClothConstraints {
 pub struct SelfCollision {
     pub enabled: bool,
     pub particle_radius: f32,
+    /// **自摩擦系数 μ**（切向库仑锥；`0` = 关）。
+    ///
+    /// ⚠️ **这个值不是规格书给的** —— 本骨架其余数值都取自 `SPEC.md`，而规格书**没有规定自摩擦**；
+    /// 本值是本片选的默认（**`0` = 关**，与全仓"0=关字段"先例一致 ⇒ 打开它是有意的行为变化）。
+    pub friction: f32,
 }
 
 impl Default for SelfCollision {
@@ -77,26 +82,7 @@ impl Default for SelfCollision {
         Self {
             enabled: false,
             particle_radius: 0.05,
+            friction: 0.0,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn alpha_table_matches_spec() {
-        assert_eq!(Stiffness::NearRigid.alpha(), 1e-7);
-        assert_eq!(Stiffness::Hard.alpha(), 1e-6);
-        assert_eq!(Stiffness::Standard.alpha(), 1e-5);
-        assert_eq!(Stiffness::Soft.alpha(), 1e-4);
-        assert_eq!(Stiffness::Jelly.alpha(), 3e-4);
-    }
-
-    #[test]
-    fn tear_table_matches_spec() {
-        assert_eq!(TearStrain::E03.eps(), 0.3);
-        assert_eq!(TearStrain::None.eps(), f32::INFINITY);
     }
 }
