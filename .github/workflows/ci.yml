@@ -57,7 +57,7 @@ jobs:
     name: 静态 (文本/工作流/纪律)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # 工具逐个安装（首次 CI 实测：合并写法 `tool: a,b,c` 在安装步失败——exit 76；
@@ -111,7 +111,7 @@ jobs:
     name: 静态 (依赖)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # 本仓自研的依赖红线（纯 Python stdlib，无需装任何工具）：外部依赖 / 构建依赖
@@ -133,10 +133,10 @@ jobs:
     name: 静态 (文档/强化 lint)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable # zizmor: ignore[unpinned-uses] 该 action 的 ref 即工具链名（stable/nightly），无固定 SHA 语义
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: clippy
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
@@ -167,10 +167,10 @@ jobs:
           - { os: ubuntu-latest, label: "GCC / x86_64", linker: "" }
           - { os: ubuntu-latest, label: "Clang+LLD / x86_64", linker: "-C linker=clang -C link-arg=-fuse-ld=lld" }
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable # zizmor: ignore[unpinned-uses] ref 即工具链名，无固定 SHA 语义
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
@@ -193,10 +193,10 @@ jobs:
     name: miri (core 子集)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@nightly # zizmor: ignore[unpinned-uses] ref 即工具链名，无固定 SHA 语义
+      - uses: dtolnay/rust-toolchain@be39649afda95dbf70f87cce95f68b8d5797b296 # nightly
         with:
           components: miri
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
@@ -210,10 +210,10 @@ jobs:
     name: loom (并发原语)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable # zizmor: ignore[unpinned-uses] ref 即工具链名，无固定 SHA 语义
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: loom 模型测试
         env:
@@ -226,10 +226,10 @@ jobs:
     name: TSan (并行路径)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@nightly # zizmor: ignore[unpinned-uses] ref 即工具链名，无固定 SHA 语义
+      - uses: dtolnay/rust-toolchain@be39649afda95dbf70f87cce95f68b8d5797b296 # nightly
         with:
           components: rust-src
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
@@ -247,10 +247,10 @@ jobs:
     name: ASan (core + 门槛短跑)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@nightly # zizmor: ignore[unpinned-uses] ref 即工具链名，无固定 SHA 语义
+      - uses: dtolnay/rust-toolchain@be39649afda95dbf70f87cce95f68b8d5797b296 # nightly
         with:
           components: rust-src
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
@@ -279,10 +279,10 @@ jobs:
           - { os: ubuntu-latest, label: "GCC", linker: "" }
           - { os: ubuntu-latest, label: "Clang", linker: "-C linker=clang -C link-arg=-fuse-ld=lld" }
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable # zizmor: ignore[unpinned-uses] ref 即工具链名，无固定 SHA 语义
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Clang 工具链（clang 行）
         if: contains(matrix.label, 'Clang')
@@ -302,7 +302,7 @@ jobs:
         env:
           RUSTFLAGS: ${{ matrix.linker }}
         run: cargo run --release -p vxl-phys --example m1_collision_row -- row-${{ matrix.label }}.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: gates-${{ matrix.label }}
           path: |
@@ -315,10 +315,10 @@ jobs:
     name: 确定性 (GCC-aarch64/qemu)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable # zizmor: ignore[unpinned-uses] ref 即工具链名，无固定 SHA 语义
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           targets: aarch64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
@@ -333,7 +333,7 @@ jobs:
         run: |
           cargo run --release --target aarch64-unknown-linux-gnu -p vxl-phys --example determinism \
             | tee determinism-GCC-aarch64.txt
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: gates-GCC-aarch64
           path: determinism-GCC-aarch64.txt
@@ -344,7 +344,7 @@ jobs:
     needs: [determinism, determinism-arm64]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with: { path: arts }
       - name: gate_scene.hash.final 全等断言（x86_64 三编译器）
         run: |
@@ -376,16 +376,34 @@ jobs:
           echo "唯一哈希数 = $n（应为 1；>1 即跨平台不一致）"
           test "$n" -eq 1
 
+  # ==================== 棘轮门禁（自 main 并入：27 个纯 stdlib Python 门 + selftest + probe） ====================
+  # 入口 `scripts/local_gate.py` 是 **CI 专用**；本地全量验证仍走 `scripts/gate_all.sh`
+  # （行为门 / 金样门 / 计时独占锁）。两者范围不同、不是重复入口——分支此前把自用的
+  # local_gate 撤成指路牌，是因为当时它和 gate_all 功能重合；main 这版只跑静态细粒度门。
+  # 动作按本仓纪律钉 SHA：setup-python 的 v7 与 v7.0.0 同尖端（合 P9 的注释规则）。
+  ratchet:
+    name: 棘轮门禁
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+      - name: 跑门禁（dag/rayon/unwrap/unsafe/linelen/glob/todo/god/cyc/nest/args + selftest + probe）
+        run: python scripts/local_gate.py
+
   # ==================== 报告层：覆盖率（不阻断；产物供趋势观察） ====================
   coverage:
     name: 覆盖率 (报告)
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable # zizmor: ignore[unpinned-uses] ref 即工具链名，无固定 SHA 语义
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
@@ -395,7 +413,7 @@ jobs:
           tool: cargo-llvm-cov@0.9.1     # 钉版本，理由同 typos（@latest 会自己漂）
       - name: 覆盖率（全量测试 + 摘要）
         run: cargo llvm-cov --workspace --release --json --output-path cov.json --summary-only | tee cov-summary.txt
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: coverage
@@ -414,10 +432,10 @@ jobs:
     continue-on-error: true
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable # zizmor: ignore[unpinned-uses] ref 即工具链名，无固定 SHA 语义
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: gold-sample
@@ -429,7 +447,7 @@ jobs:
             echo "=== $s ===" | tee gold-$s.txt
             cargo run --release -- "$s" 600 16 0.01 4 3.0 30 4 2>&1 | tee -a gold-$s.txt
           done
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: gold-sample
@@ -451,6 +469,7 @@ jobs:
       - determinism
       - determinism-arm64
       - hash-compare
+      - ratchet
     if: always()
     runs-on: ubuntu-latest
     steps:

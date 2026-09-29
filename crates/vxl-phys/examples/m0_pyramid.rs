@@ -46,7 +46,7 @@ fn main() {
     );
     bodies += 2;
 
-    println!("RUST WL / vxl_phys M0 演示 —— {bodies} 动态体，预设 = Balanced");
+    println!("BSHSQ / vxl_phys M0 演示 —— {bodies} 动态体，预设 = Balanced");
     println!("tick | 物理耗时 ms | 活跃体 | 接触点 | 哈希(每60tick)");
     let start = std::time::Instant::now();
     let mut hash_log = String::new();

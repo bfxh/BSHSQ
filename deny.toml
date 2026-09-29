@@ -10,6 +10,8 @@
 targets = []
 
 [advisories]
+# RUSTSEC 漏洞库默认开启，但需要**联网拉 advisory-db**；本地/离线沙箱拦 github git 协议时
+# 这一项判不出来 ⇒ advisories 的结论以真实 CI（static-deps 作业）为准，本地红绿不作数。
 version = 2
 # 被 yank 的版本一律拒（可复现构建不接受「已撤回」的依赖）。
 yanked = "deny"

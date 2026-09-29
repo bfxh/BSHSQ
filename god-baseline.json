@@ -1020,8 +1020,8 @@
   "max_type_members": 3
  },
  "crates/vxl-phys/examples/m0_bench.rs": {
-  "file_lines": 102,
-  "max_fn_lines": 91,
+  "file_lines": 100,
+  "max_fn_lines": 89,
   "max_type_members": 0
  },
  "crates/vxl-phys/examples/m0_gates.rs": {
@@ -1294,9 +1294,79 @@
   "max_fn_lines": 58,
   "max_type_members": 0
  },
+ "scripts/args_gate.py": {
+  "file_lines": 30,
+  "max_fn_lines": 10,
+  "max_type_members": 0
+ },
+ "scripts/asm_gate.py": {
+  "file_lines": 56,
+  "max_fn_lines": 25,
+  "max_type_members": 0
+ },
+ "scripts/clone_gate.py": {
+  "file_lines": 44,
+  "max_fn_lines": 12,
+  "max_type_members": 0
+ },
+ "scripts/cpp_gate.py": {
+  "file_lines": 40,
+  "max_fn_lines": 16,
+  "max_type_members": 0
+ },
+ "scripts/cyc_gate.py": {
+  "file_lines": 30,
+  "max_fn_lines": 10,
+  "max_type_members": 0
+ },
+ "scripts/dag_gate.py": {
+  "file_lines": 89,
+  "max_fn_lines": 64,
+  "max_type_members": 0
+ },
+ "scripts/dbg_gate.py": {
+  "file_lines": 44,
+  "max_fn_lines": 19,
+  "max_type_members": 0
+ },
  "scripts/deps_lock.py": {
   "file_lines": 253,
   "max_fn_lines": 105,
+  "max_type_members": 0
+ },
+ "scripts/engine_dep_gate.py": {
+  "file_lines": 51,
+  "max_fn_lines": 17,
+  "max_type_members": 0
+ },
+ "scripts/f64_gate.py": {
+  "file_lines": 55,
+  "max_fn_lines": 24,
+  "max_type_members": 0
+ },
+ "scripts/fastmath_gate.py": {
+  "file_lines": 42,
+  "max_fn_lines": 16,
+  "max_type_members": 0
+ },
+ "scripts/gate_probe.py": {
+  "file_lines": 142,
+  "max_fn_lines": 20,
+  "max_type_members": 0
+ },
+ "scripts/gate_selftest.py": {
+  "file_lines": 76,
+  "max_fn_lines": 11,
+  "max_type_members": 0
+ },
+ "scripts/gates_common.py": {
+  "file_lines": 453,
+  "max_fn_lines": 75,
+  "max_type_members": 0
+ },
+ "scripts/glob_gate.py": {
+  "file_lines": 39,
+  "max_fn_lines": 9,
   "max_type_members": 0
  },
  "scripts/god_gate.py": {
@@ -1304,9 +1374,44 @@
   "max_fn_lines": 72,
   "max_type_members": 0
  },
+ "scripts/license_gate.py": {
+  "file_lines": 75,
+  "max_fn_lines": 32,
+  "max_type_members": 0
+ },
+ "scripts/linelen_gate.py": {
+  "file_lines": 41,
+  "max_fn_lines": 12,
+  "max_type_members": 0
+ },
  "scripts/local_gate.py": {
-  "file_lines": 23,
-  "max_fn_lines": 0,
+  "file_lines": 87,
+  "max_fn_lines": 17,
+  "max_type_members": 0
+ },
+ "scripts/memfind_core_gate.py": {
+  "file_lines": 48,
+  "max_fn_lines": 20,
+  "max_type_members": 0
+ },
+ "scripts/naming_gate.py": {
+  "file_lines": 133,
+  "max_fn_lines": 23,
+  "max_type_members": 0
+ },
+ "scripts/nest_gate.py": {
+  "file_lines": 30,
+  "max_fn_lines": 10,
+  "max_type_members": 0
+ },
+ "scripts/print_gate.py": {
+  "file_lines": 44,
+  "max_fn_lines": 19,
+  "max_type_members": 0
+ },
+ "scripts/rayon_gate.py": {
+  "file_lines": 37,
+  "max_fn_lines": 15,
   "max_type_members": 0
  },
  "scripts/render_compare.py": {
@@ -1318,5 +1423,25 @@
   "file_lines": 488,
   "max_fn_lines": 60,
   "max_type_members": 2
+ },
+ "scripts/staticmut_gate.py": {
+  "file_lines": 41,
+  "max_fn_lines": 18,
+  "max_type_members": 0
+ },
+ "scripts/todo_gate.py": {
+  "file_lines": 40,
+  "max_fn_lines": 9,
+  "max_type_members": 0
+ },
+ "scripts/unsafe_gate.py": {
+  "file_lines": 39,
+  "max_fn_lines": 9,
+  "max_type_members": 0
+ },
+ "scripts/unwrap_gate.py": {
+  "file_lines": 39,
+  "max_fn_lines": 9,
+  "max_type_members": 0
  }
 }

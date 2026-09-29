@@ -30,7 +30,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-authors = ["RUST WL"]
+authors = ["BSHSQ"]
 
 [workspace.dependencies]
 # 版本与 path 同时给出：path 供本地 workspace 解析，version 供「若将来发布」

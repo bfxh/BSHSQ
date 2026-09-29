@@ -1,6 +1,6 @@
 # 会话交接与工作整理（2026-09-12）
 
-> 本文整理会话 `sess_e5a7713f`（"根据VXLPHYS文档开搞RUST WL项目"）的全部有效产出，
+> 本文整理会话 `sess_e5a7713f`（"根据VXLPHYS文档开搞BSHSQ项目"）的全部有效产出，
 > 供该会话回档后作为唯一参考。主线工作后续在本文件所在仓库直接推进。
 > 原始材料：`C:\Users\lbx13\.zcode\cli\log\zcode-2026-09-12.jsonl`（事件流）、
 > `C:\Users\lbx13\.zcode\cli\artifacts\sess_e5a7713f-*/`（214 个工具结果溢出文件）。
@@ -11,7 +11,10 @@
 > ⚠️ **路径漂移（2026-09-30 注）**：本档内 `D:\开发\…` 均为 2026-09-12 当时的事实；该树
 > 已不存在，内容迁至 `D:\KF\…`（`VoxelForge-V3` → `D:\KF\VoxelForge-V3`）。原文不改写。
 
-- 仓库 `bfxh/RUST-WL`（private，gh 已登录 bfxh）——**用户明确要求：不要删**。
+- 仓库 `bfxh/BSHSQ`（原 `bfxh/RUST-WL`，2026-09-27 改名；gh 已登录 bfxh）——**用户明确要求：不要删**。
+  ⚠️ **可见性现状 = PUBLIC**（2026-09-30 `gh api repos/bfxh/BSHSQ` 实测）：本档 2026-09-12
+  写的 private 已不成立。要么改回 private，要么把「允许公开」显式记成一条决定——
+  仓库公开性不该靠一次没留痕的设置变更改变。
 - 与 `D:\开发\VoxelForge-V3` **零关联**：文档/注释/Cargo 元数据/术语全部清除。
   措辞映射：宿主客户代号 → 消费方/集成方；游戏侧 → 集成方；旧规格书
   PHYS-ENGINE-VXLPHYS-V1 → `docs/SPEC.md`（V1.2 起）。

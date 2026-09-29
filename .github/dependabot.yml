@@ -40,3 +40,13 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: "ci"
+
+    # 同一 action 在 ci.yml 里用两次、ref 不同（stable 一个 sha、nightly 一个 sha）。
+    # dependabot 把两个 ref 当成一条依赖，会提议把 nightly 那行也改成 stable 的 sha
+    # —— main 上撞过（PR #12：注释仍写 nightly、实际拿到 stable ⇒ miri / TSan 拿不到
+    # nightly 工具链直接红）。两条 ref 需人工按用途分别定，不交给自动 bump。
+    ignore:
+      - dependency-name: "dtolnay/rust-toolchain"
+        update-types: ["version-update:semver-patch",
+                       "version-update:semver-minor",
+                       "version-update:semver-major"]
