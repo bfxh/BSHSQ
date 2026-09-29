@@ -186,6 +186,9 @@ KNOWLEDGE）；D 的失败教训 = 「预估 cache 行数」必须实测（环�
 
 ## 2026-09-15 · 接 PhysArena 同台对比（引擎侧改动与实测）
 
+> ⚠️ **路径已漂移（2026-09-30 注）**：下文 `D:\开发\physarena` 是当时的事实，现位于
+> `D:\KF\physarena`。历史记录按原文保留，命令以 `RECIPES.md` 的新路径为准。
+
 背景：把本引擎作为第 9 个参战引擎接进 `D:\开发\physarena`（浏览器物理引擎测试场），
 与 Rapier / Jolt / PhysX 5 / Bullet / Havok / Crashcat / cannon-es / Oimo.js 同场景对比。
 桥 = `physarena/wasm-bridge/`（独立工作区的工具 crate，零 unsafe：Rust 侧缓冲 +

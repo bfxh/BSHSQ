@@ -97,9 +97,13 @@ MIT OR Apache-2.0（依赖审计禁 GPL 传染）。
 
 ## 本机注意事项
 
-- 仓库位于非 ASCII 路径（`D:\开发`）时，MinGW（`x86_64-pc-windows-gnu`）链接器
-  无法解析目标文件路径。`.cargo/config.toml` 已把 `target-dir` 固定到
-  `C:/vxl-wl-target` 规避；切换到 MSVC 工具链后可删除该配置。
+- **仓库路径**：`D:\KF\RUST WL`（ASCII）。历史上仓库在 `D:\开发`，非 ASCII 路径会让
+  MinGW（`x86_64-pc-windows-gnu`）链接器无法解析目标文件路径，因此 `.cargo/config.toml`
+  把 `target-dir` 固定到 `C:/vxl-wl-target`。
+  **该规避的理由已随迁移消失**（2026-09-30 实测：`CARGO_TARGET_DIR=<仓库>/target`
+  `cargo test -p vxl-phys-integrate` 在本机 GNU 工具链下编译+链接全过）；现在留着这一行
+  只是因为 ① C 盘已有 7.0 GB 热缓存 ② 三个门脚本硬编码该路径。删它 = 一次全量重建，
+  属可选项，不再是必需项。
 - M0 零外部依赖（离线可构建）；xxh3 / Criterion / proptest / Rapier 金样 /
   wgpu 随 M1+ 引入（需要 crates.io 网络）。
 

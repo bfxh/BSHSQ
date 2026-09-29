@@ -2,6 +2,9 @@
 
 > 全部基准/复现的命令行，Windows Git Bash + `CARGO_TARGET_DIR=C:/vxl-wl-target`。
 > 所有配方都要求 release；确定性判定用同机双跑四哈希（ADR 0004）。
+> **路径口径（2026-09-30）**：仓库与 `physarena` 已从 `D:\开发\` 迁到 `D:\KF\`，本文件内
+> 全部命令行按新路径改写；`C:/vxl-wl-target*` 三个 target 目录未动（历史日志里的旧路径
+> 按原文保留，不再逐条追改）。引用前先 `Test-Path`。
 
 ## 门禁链（每次源码改动落地前，ADR 0005）
 
@@ -58,7 +61,7 @@ bash scripts/gate_gold.sh          # 一条命令；逐项打印退出码，失�
 `CARGO_TARGET_DIR_GOLD` 覆盖；日志落 `/tmp/g_*.log`，可用 `GOLD_LOG_DIR` 覆盖）：
 
 ```bash
-cd "/d/开发/RUST WL/gold-sample"
+cd "/d/KF/RUST WL/gold-sample"
 export CARGO_TARGET_DIR=C:/vxl-wl-target-gold
 cargo fmt --all -- --check                              ; echo "gold_fmt=$?"
 cargo clippy --release -q -- -D warnings                 ; echo "gold_clippy=$?"
@@ -200,12 +203,12 @@ cargo run --release -q -p vxl-phys --example arena_bench pyramid
 同一份代码 40 分钟内从"构建 392 µs"漂到"490 µs"）：
 
 ```bash
-cd /d/开发/physarena
+cd /d/KF/physarena
 npm run build:vxl && cp public/vendor/vxl/vxl_phys_wasm.wasm out/new.wasm   # 新构建
-cd "/d/开发/RUST WL" && git stash push -- crates/vxl-phys-solver/src/lib.rs crates/vxl-phys/examples/arena_bench.rs
-cd /d/开发/physarena && npm run build:vxl && cp public/vendor/vxl/vxl_phys_wasm.wasm out/old.wasm  # 旧构建
-cd "/d/开发/RUST WL" && git stash pop
-cd /d/开发/physarena && node scripts/vxl-simd-ab.mjs out/old.wasm out/new.wasm   # 3 轮交替 + 位指纹
+cd "/d/KF/RUST WL" && git stash push -- crates/vxl-phys-solver/src/lib.rs crates/vxl-phys/examples/arena_bench.rs
+cd /d/KF/physarena && npm run build:vxl && cp public/vendor/vxl/vxl_phys_wasm.wasm out/old.wasm  # 旧构建
+cd "/d/KF/RUST WL" && git stash pop
+cd /d/KF/physarena && node scripts/vxl-simd-ab.mjs out/old.wasm out/new.wasm   # 3 轮交替 + 位指纹
 ```
 
 要点：**别用 `git stash push -- <源码文件>` 做 A/B**——Mimosa hook 会按"Bash 直接写
@@ -213,9 +216,9 @@ cd /d/开发/physarena && node scripts/vxl-simd-ab.mjs out/old.wasm out/new.wasm
 target 目录：
 
 ```bash
-cd "/d/开发/RUST WL"
-git worktree add "D:/开发/RUST-WL-old" <旧提交>
-cd "D:/开发/RUST-WL-old" && CARGO_TARGET_DIR=C:/vxl-wl-target-old \
+cd "/d/KF/RUST WL"
+git worktree add "D:/KF/RUST-WL-old" <旧提交>
+cd "D:/KF/RUST-WL-old" && CARGO_TARGET_DIR=C:/vxl-wl-target-old \
   cargo build --release -q -p vxl-phys --example arena_bench
 # 交替跑两个二进制（3 轮），同温窗才有可比性：
 OLD=C:/vxl-wl-target-old/release/examples/arena_bench.exe
@@ -223,7 +226,7 @@ NEW=C:/vxl-wl-target/release/examples/arena_bench.exe
 for r in 1 2 3; do for s in pyramid ballpit; do
   echo "$s 旧 $($OLD $s | grep -o 'p50 [0-9.]*')  新 $($NEW $s | grep -o 'p50 [0-9.]*')"
 done; done
-git worktree remove "D:/开发/RUST-WL-old" --force   # 收尾
+git worktree remove "D:/KF/RUST-WL-old" --force   # 收尾
 ```
 
 A/B 跑完必须 `npm run build:vxl && npm run build` 把 `public/` 与 `dist/` 都刷成
@@ -233,7 +236,7 @@ A/B 跑完必须 `npm run build:vxl && npm run build` 把 `public/` 与 `dist/` 
 ## 浏览器对拍自检（PhysArena，**21** 探针 × 9 引擎；2026-09-22 起）
 
 ```bash
-cd /d/开发/physarena
+cd /d/KF/physarena
 npm run build:vxl && npm run build      # 刷成当前构建（先做，否则测的是旧 wasm）
 (npx vite preview --port 4173 &)        # 自检脚本走 http://localhost:4173
 ARENA_TAG=verify node scripts/arena-drive.mjs selftest   # 落盘 out/selftest-verify.json
@@ -302,7 +305,7 @@ AABB 角点并集凸包）。那正是 `TECH-SURVEY.md` §6 的 **A9**，当日�
 **适用**：**高塔/高堆**（本仓的睡眠缺口场景）。**简单平堆不需要它**——见下面的对照。
 
 ```bash
-cd "/d/开发/RUST WL/gold-sample"
+cd "/d/KF/RUST WL/gold-sample"
 CARGO_TARGET_DIR=C:/vxl-wl-target-gold cargo run --release -q -- tower25 2400 16 0.01 1 3.0 30 96 - 0
 # 注意：tower25 要**长跑**（2400 tick）才收敛；600 tick 时还在爬。
 ```
@@ -341,7 +344,7 @@ CARGO_TARGET_DIR=C:/vxl-wl-target-gold cargo run --release -q -- tower25 2400 16
 ## 金样（保真度门，换代哈希时必跑）
 
 ```bash
-cd "/d/开发/RUST WL/gold-sample"     # 独立 workspace：-p 要在这里用
+cd "/d/KF/RUST WL/gold-sample"     # 独立 workspace：-p 要在这里用
 CARGO_TARGET_DIR=C:/vxl-wl-target-gold cargo run --release -q -- col45 600 16 0.01 1 3.0 30 16
 # **参考配方（2026-09-20 起）= iters 16 / inner 1 / substeps 16**（同总扫掠数 256 下，
 #   把预算从"重复扫"挪到"重新线性化"：残差与入睡两列同时变好，代价塔上 +30%）。
