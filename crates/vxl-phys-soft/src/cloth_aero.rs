@@ -10,10 +10,11 @@
 //! - **`u = 0 ⇒ F = 0` 逐位成立** ⇒ 零风场景与"气动关"**逐位相同**（金丝雀判据靠这条）。
 //!
 //! **边界（写清，不是漏）**：本档**不含**力矩（顶点力天然给出分布力矩，但没有单独立"面元力矩"
-//! 这条量）、不含升力线斜率（`lift_slope` 在骨架里但 Bridson 线化式不用它）、面积退化面跳过
-//! （`area ≤ 0` ⇒ 法向无定义，与 `project_constraints` 的 `len < 1e-9` 同惯例）。
+//! 这条量）、面积退化面跳过（`area ≤ 0` ⇒ 法向无定义，与 `project_constraints` 的
+//! `len < 1e-9` 同惯例）。**升力已接入**（2026-09-29）：经 `vxl_phys_aero::face_force_tri`
+//! ⇒ `face_force_with_lift`，`lift_slope` 从此有消费方（判据 `tests/cloth_aero_lift.rs`）。
 use crate::cloth::ClothSheet;
-use vxl_phys_aero::{face_force, AeroConfig};
+use vxl_phys_aero::{face_force_tri, AeroConfig};
 use vxl_phys_core::Vec3;
 
 /// **气动输入**（**默认关**）。
@@ -51,12 +52,11 @@ impl ClothSheet {
         for t in 0..self.tris.len() {
             let [a, b, c] = self.tris[t].map(|x| x as usize);
             let (pa, pb, pc) = (self.pos[a], self.pos[b], self.pos[c]);
-            let area = (pb - pa).cross(pc - pa).length() * 0.5;
-            if area <= 0.0 {
-                continue; // 退化面：法向无定义
-            }
             let v_c = (self.aero.v0[a] + self.aero.v0[b] + self.aero.v0[c]) * (1.0 / 3.0);
-            let f3 = face_force(wind - v_c, area, &cfg) * (1.0 / 3.0);
+            let Some(f3) = face_force_tri(pa, pb, pc, v_c, wind, &cfg).map(|f| f * (1.0 / 3.0))
+            else {
+                continue; // 退化面：法向无定义
+            };
             for i in [a, b, c] {
                 if self.inv_mass[i] == 0.0 {
                     continue; // 钉住粒子不受力（也不该被推）
