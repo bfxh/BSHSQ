@@ -39,6 +39,7 @@ DEFAULT_CFG = {
     # **双超**才是"状态和行为攥在一个类型里"。按**跨文件累计**的方法数判。
     "max_type_fields": 24,
     "max_type_methods": 24,
+    "max_type_methods_alone": 32,      # 只超方法轴也记债务（防 regroup 字段糊弄双超判据）
     "god_pairs": {},                 # 双超类型的登记簿：{类型: 理由}，登记后只准减
     "include": ["**/*.py", "**/*.rs", "**/*.js", "**/*.ts", "**/*.tsx", "**/*.mjs", "**/*.cjs"],
     "exclude": ["**/.git/**", "**/node_modules/**", "**/target/**", "**/__pycache__/**",
@@ -376,16 +377,23 @@ def evaluate(files: dict, types: dict, base: dict, cfg: dict) -> tuple[list[str]
     #    判据按豁免文档自己写的口径：**字段与方法双超 ⇒ 上帝对象**；登记进 `god_pairs` 的
     #    转为"债务（只准减）"，但**方法数一变胖就红**，且必须带理由。
     fl, ml = cfg.get("max_type_fields", 10 ** 9), cfg.get("max_type_methods", 10 ** 9)
+    alone = cfg.get("max_type_methods_alone", 10 ** 9)
     pairs = cfg.get("god_pairs", {})
     for name, t in sorted(types.items(), key=lambda kv: -kv[1]["methods"]):
-        if t["fields"] <= fl or t["methods"] <= ml:
-            continue                                   # 单轴超 = 数据记录或算法类型，不管
+        double = t["fields"] > fl and t["methods"] > ml
+        # 第二档：**方法轴单独**超阈也记债务。缺了它，把 scratch 收进一个具名结构体就能让
+        # 字段数掉到阈下、而类型仍攥着 62 个方法 —— regroup 字段即可糊弄过第一档。
+        many = t["methods"] > alone
+        if not (double or many):
+            continue                       # 只超一轴且未过 alone ⇒ 数据记录/内聚算法类型，不拦
         bt = base_types.get(name, {})
-        desc = f"{name} 字段 {t['fields']} / 方法 {t['methods']}（散在 {len(t['files'])} 个文件）"
+        why = "字段与方法双超" if double else f"方法数单独超 {alone}"
+        desc = (f"{name} 字段 {t['fields']} / 方法 {t['methods']}"
+                f"（散在 {len(t['files'])} 个文件，{why}）")
         if name not in pairs:
-            bad.append(f"上帝对象未登记：{desc} ⇒ 拆，或在 god.gate.json 的 god_pairs 写明理由")
+            bad.append(f"未登记：{desc} ⇒ 拆，或在 god.gate.json 的 god_pairs 写明理由")
         elif t["methods"] > bt.get("methods", t["methods"]):
-            bad.append(f"上帝对象变胖：{desc} > 基线 {bt.get('methods')}（只准减）")
+            bad.append(f"债务变胖：{desc} > 基线 {bt.get('methods')}（只准减）")
         else:
             grew.append(f"已登记债务：{desc} —— {pairs[name]}")
     return bad, grew, shrank

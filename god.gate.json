@@ -21,10 +21,18 @@
   "god_pairs": {
     "crates/vxl-phys-narrow::DefaultNarrowPhase": "已登记债务（非豁免）：握着 HullStore/CompoundStore/MeshStore 三个仓库 + scratch + 配置 + 诊断计数，方法 62 个是形状×形状分派矩阵（box_pair / capsule_ab|ba / hull_pair / *_heightfield / hull_vs_mesh / *_provider_contacts…），每加一个形状或域都要动它 —— 与 ROUTE §2.1『跨域只走四接口』同源的问题。处置：把只读仓库的 *_pair/*_contacts 挪成模块自由函数（pair_shaped.rs / mesh_pair.rs / heightfield.rs 已按文件切好），方法数只准减。",
     "crates/vxl-phys-fluid::FluidSystem": "已登记债务（非豁免）：SoA 数组集合本身合理（§5 确定性要求有序数组），但同一相位并列三个变体（density_pass / density_pass_parallel / density_boundary_pass；force_pass / _parallel / _serial）= 数据与整条管线同体。处置：变体收敛成一个带枚举参数的入口，方法数只准减。",
-    "crates/vxl-phys-gpu::Packet": "已登记债务（非豁免）：常驻缓冲清单 + 驱动会话（run_/run_stages/run_deferred/read_*/poll_wait/measure_readback_ms）混在一个类型。处置：把会话侧（run/read/poll）拆到独立的 submission 类型，缓冲清单留原处 —— 字段数本就不是复杂度。"
+    "crates/vxl-phys-gpu::Packet": "已登记债务（非豁免）：常驻缓冲清单 + 驱动会话（run_/run_stages/run_deferred/read_*/poll_wait/measure_readback_ms）混在一个类型。处置：把会话侧（run/read/poll）拆到独立的 submission 类型，缓冲清单留原处 —— 字段数本就不是复杂度。",
+    "crates/vxl-phys::World": "已登记债务（非豁免）：SPEC §1 就把它定义为门面（默认管线组装），抽查证实方法多为转发（add_mesh = build_grid + providers.push_mesh + bodies.push_static）。风险是趋势性的：M3–M7 每加一域就往同一类型添 add_*/*_pass，76 个方法会奔 150。处置：域侧 API 拆成扩展 trait（impl FluidExt for World 等），门面只留管线组装；方法数只准减。",
+    "crates/vxl-phys-soft::ClothSheet": "已登记债务（非豁免）：SoA 表示（pos/prev/vel/inv_mass/tris/cons/rest/lambda/弯曲对）合理，但 36 个方法把 XPBD 各约束族（边/弯/塑/撕裂/自摩擦/自碰撞/气动/刚体接触）的求解全攥在同一片上，与 FluidSystem 同形。处置：约束族求解挪进独立求解器，ClothSheet 只留表示与索引；方法数只准减。"
   },
   "file_growth_with_fn_shrink_pct": 10,
-  "include": ["**/*.py", "**/*.rs", "**/*.js", "**/*.ts", "**/*.mjs"],
+  "include": [
+    "**/*.py",
+    "**/*.rs",
+    "**/*.js",
+    "**/*.ts",
+    "**/*.mjs"
+  ],
   "exclude": [
     "**/bench/manual_snaps/**",
     "**/bench/results/**",
@@ -34,5 +42,7 @@
     "**/.git/**",
     "**/gold-sample/**"
   ],
-  "baseline": "god-baseline.json"
+  "baseline": "god-baseline.json",
+  "max_type_methods_alone": 32,
+  "_alone_doc": "第二档阈值 32 的定标理由：盖住 ClothSheet(36) 与三个双超类型，放过 Bvh8(31)/WideBvh(29)/Packet(25) —— 后者字段只有 4-5 个、方法全围绕同一结构，属内聚算法类型。Bvh8 距阈值只差 1 个方法，再加方法就会要求登记理由，这是有意的紧界。"
 }

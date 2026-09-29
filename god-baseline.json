@@ -1371,8 +1371,8 @@
    "max_type_members": 0
   },
   "scripts/god_gate.py": {
-   "file_lines": 556,
-   "max_fn_lines": 77,
+   "file_lines": 564,
+   "max_fn_lines": 84,
    "max_type_members": 0
   },
   "scripts/license_gate.py": {
