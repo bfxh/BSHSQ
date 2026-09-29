@@ -208,17 +208,11 @@ fn make_sorted_binds(
             ent(5, &bufs.start_b),
             ent(6, &c.items_id),
             ent(7, &c.dens_c),
+            super::two_class::class1_entry(bufs), // 槽 9：类 1 表切片（零区 ⇒ 边界段恒空）
         ],
     );
-    let bg_eos = bg(
-        "s.bg_eos",
-        &pipes.bl_eos,
-        &[
-            ent(0, &prm.eos_params_b),
-            ent(1, &c.dens_c),
-            ent(2, &c.press_c),
-        ],
-    );
+    let bg_eos =
+        super::two_class::sorted_eos_bind(device, pipes, &prm.eos_params_b, &c.dens_c, &c.press_c);
     let bg_force = bg(
         "s.bg_force",
         &pipes.bl_force,
@@ -232,6 +226,7 @@ fn make_sorted_binds(
             ent(6, &c.items_id),
             ent(7, &c.dens_c),
             ent(8, &c.out_c),
+            super::two_class::class1_entry(bufs), // 槽 9：同上
         ],
     );
     (bg_gather, bg_scatter, bg_dens, bg_force, bg_eos)

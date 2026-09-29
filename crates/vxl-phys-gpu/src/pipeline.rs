@@ -31,6 +31,7 @@ mod reaction;
 mod readback;
 mod sorted;
 mod stepper;
+mod two_class;
 mod wall_table;
 mod walls;
 pub use self::bodies::*;
@@ -38,6 +39,7 @@ pub(crate) use self::gpu_setup::*;
 pub use self::gpu_types::*;
 pub use self::reaction::*;
 pub use self::stepper::*;
+pub(crate) use self::two_class::*;
 pub use self::walls::*;
 // ↑ 子模块顶层条目再导出（impl-only 模块不入 glob，避免 unused）
 
@@ -102,22 +104,13 @@ pub(crate) fn make_buffers(
     let bins_b = storage("p.bins", (n as u64) * 4, wgpu::BufferUsages::empty());
     // ⚠️ 这三张**按格数**的缓冲是一次性分配的（与 CPU 侧 `Vec` 会自动增长不同）：
     // `cap_total` = 分配额度，`refresh_box` 按它夹"总格数预算"⇒ 箱子跟随时不会越界写。
-    let counts_b = storage(
-        "p.counts",
-        ((cap_total + 1) as u64) * 4,
-        wgpu::BufferUsages::empty(),
-    );
-    let start_b = storage(
-        "p.start",
-        ((cap_total + 1) as u64) * 4,
-        wgpu::BufferUsages::empty(),
-    );
+    // **两类档**：每张 = `2 × stride`，`stride = align8(total+1)`（与 `grid.wgsl::table_stride`
+    // 同式 —— 类 1 表以**切片**绑给相位核，偏移须满足 `min_storage_buffer_offset_alignment`）。
+    let tbl = ((cap_total + 1).div_ceil(8) * 8) as u64 * 4;
+    let counts_b = storage("p.counts", 2 * tbl, wgpu::BufferUsages::empty());
+    let start_b = storage("p.start", 2 * tbl, wgpu::BufferUsages::empty());
     let items_b = storage("p.items", (n as u64) * 4, wgpu::BufferUsages::empty());
-    let cursor_b = storage(
-        "p.cursor",
-        ((cap_total + 1) as u64) * 4,
-        wgpu::BufferUsages::empty(),
-    );
+    let cursor_b = storage("p.cursor", 2 * tbl, wgpu::BufferUsages::empty());
     let overflow_b = storage("p.overflow", 4, wgpu::BufferUsages::empty());
     let readback_b = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("p.readback"),
@@ -273,8 +266,8 @@ pub(crate) fn make_pipelines(device: &wgpu::Device) -> Pipes {
 
     // 网格：0 uniform + 1(pos,只读) + 2..=7(读写)
     let bl_grid = mk_layout(device, "p.bl_grid", &bind_layout::spec("urwwwwww"));
-    // 密度：0 uniform | 1 pos(只读) | 3 pmass(只读) | 5/6 格表(只读) | 7 dens(读写)
-    let bl_dens = mk_layout(device, "p.bl_dens", &bind_layout::spec("ur_r_rrw"));
+    // 密度：0 uniform | 1 pos(只读) | 3 pmass(只读) | 5/6 格表(只读) | 7 dens(读写) | 9 类 1 表(只读)
+    let bl_dens = mk_layout(device, "p.bl_dens", &bind_layout::spec("ur_r_rrw r"));
     // 力：0 uniform | 1..=7 只读（含 dens）| 8 out(读写)
     let bl_force = mk_layout(
         device,
@@ -289,6 +282,7 @@ pub(crate) fn make_pipelines(device: &wgpu::Device) -> Pipes {
             (6, Kind::Ro),
             (7, Kind::Ro),
             (8, Kind::Rw),
+            (9, Kind::Ro), // 类 1 格表（两段枚举的边界段）
         ],
     );
     let bl_eos = mk_layout(
@@ -342,81 +336,8 @@ pub(crate) struct Binds {
     pub bg_int: wgpu::BindGroup,
 }
 
-pub(crate) fn make_bind_groups(
-    device: &wgpu::Device,
-    bufs: &Bufs,
-    prm: &Params,
-    pipes: &Pipes,
-) -> Binds {
-    let bg_grid = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("p.bg_grid"),
-        layout: &pipes.bl_grid,
-        entries: &[
-            ent(0, &prm.grid_params_b),
-            ent(1, &bufs.pos_b),
-            ent(2, &bufs.bins_b),
-            ent(3, &bufs.counts_b),
-            ent(4, &bufs.start_b),
-            ent(5, &bufs.items_b),
-            ent(6, &bufs.cursor_b),
-            ent(7, &bufs.overflow_b),
-        ],
-    });
-    let bg_dens = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("p.bg_dens"),
-        layout: &pipes.bl_dens,
-        entries: &[
-            ent(0, &prm.phase_params_b),
-            ent(1, &bufs.pos_b),
-            ent(3, &bufs.pmass_b),
-            ent(5, &bufs.start_b),
-            ent(6, &bufs.items_b),
-            ent(7, &bufs.dens_b),
-        ],
-    });
-    let bg_force = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("p.bg_force"),
-        layout: &pipes.bl_force,
-        entries: &[
-            ent(0, &prm.phase_params_b),
-            ent(1, &bufs.pos_b),
-            ent(2, &bufs.vel_b),
-            ent(3, &bufs.pmass_b),
-            ent(4, &bufs.press_b),
-            ent(5, &bufs.start_b),
-            ent(6, &bufs.items_b),
-            ent(7, &bufs.dens_b),
-            ent(8, &bufs.out_b),
-        ],
-    });
-    let bg_eos = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("p.bg_eos"),
-        layout: &pipes.bl_eos,
-        entries: &[
-            ent(0, &prm.eos_params_b),
-            ent(1, &bufs.dens_b),
-            ent(2, &bufs.press_b),
-        ],
-    });
-    let bg_int = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("p.bg_int"),
-        layout: &pipes.bl_int,
-        entries: &[
-            ent(0, &prm.int_params_b),
-            ent(1, &bufs.pos_b),
-            ent(2, &bufs.vel_b),
-            ent(3, &bufs.out_b),
-        ],
-    });
-
-    Binds {
-        bg_grid,
-        bg_dens,
-        bg_force,
-        bg_eos,
-        bg_int,
-    }
-}
+// `make_bind_groups` 已搬到 `pipeline/two_class.rs`（棘轮：本文件 857 行超阈 ⇒ 必须净缩）。
+// 那里同时给出**类 1 格表的切片绑定**（相位核的槽 9）。
 
 impl Packet {
     /// 建全部缓冲/管线（**一次性**），并上传初始 `pos` / `vel` / `pmass`。

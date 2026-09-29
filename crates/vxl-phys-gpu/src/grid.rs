@@ -1,15 +1,9 @@
-//! **GPU 网格重建探针**：把 CPU 的计数排序原样搬到卡上，判据 = **与 CPU 逐位同表**
-//! （`start` / `items` 两数组全等；`grid.wgsl` 头注写了四个入口与 CPU 四步的对应关系）。
-//!
-//! 纪律（同 `probe.rs`）：
-//! - **口径 A 用在网格上是可达的**：这里没有浮点累加，只有"一次减、一次乘、一次 floor"的
-//!   整数分箱 + 整数前缀和 + 整数排序 ⇒ 与 CPU 的位级一致**不依赖** FMA 收缩那类运气；
-//! - **不绑厂商**：同一份 WGSL 在任何适配器上跑（含 Intel iGPU）；
-//! - **两个测量坑**照旧：提交是异步的（计时必须含同步回读）、一次性 setup 与稳态分开报。
+//! **GPU 网格重建探针**（把 CPU 的计数排序原样搬到卡上）：判据 = **与 CPU 逐位同表**
+//! （`start`/`items` 全等）。纪律同 `probe.rs`：口径 A 在网格上可达（只有整数运算 +
+//! 一次 reduce ⇒ 不依赖 FMA 收缩）；不绑厂商；提交异步 ⇒ 计时须含同步回读。
 
 use wgpu::util::DeviceExt;
 
-/// 与 `grid.wgsl` 的 `GridParams` **逐字节对应**。
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct GridParams {
@@ -28,8 +22,7 @@ pub struct GridParams {
     pub class_lo: u32,
 }
 
-/// 输入：位置（扁平 xyz）+ 同一套箱子参数（`min`/`inv`/`dims` 由调用方给，
-/// 与 CPU `rebuild` 自己算出来的那组**完全相同**才能谈同表——箱子计算是另一件事）。
+/// 输入：位置（扁平 xyz）+ 箱参数（须与 CPU `rebuild` 那组**完全相同**才谈同表）。
 pub struct GridInputs<'a> {
     pub pos_flat: &'a [f32],
 }
@@ -68,7 +61,7 @@ impl GridOut {
     }
 }
 
-/// 网格探针的缓冲 + 回读偏移（`grid_on_adapter` 第一段）。
+/// 网格探针的缓冲 + 回读偏移。
 pub(crate) struct GridBuffs {
     pub pos_b: wgpu::Buffer,
     pub params_b: wgpu::Buffer,
@@ -124,14 +117,15 @@ pub(crate) fn make_grid_buffs(
     };
     // **两类表**（§26.1）：`counts`/`start`/`cursor` 各 `2·(total+1)`（类 0 在前、类 1 在后）
     // ⇒ 纯流体档只用前一半（逐位不变），2b 档两半都用。
-    let tbl = ((total + 1) * 4) as u64;
+    // 表步长 = align8(total+1)（与 `grid.wgsl::table_stride` 同式；切片绑定须 32 B 对齐）。
+    let tbl = ((total + 1).div_ceil(8) * 8 * 4) as u64;
     let bins_b = mk("grid.bins", (n * 4) as u64);
     let counts_b = mk("grid.counts", 2 * tbl);
     let start_b = mk("grid.start", 2 * tbl);
     let items_b = mk("grid.items", (n * 4) as u64);
     let cursor_b = mk("grid.cursor", 2 * tbl);
     let overflow_b = mk("grid.overflow", 4);
-    // 回读：start(两张表) | items | bins | overflow（每轮尾同步回读一次，只为校验）
+    // 回读：start(两张表) | items | bins | overflow（每轮尾同步一次，只为校验）
     let start_off = 0u64;
     let start2_off = start_off + tbl;
     let items_off = start2_off + tbl;
@@ -162,7 +156,7 @@ pub(crate) fn make_grid_buffs(
     }
 }
 
-/// `GridParams` → 48 字节 uniform（**唯一**的序列化点 ⇒ 两类两遍共用）。
+/// `GridParams` → 48 字节 uniform（唯一的序列化点）。
 pub(crate) fn params_bytes(params: &GridParams) -> Vec<u8> {
     let mut b = Vec::with_capacity(48);
     for x in params.gmin {
@@ -323,12 +317,22 @@ fn read_back_grid(
     n: usize,
     total: usize,
 ) -> (Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>, u32) {
-    let tbl = ((total + 1) * 4) as u64;
+    // 表步长 = align8(total+1)（与 `grid.wgsl::table_stride` 同式；切片绑定须 32 B 对齐）。
+    let tbl = ((total + 1).div_ceil(8) * 8 * 4) as u64;
     {
         let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("grid.bufs.readback"),
         });
-        enc.copy_buffer_to_buffer(&bufs.start_b, 0, &bufs.readback, bufs.start_off, 2 * tbl);
+        enc.copy_buffer_to_buffer(&bufs.start_b, 0, &bufs.readback, bufs.start_off, tbl);
+        // 类 1 表在**对齐步长**处（两段拷贝：readback 里仍按紧凑布局排）。
+        let half = bufs.start_b.size() / 2;
+        enc.copy_buffer_to_buffer(
+            &bufs.start_b,
+            half,
+            &bufs.readback,
+            bufs.start2_off,
+            ((total as u64) + 1) * 4,
+        );
         enc.copy_buffer_to_buffer(
             &bufs.items_b,
             0,
@@ -439,7 +443,7 @@ fn submit_grid_pass(
     queue.submit(Some(enc.finish()));
 }
 
-/// 在**指定适配器序号**上跑「网格重建」（四个入口一条命令链，缓冲/管线复用，`repeats` 轮）。
+/// 在**指定适配器序号**上跑「网格重建」（四入口一条链、缓冲/管线复用、`repeats` 轮）。
 pub fn grid_on_adapter(
     adapter_index: usize,
     inputs: &GridInputs<'_>,
@@ -493,12 +497,8 @@ pub fn grid_on_adapter(
     }
 }
 
-/// **两类档（`PLAN-gpu.md` §26.1 第 1 步）**：同一份输入上跑**两遍**四入口 ——
-/// 类 0 = 流体 `[0, n_fluid)`、类 1 = 边界 `[n_fluid, n)` ⇒ 产出**两张表 + 共享 `items`**
-/// （槽位 = 流体块 ‖ 边界块）。**判据 = 与 CPU 原型逐位同表**（`two_block_order.rs` 的 oracle）。
-///
-/// ⚠️ **两遍之间不清零**（第二遍若清会抹掉类 0 的计数表）⇒ `clear` 只给第一遍。
-/// ⚠️ 要求 `1 ≤ n_fluid < n`；纯流体（`n_fluid == n`）请走 [`grid_on_adapter`]。
+/// **两类档**：同一份输入上跑**两遍**四入口（类 0 = 流体、类 1 = 边界）⇒ 两张表 + 共享
+/// `items`（槽位 = 流体块 ‖ 边界块）。⚠️ 清零只给第一遍；要求 `1 ≤ n_fluid < n`。
 pub fn grid_two_class_on_adapter(
     adapter_index: usize,
     inputs: &GridInputs<'_>,

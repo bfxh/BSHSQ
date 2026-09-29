@@ -37,6 +37,9 @@ struct Params {
 @group(0) @binding(5) var<storage, read> cell_start: array<u32>;
 @group(0) @binding(6) var<storage, read> cell_items: array<u32>;
 @group(0) @binding(7) var<storage, read_write> dens: array<f32>;
+/// **类 1（边界）的格表**（`PLAN-gpu.md` §26.3）：两段枚举的边界段；单类档绑到 `start_b`
+/// 的后半段（全零）⇒ 边界段恒空。
+@group(0) @binding(9) var<storage, read> bstart: array<u32>;
 
 fn p3(i: u32) -> vec3<f32> {
     return vec3<f32>(pos[i * 3u], pos[i * 3u + 1u], pos[i * 3u + 2u]);
@@ -76,9 +79,16 @@ fn density(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let x = ax + dx;
                 if (x < 0 || x >= i32(P.nx)) { continue; }
                 let ci = u32((x * ny + y) * nz + z);
+                // **两段枚举**（`PLAN-gpu.md` §26.3）：流体段 ‖ 边界段（单类档 `bstart` 全零
+                // ⇒ 边界段恒空）。段内**仍逐项判类** —— 单类档的"流体段"含两类 ⇒ 这层是承重的；
+                // 两类档（第二遍网格）下它退化为常数、可再优化。
                 let a = cell_start[ci];
                 let b = cell_start[ci + 1u];
-                for (var k = a; k < b; k = k + 1u) {
+                let g0 = P.n_fluid + bstart[ci];
+                let g1 = P.n_fluid + bstart[ci + 1u];
+                let seg1 = b - a;
+                for (var q = 0u; q < seg1 + (g1 - g0); q = q + 1u) {
+                    let k = select(g0 + (q - seg1), a + q, q < seg1);
                     let j = cell_items[k];
                     if (j == i) { continue; }
                     let d = pi - p3(j);

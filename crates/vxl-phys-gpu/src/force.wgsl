@@ -41,6 +41,9 @@ struct Params {
 @group(0) @binding(6) var<storage, read> cell_items: array<u32>;
 @group(0) @binding(7) var<storage, read> dens: array<f32>;
 @group(0) @binding(8) var<storage, read_write> out: array<f32>;
+/// **类 1（边界）的格表**（`PLAN-gpu.md` §26.3）：两段枚举的边界段；单类档绑到 `start_b`
+/// 的后半段（全零）⇒ 边界段恒空。
+@group(0) @binding(9) var<storage, read> bstart: array<u32>;
 
 fn p3(i: u32) -> vec3<f32> {
     return vec3<f32>(pos[i * 3u], pos[i * 3u + 1u], pos[i * 3u + 2u]);
@@ -86,9 +89,15 @@ fn force(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let x = ax + dx;
                 if (x < 0 || x >= i32(P.nx)) { continue; }
                 let ci = u32((x * ny + y) * nz + z);
+                // **两段枚举**（`PLAN-gpu.md` §26.3）：流体段 ‖ 边界段（单类档 `bstart` 全零
+                // ⇒ 边界段恒空）。段内**仍逐项判类**（单类档下承重；两类档下为常数）。
                 let a0 = cell_start[ci];
                 let b0 = cell_start[ci + 1u];
-                for (var k = a0; k < b0; k = k + 1u) {
+                let g0 = P.n_fluid + bstart[ci];
+                let g1 = P.n_fluid + bstart[ci + 1u];
+                let seg1 = b0 - a0;
+                for (var q = 0u; q < seg1 + (g1 - g0); q = q + 1u) {
+                    let k = select(g0 + (q - seg1), a0 + q, q < seg1);
                     let j = cell_items[k];
                     if (j == i) { continue; }
                     // 边界-边界不成对（Akinci 口径，与密度核一致；CPU 的 `bforce` 只从流体侧累加）。
