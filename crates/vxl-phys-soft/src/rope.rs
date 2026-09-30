@@ -106,8 +106,8 @@ pub struct Rope {
     buf: Vec<vxl_phys_core::interop::InteropContact>,
     /// **体接触的收集暂存**（§8.4.24；复用免分配）：先收全部命中、排序、再施加 ⇒ 与数组方向无关。
     hits: Vec<BodyHit>,
-    /// **粒子↔刚体反作用**（累加**冲量**，每 tick 开头清空）：门面 `÷dt` 后作为力/力矩加到体上
-    /// （与 2b 流体反作用同段位、同量纲口径）。
+    /// **粒子↔刚体反作用**（累加**冲量**，每 tick 开头清空）：门面把 `torque` 按
+    /// `angular_impulse_contract` 契约（`÷dt_sub`）注入；`impulse` 暂只记账未被消费（§2 B4）。
     pub reactions: Vec<RigidReaction>,
     /// **刚体的速度增量**（与 `step` 传入的 `bodies` 同序，每 tick 开头清零）：
     /// 门面做 `bodies.linvel[i] += body_dv[i]`（在体解算之前施加 ⇒ 下一 tick 生效）。
@@ -117,10 +117,10 @@ pub struct Rope {
     body_disp: Vec<Vec3>,
     /// **虚拟转动**（朝向 / 上一朝向 / 角速度反作用；见 [`VirtRot`]）。
     vrot: VirtRot,
-    /// **角反作用开关**（计划 2c-3，**默认关**）：开 ⇒ 按库仑/冲量口径把 `r × J` 回填成体的角冲量
-    /// （门面按 `angular_impulse_contract` 钉住的契约注入），并把它折进"虚拟角速度"。
-    /// **默认关**是刻意的：打开会改变动态盒在绳上的读数（那是**换代级**），先按"0=关字段"的先例落地，
-    /// 让"打开会怎样"由实测登记（§8.4.31）。静态体/睡眠体不受影响（`inv_mass`/`awake` 已为 0）。
+    /// **角反作用开关**（计划 2c-3，**默认开** since 2026-10-01）：开 ⇒ 按库仑/冲量口径把 `r × J`
+    /// 回填成体的角冲量（门面按 `angular_impulse_contract` 钉住的契约注入），并把它折进"虚拟角速度"。
+    /// **翻默认的依据**（换代级，`PLAN-COUPLING.md` §5 P1 与 C2 同批）：§8.4.31/§8.4.32 实测打开后
+    /// 中心场景仍托住；静态体/睡眠体不受影响（`inv_mass`/`awake` 已为 0）。残留局限见 `world_soft.rs`。
     pub angular_reaction: bool,
     /// **位置口径的补足量**（同上序，每 tick 开头清零；**门面读它做 `bodies.position += dx`**）：
     /// `Σ −n·w_b·(λ_geom − λ)` —— `λ = min(λ_geom, λ_vel)` 被**速度钳位**压掉的那一部分，
@@ -185,7 +185,7 @@ impl Rope {
             body_disp: Vec::new(),
             vrot: VirtRot::default(),
             body_dx: Vec::new(),
-            angular_reaction: false,
+            angular_reaction: true,
             entry: vec![(u32::MAX, FACE_NONE); n],
         }
     }

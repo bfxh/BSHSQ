@@ -134,8 +134,9 @@ impl World {
 
     /// **软体域通道**：每条绳索按自身 `substeps` 推进一个 `config.dt`；接触走统一提供者通道
     /// （`0..providers.len()` 全量 id）与**刚体代理**（粒子↔刚体，Akinci 式最小实现）。
-    /// 反作用回填：`bodies.linvel += body_dv`（速度增量）、`bodies.torque += τ/dt`（角冲量 → 力矩口径，
-    /// 与 2b 流体反作用同段位）。**空集 ⇒ 零成本短路**。
+    /// 反作用回填：`bodies.linvel += body_dv`（速度增量）、`bodies.position += body_dx`（位置补足）；
+    /// 角反作用（`angular_reaction`，默认开）经 `cpl::add_tick_torque`（`÷dt_sub` 契约）注入。
+    /// **空集 ⇒ 零成本短路**。
     pub(crate) fn rope_pass(&mut self) {
         if self.soft.ropes.is_empty() {
             return;
@@ -153,32 +154,21 @@ impl World {
             // **反作用两腿**（`Rope::body_dv` 速度口径 + `Rope::body_dx` 位置口径，§8.4.9）：
             // 与布料域**共用同一段实现**（切片 2b-ii 提取 —— 两处逐字相同，见 `apply_two_leg_reactions`）。
             apply_two_leg_reactions(&mut self.bodies, &proxies, &rope.body_dv, &rope.body_dx);
-            // **角反作用：本片不施加**（§8.4.9/§8.4.10 实测）。理由不是"力矩算错了"，而是
-            // **接触模型看不见转动**：`body_disp` 只跟踪平移、摩擦的滑移用 `b.linvel` 而非
-            // `linvel + ω×r`、`crossed_face` 用的是**冻结的** `rot` ⇒ 把角动量回填给体以后，
-            // 体转起来的运动会**完全落在模型之外**。实测（1 kg 薄盒压在绳上）：`hit = 1`
-            // （单点接触、力臂 ≈ 0.3 m、`I_zz ≈ 0.031`）⇒ `|ω|` 一 tick 就到 **5~8 rad/s**
-            // ⇒ 接触立刻丢失（`hit = 0`）⇒ 盒子被甩下去（门面 1800 tick y = −2420）。
-            // **自扮引擎侧一直不读 `reactions`**（只吃 `body_dv`）⇒ 它托得住（y@1800 = +0.995），
-            // 这正是两侧差异的最后一块。**要恢复本行**必须先做"转动感知的代理"（见 §8.4.10）。
+            // **角反作用**（计划 2c-3，**默认开** since 2026-10-01；此前默认关）：关闭的理由不是
+            // "力矩算错了"，而是**接触模型看不见转动**：`body_disp` 只跟踪平移、摩擦的滑移用
+            // `b.linvel` 而非 `linvel + ω×r`、`crossed_face` 用的是**冻结的** `rot` ⇒ 回填角动量
+            // 等于注入模型看不见的运动（实测 1 kg 薄盒：`hit = 1` 时 `|ω|` 一 tick 就到 5~8 rad/s
+            // ⇒ 接触立刻丢 ⇒ 盒子被甩下去，门面 1800 tick y = −2420）。**翻默认的依据**（换代级，
+            // 与 C2 同批，`PLAN-COUPLING.md` §5 P1）：§8.4.31/§8.4.32 实测打开后中心场景仍托住，
+            // 且 `angular_reaction_holds`（带转动的自扮引擎）与 `rope_scene` 偏置判据守着符号与量级；
+            // 残留局限 = 上面的"模型看不见转动"三条（转动感知代理，见 `PLAN-COUPLING.md` §9）。
             //
-            // ⚠️ **恢复时口径必须用下面这一行**（已由 `crates/vxl-phys/tests/angular_impulse_contract.rs`
-            // 钉住，2026-09-28 §8.4.28）：`torque` 是**每子步消费并清零**的累加器
-            // （`Integrate`：`ω += I⁻¹·τ·dt_sub` 之后清零），而本处注入发生在**所有子步之后**
-            // ⇒ 只被**一个**子步消费 ⇒ 想交付"整 tick 的角冲量 `r.torque`"就必须 `÷ dt_sub`
+            // ⚠️ **口径**（`crates/vxl-phys/tests/angular_impulse_contract.rs` 钉住，2026-09-28 §8.4.28）：
+            // `torque` 是**每子步消费并清零**的累加器，而本处注入发生在**所有子步之后**
+            // ⇒ 只被**一个**子步消费 ⇒ 交付"整 tick 的角冲量 `r.torque`"必须 `÷ dt_sub`
             // （= `× substeps / dt`）；写成 `÷ dt` 只会交付 `1/substeps`（默认 2 ⇒ **差 2×**，
             // 那条判据的金丝雀里实测比值正好 `0.500000`）。
-            // for r in &rope.reactions {
-            //     let b = r.body as usize;
-            //     if b < self.bodies.len() {
-            //         let substeps = self.config.substeps.max(1) as f32;
-            //         self.bodies.torque[b] += r.torque * (substeps / dt);
-            //     }
-            // }
             if rope.angular_reaction {
-                // **角反作用注入**（计划 2c-3）：口径按 `crates/vxl-phys/tests/angular_impulse_contract.rs`
-                // 钉住的契约 —— 本处注入发生在**所有子步之后** ⇒ 只被**一个**子步消费 ⇒ 必须 `÷ dt_sub`
-                // （= `× substeps / dt`）才交付"整 tick 的角冲量 `r.torque`"。
                 let substeps = self.config.substeps.max(1) as f32;
                 for r in &rope.reactions {
                     // 经受体门 + tick 末注入契约（`PLAN-COUPLING.md` §2 A3 / §3.5：原先无 awake 检查）。
