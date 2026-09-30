@@ -11,7 +11,7 @@
   "crates/vxl-phys-gpu/examples/gpu_walls_probe.rs": 2,
   "crates/vxl-phys-gpu/src/grid.rs": 1,
   "crates/vxl-phys-gpu/src/pipeline.rs": 2,
-  "crates/vxl-phys-gpu/src/pipeline/sorted.rs": 1,
+  "crates/vxl-phys-gpu/src/pipeline/reaction.rs": 1,
   "crates/vxl-phys-gpu/src/pipeline/stepper.rs": 2,
   "crates/vxl-phys-gpu/src/probe.rs": 1,
   "crates/vxl-phys-narrow/src/entry.rs": 1,

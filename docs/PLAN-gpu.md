@@ -463,6 +463,25 @@ CPU 侧的可比对象先钉住：`tests/boundary_reaction_balance.rs`（成对�
 ⇒ 反作用这条链（2b 边界粒子 → 卡上力 → 回读 → 聚合）**端到端对齐**，`(F, τ)` 的量纲
 = **力**（与 CPU `breact` 同口径），可直接喂耦合回路。
 
+**C2 增补（2026-10-01，`PLAN-COUPLING.md` §5：反作用改 dt_sub 时间加权 tick 平均）**：
+`reduce.wgsl` 加孪生入口 **`reduce_add`**（就地累加；覆写版 `reduce` 保留给 report 的快照自洽腿），
+`ReactionStage::tick_average` = `begin_tick` 清账（`react_b` 补 `COPY_DST`）→ 每子步
+`encode_substep` + `encode_accumulate` 同链提交 → 末子步回拷 → **一次**回读 → 主机 ÷ 子步数。
+步进器（`GpuFluidStepper`）与两个探针全走它。同场景同参数重跑验收：
+
+| 读数 | C2 前（末子步快照） | **C2 后（tick 平均）** |
+|---|---|---|
+| `--tank` 逐粒 max \|ΔF\|（rel） | 1.057e-4（6.70e-7） | **7.415e-5（5.08e-7）** |
+| `--tank` 每体 max \|ΔF\|（rel） | 1.306e-3（9.13e-6） | **1.039e-3（6.55e-6）** |
+| `--tank` 每体 max \|Δτ\|（rel） | 4.420e-4（2.23e-5） | **3.264e-4（1.48e-5）** |
+| 耦合回路逐 tick 最坏 relF / relT（240 tick） | 1.05e-4 / 4.41e-4 | **8.20e-5 / 2.81e-4** |
+| 耦合回路动量账两侧之差 | 4.91e-6 | **2.01e-6** |
+
+判据（每体 1e-5 量级）继续成立；漂移表与旧版逐字相同（反作用不回灌流体 ⇒ C2 不改流体演化）。
+踩坑登记：`react_b` 缺 `COPY_DST` 时 `begin_tick` 的 `write_buffer` 在**第二个 tick** 崩
+（首 tick 缓冲未建侥幸跳过）；report 的可比性要求**锁步**（只推 GPU 一侧 ⇒ 状态差一拍，
+逐粒 rel 6.7e-7→3.3e-4，看着像接线错其实是错位）。
+
 **顺带的 CPU 侧两处**（都是**上帝对象门**的账）：新增只读访问器 `FluidSystem::boundary_spans()`
 （段表 = GPU 聚合的输入；落点 `fluid_boundary.rs`），并把 `boundary_pass` 的"同位坍缩消解"抽成
 `separate_coincident`（**纯搬移**，语义未改）——后者让该档最长函数 **79 → 57 行**，于是文件涨
