@@ -62,7 +62,6 @@ pub(crate) struct Bufs {
 
 pub(crate) fn make_buffers(
     device: &wgpu::Device,
-    queue: &wgpu::Queue,
     n: u32,
     cap_total: u32,
     pos_flat: &[f32],
@@ -109,15 +108,19 @@ pub(crate) fn make_buffers(
     // 同式 —— 类 1 表以**切片**绑给相位核，偏移须满足 `min_storage_buffer_offset_alignment`）。
     let tbl = ((cap_total + 1).div_ceil(8) * 8) as u64 * 4;
     let counts_b = storage("p.counts", 2 * tbl, wgpu::BufferUsages::empty());
-    let start_b = storage("p.start", 2 * tbl, wgpu::BufferUsages::empty());
-    // **一次性清零 `start_b`**：类 1 表区（`[tbl, 2tbl)`）在纯流体档**永不写入**，而相位核经
-    // `cell_start[tstride + ci]` 读它（§28.2）——未初始化读 = 驱动相关的垃圾 ⇒ 幻影边界段。
-    // 2b 档每子步由第二遍网格重写该区 ⇒ 清零只需建包时这一次（队列操作，落在后续提交之前）。
-    queue.write_buffer(
-        &start_b,
-        0,
-        &vec![0u8; 2 * ((cap_total + 1).div_ceil(8) * 8) as usize * 4],
-    );
+    // ⚠️ `start_b` **不能**用上面的 `storage`（`mapped_at_creation: false`）：类 1 表区
+    // （`[tbl, 2tbl)`）在纯流体档**永不写入**，而相位核经 `cell_start[tstride + ci]` 读它（§28.2）
+    // ⇒ "从未写入"区域的读数是驱动相关的 ⇒ 必须是**确定性的零**（`mapped_at_creation` 规格保证
+    // 全零映射，立即 unmap 即可；2b 档每子步由第二遍网格重写该区）。
+    let start_b = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("p.start"),
+        size: 2 * tbl,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: true,
+    });
+    start_b.unmap();
     let items_b = storage("p.items", (n as u64) * 4, wgpu::BufferUsages::empty());
     let cursor_b = storage("p.cursor", 2 * tbl, wgpu::BufferUsages::empty());
     let overflow_b = storage("p.overflow", 4, wgpu::BufferUsages::empty());
@@ -397,7 +400,7 @@ impl Packet {
         // 四段各进一个 helper（`new` 由 310 行降到 ~90）：**持有结构体而不是就地解构**——
         // 后一段（bind group）要借前几段（`&bufs`/`&prm`/`&pipes`），解构会把它们移走。
         let cap_total = total.max(cfg.grid_bins_cap);
-        let bufs = make_buffers(&device, &queue, n, cap_total, pos_flat, vel_flat, pmass);
+        let bufs = make_buffers(&device, n, cap_total, pos_flat, vel_flat, pmass);
         let prm = make_params(&device, &cfg, n, total);
         let pipes = make_pipelines(&device);
         let binds = make_bind_groups(&device, &bufs, &prm, &pipes);
