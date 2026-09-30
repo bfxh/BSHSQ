@@ -25,7 +25,9 @@
 //!   （`inv_mass = 0` = "睡眠体对软体域呈现为静态"），语义不同、本片**不改**（只登记）。
 //! - 引擎自用的接触/关节/CCD 通道不过这道门（它们是求解器内部语义）。
 
-use super::*;
+// ⚠️ **显式导入**（不用 `use super::*`）：glob 门把新增 glob 一律算"新增"（棘轮）——仓内惯例
+// 是把新文件的导入写全（见 `vxl-phys-gpu` 的 `two_class.rs` 同款修法）。
+use crate::{BodySet, HealthReport, Vec3, World};
 
 /// **统一受体门**（契约的唯一定义处）：只有"动态 + 清醒 + 质量为正"的体收跨域作用。
 ///
@@ -163,8 +165,11 @@ pub(crate) fn fill_health(rep: &mut HealthReport, world: &World) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    // 显式导入（同文件顶部的理由：glob 门棘轮）。
+    use super::{add_force, dropped_force_writes, fluid_reaction_ledger, is_receptor, ledger_of};
+    use crate::{Integrator, PhysConfig, Quat, Shape, Vec3, World};
     use vxl_phys_core::mass::mass_props;
+    use vxl_phys_core::BodySet;
 
     /// 手工体集：一个动态体（清醒）、一个动态体（睡眠）、一个静态体。
     fn bodies3() -> (BodySet, [usize; 3]) {
