@@ -16,6 +16,7 @@
 //! `gpu_reduce_covers_all_particles` 逐位钉住）。等管线接线时若发现每子步回读 24 字节吃不消，
 //! 再回头做卡上 setup（届时先用"写哨兵看它落不落"的方式定位那一遍 pass）。
 
+use crate::pipeline::ent;
 use vxl_phys_core::grid::grid_box;
 use vxl_phys_core::Vec3;
 use wgpu::util::DeviceExt;
@@ -137,26 +138,11 @@ fn make_bbox_pipes(
         label: Some("bbox.bg"),
         layout: &bgl,
         entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: pos_b.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: bb_b.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: rp_b.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: box_out_b.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 4,
-                resource: sp_b.as_entire_binding(),
-            },
+            ent(0, pos_b),
+            ent(1, bb_b),
+            ent(2, rp_b),
+            ent(3, box_out_b),
+            ent(4, sp_b),
         ],
     });
     let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -286,8 +272,10 @@ pub fn box_on_adapter(adapter_index: usize, pos_flat: &[f32], h: f32, max_bins: 
         Ok(v) => v,
         Err(e) => return BoxOut::err(e),
     };
-    let ngroups = n.div_ceil(WG).max(1);
-    let (bb_b, box_out_b, readback, pipes) = make_probe(&device, pos_flat, n, ngroups, h, max_bins);
+    // 二维分派（核里同式展平，见 `bbox.wgsl`；`rp.y` 记总组数）。
+    let shape = crate::probe::split_2d(n.div_ceil(WG).max(1));
+    let (bb_b, box_out_b, readback, pipes) =
+        make_probe(&device, pos_flat, n, shape.0 * shape.1, h, max_bins);
 
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("bbox.enc"),
@@ -299,7 +287,7 @@ pub fn box_on_adapter(adapter_index: usize, pos_flat: &[f32], h: f32, max_bins: 
         });
         cp.set_pipeline(&pipes.reduce);
         cp.set_bind_group(0, &pipes.bg, &[]);
-        cp.dispatch_workgroups(ngroups, 1, 1);
+        cp.dispatch_workgroups(shape.0, shape.1, 1);
     }
     {
         let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -392,7 +380,7 @@ fn decode_bb(data: &[u8]) -> [u32; 6] {
 
 /// **常驻**包围盒阶段（`Packet` 用）：缓冲/管线只建一次，每子步只"写中性元 + 归约 + setup"。
 pub struct BboxStage {
-    groups: u32,
+    shape: (u32, u32),
     bb_b: wgpu::Buffer,
     /// setup 的产物（与 uniform 动态字段同形，见 `bbox.wgsl`）——主机侧用 `copy_buffer_to_buffer` 搬。
     box_out_b: wgpu::Buffer,
@@ -411,7 +399,7 @@ impl BboxStage {
         h: f32,
         max_bins: usize,
     ) -> Self {
-        let groups = n.div_ceil(WG).max(1);
+        let shape = crate::probe::split_2d(n.div_ceil(WG).max(1));
         let bb_b = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("bbox.stage.bb"),
             size: 24,
@@ -443,7 +431,7 @@ impl BboxStage {
             label: Some("bbox.stage.rp"),
             contents: &{
                 let mut b = Vec::with_capacity(16);
-                for x in [n, groups, 0, 0] {
+                for x in [n, shape.0 * shape.1, 0, 0] {
                     b.extend_from_slice(&x.to_le_bytes());
                 }
                 b
@@ -452,7 +440,7 @@ impl BboxStage {
         });
         let pipes = make_bbox_pipes(device, pos_b, &bb_b, &rp_b, &box_out_b, &sp_b);
         Self {
-            groups,
+            shape,
             bb_b,
             box_out_b,
             readback,
@@ -473,7 +461,7 @@ impl BboxStage {
             });
             cp.set_pipeline(&self.reduce);
             cp.set_bind_group(0, &self.bg, &[]);
-            cp.dispatch_workgroups(self.groups, 1, 1);
+            cp.dispatch_workgroups(self.shape.0, self.shape.1, 1);
         }
         {
             let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {

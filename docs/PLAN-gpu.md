@@ -2961,3 +2961,51 @@ vxl-phys-gpu` 13 个测试二进制全绿。
 **教训（可移植）**：**"分派覆盖"与"核里的守卫"必须按同一个量**——按 A 的数量分派、按 B 的数量设界，
 在覆盖恰好等于 A 的整数倍时是对的（这两档曾是 64 的整数倍：`40³=64 000`、`100³`、`140³`、`160³`），
 一旦不是整数倍就静默错，**而且二维展开会把"溢出一点点"放大成"溢出整段"**。
+
+### 28.1 同族第二处：包围盒归约的分派也是一维（**响的**：校验报错）
+
+修 §28 时顺手复跑 `--box=follow` 档，n=180 直接 panic：
+
+```
+Each current dispatch group size dimension ([102215, 1, 1]) must be less or equal to 65535
+```
+
+`102 215 = ⌈6 541 760/64⌉` ⇒ **`bbox` 的归约分派没走 `split_2d`**（`bbox.rs` 的 `box_on_adapter` 与
+`BboxStage::encode` 两处都是 `dispatch_workgroups(groups, 1, 1)`，`groups = ⌈n/64⌉`）。
+⇒ `recompute_box`（"箱跟随"档，自由落体等场景必需）在 **> 4.19M 粒**上**根本跑不起来**。
+
+**修法**：两处都改 `split_2d`；核里按同一步长展平（`bbox.wgsl::reduce` 的 `i = gid.x + gid.y*(65535*64)`），
+并把 `rp.y`（步进乘数）写成**总组数** `gx×gy` ⇒ 覆盖仍是"每粒恰好一次"（原子 min/max 与序无关）
+⇒ **小档逐位不变**。
+**判据 `tests/bbox_large.rs`**（新，需适配器）：`n = 4.30M`（`⌈n/64⌉ = 67 188 > 65 535` ⇒ 真踩二维）
+与 `host_box` **逐位对拍**（角点/bin/dims/total/inv + 卡上 setup 三项）。**有齿已验证**：把修复
+`git stash` 掉即 panic 在同一句校验；恢复后绿。金丝雀 = 断言 `⌈n/64⌉ > 65 535`（否则空过）。
+
+**同族审计（一次性扫完，老实记档）**：全仓还有两处**原始一维分派**、量级都可能越 4.19M：
+
+| 位置 | 分派量 | 越界时 |
+|---|---|---|
+| `bbox.rs` ×2 | `⌈n/64⌉` | ✅ 本片已修 |
+| `broad.rs:304` | `⌈n/64⌉`（三个入口同批 `[ng, 1, ng, ng]`） | ❌ 未修：10M 档宽相**直接校验报错**（响的，不是静默错） |
+| `narrow.rs:460/469` | `⌈n_upd/64⌉` / `⌈n_pairs/64⌉` | ❌ 未修：同上（10M 档对数上百万 ⇒ 必越界） |
+
+⇒ 队列项：**给 broad/narrow 也接 `split_2d` + 核内展平**（与 bbox 同一套改法），并把"10M 档接触链
+跑得起来"立成判据。它们的核是 `let i = gid.x;` ⇒ 展平时步长必须同式（别只改分派不改核）。
+
+**修后复跑 `--box=follow`（n=180）⇒ 分派校验过了，但撞上第二层**：
+
+```
+Error in Device::poll: Validation Error / Caused by: Parent device is lost
+（发生在 build_packet 之后的第一个 tick，`run_drift` 里）
+```
+
+⇒ **`recompute_box`（箱跟随）在大规模下还有一处问题**，形态与 §26.3.3 那个不同（那次是 walls 档的
+两遍网格、且已修）。已知：小块（`sorted_seed_localize` 的 walls 档、110k/1.23M 的 tank 档）跑
+`--box=follow` 都正常 ⇒ **又是规模相关**。下一步的查法（照 §26.3.3 的成功套路）：
+① 先确认"哪一步"——`run_stages` 的 stage 掩码逐位打开（网格 1 / 相位 2 / …），看是网格还是相位；
+② 核对**实时箱与分配额度**：`cap_total` 是按**建包时的箱**算的（`counts/start/cursor` 各
+`2 × align8(cap_total+1)`），而 `refresh_box` 每子步把**新箱**的 `dims/total` 写进 uniform ——
+`box_setup` 只按 `sp.y = min(GRID_MAX_BINS, cap_total)` 夹总格数，若新箱的 `table_stride()` 与
+分配额度不同源，`scan` 会写到表尾之外（**storage 写不校验 ⇒ device lost**，与 §26.3.3 同一类机制）；
+③ 判据：n=180 的 `--box=follow` 转绿 + 小档逐位不变。
+（本条**未修**，如实记档；它不影响默认档与本次的两处修复。）
