@@ -64,8 +64,13 @@ fn cls_lo() -> u32 {
 fn cls_hi() -> u32 {
     return select(P.n_fluid, P.n, cls_boundary());
 }
+/// **表步长** = `total+1` 上取整到 **8 个 u32（= 32 B）**：storage 绑定偏移须满足
+/// `min_storage_buffer_offset_alignment`（本机 32 B）——类 1 表以**切片视图**绑给相位核时靠它。
+fn table_stride() -> u32 {
+    return ((P.total + 1u + 7u) / 8u) * 8u;
+}
 fn cls_off() -> u32 {
-    return select(0u, P.total + 1u, cls_boundary());
+    return select(0u, table_stride(), cls_boundary());
 }
 fn cls_base() -> u32 {
     return select(0u, P.n_fluid, cls_boundary());

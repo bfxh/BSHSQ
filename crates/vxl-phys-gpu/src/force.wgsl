@@ -41,6 +41,7 @@ struct Params {
 @group(0) @binding(6) var<storage, read> cell_items: array<u32>;
 @group(0) @binding(7) var<storage, read> dens: array<f32>;
 @group(0) @binding(8) var<storage, read_write> out: array<f32>;
+// 类 1（边界）的格表**不再单独绑定**：与 `density.wgsl` 同款，基址在核里按运行时 dims 现算。
 
 fn p3(i: u32) -> vec3<f32> {
     return vec3<f32>(pos[i * 3u], pos[i * 3u + 1u], pos[i * 3u + 2u]);
@@ -72,6 +73,9 @@ fn force(@builtin(global_invocation_id) gid: vec3<u32>) {
     let az = axis_idx(P.gmin.z, pi.z, P.inv, P.nz);
     let ny = i32(P.ny);
     let nz = i32(P.nz);
+    // **类 1 表基址** = `table_stride`（与 `grid.wgsl` 同式、从**运行时** dims 现算）——
+    // 理由见 `density.wgsl` 同处注释（§28.2）。
+    let tstride = ((P.nx * P.ny * P.nz + 8u) / 8u) * 8u;
     // 流体：以重力起手（加速度口径）；边界：从 0 起（反作用只含成对力——CPU 的 `bforce` 同此，
     // 且每子步清零重累）。
     var a = select(P.gvec, vec3<f32>(0.0, 0.0, 0.0), boundary);
@@ -86,13 +90,20 @@ fn force(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let x = ax + dx;
                 if (x < 0 || x >= i32(P.nx)) { continue; }
                 let ci = u32((x * ny + y) * nz + z);
+                // **两段枚举**（`PLAN-gpu.md` §26.3）：流体段 ‖ 边界段。**段即类**（两张表各由
+                // 自己那一遍网格装箱）⇒ 判类用段序号，见 `density.wgsl` 同处注释。
                 let a0 = cell_start[ci];
                 let b0 = cell_start[ci + 1u];
-                for (var k = a0; k < b0; k = k + 1u) {
+                let g0 = P.n_fluid + cell_start[tstride + ci];
+                let g1 = P.n_fluid + cell_start[tstride + ci + 1u];
+                let seg1 = b0 - a0;
+                for (var q = 0u; q < seg1 + (g1 - g0); q = q + 1u) {
+                    let fs = q < seg1;
+                    let k = select(g0 + (q - seg1), a0 + q, fs);
                     let j = cell_items[k];
                     if (j == i) { continue; }
                     // 边界-边界不成对（Akinci 口径，与密度核一致；CPU 的 `bforce` 只从流体侧累加）。
-                    if (boundary && j >= P.n_fluid) { continue; }
+                    if (boundary && !fs) { continue; }
                     let pj = p3(j);
                     let d = pi - pj;
                     let r2 = d.x * d.x + d.y * d.y + d.z * d.z;

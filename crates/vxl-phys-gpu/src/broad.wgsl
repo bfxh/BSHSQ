@@ -93,9 +93,10 @@ fn dense(c: vec3<i32>) -> u32 {
 }
 
 /// ① 分箱计数：每体对其 AABB 覆盖的每个格 +1（格序 z 内层 ⇒ 与 CPU 的 `insert` 同序）。
+/// ⚠️ 二维分派展平（与各相位核同式，见 `probe::split_2d`；§28.1 同族）——三个按体枚举的入口同式。
 @compute @workgroup_size(64)
 fn bin_count(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let i = gid.x;
+    let i = gid.x + gid.y * (65535u * 64u);
     if (i >= P.n) {
         return;
     }
@@ -136,7 +137,7 @@ fn scan() {
 /// ③ 落位：每体写进它覆盖的每个格（格内序不定 ⇒ 最终 `sort+dedup` 之后与序无关）。
 @compute @workgroup_size(64)
 fn place(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let i = gid.x;
+    let i = gid.x + gid.y * (65535u * 64u);
     if (i >= P.n) {
         return;
     }
@@ -165,7 +166,7 @@ fn place(@builtin(global_invocation_id) gid: vec3<u32>) {
 /// - 动态条目 `j`：只取 `j > i`（去重靠索引而不是序 ⇒ 与格内序无关）。
 @compute @workgroup_size(64)
 fn gen_pairs(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let i = gid.x;
+    let i = gid.x + gid.y * (65535u * 64u);
     if (i >= P.n || !is_dyn(i)) {
         return;
     }

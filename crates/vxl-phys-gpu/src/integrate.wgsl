@@ -11,7 +11,13 @@ struct IntParams {
     dt: f32,
     vmax: f32,
     eps: f32,
-    n: u32,
+    /// **本档只积分 `[0, nf)`**（流体前缀）——`nf` 是**流体粒数**，**不是总数**。
+    /// ⚠️ 守卫必须按本档的语义（而不是"总粒数"）：分派覆盖是 `⌈nf/64⌉` 个工作组 ⇒ 覆盖到
+    /// `⌈nf/64⌉ × 64` **粒**（二维展开后更狠：`65535×64×gy`，见 `probe::split_2d`）⇒ 用总数当守卫
+    /// 会把**尾部那几十粒（或正段）边界粒子也积分了**（它们本该运动学冻结，CPU 侧 `for i in 0..nf`
+    /// 不动它们）——静默、无报错，只在 2b 上看得见（纯流体档 `nf == n` 恰好无差别）。
+    /// 判据：`tests/frozen_boundary.rs`。
+    nf: u32,
     _pad0: u32,
     _pad1: u32,
     _pad2: u32,
@@ -27,7 +33,7 @@ struct IntParams {
 fn integrate(@builtin(global_invocation_id) gid: vec3<u32>) {
     // 二维分派展平（见 `probe::split_2d`）：一维时 gid.y == 0 ⇒ 逐粒索引与旧式同（逐位不变）。
     let i = gid.x + gid.y * (65535u * 64u);
-    if (i >= I.n) {
+    if (i >= I.nf) {
         return;
     }
     let k = i * 3u;

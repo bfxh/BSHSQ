@@ -6,11 +6,12 @@
 //! 邻域枚举序列逐条相同（判据 §23），核里 `j = cell_items[k]` 拿到的就是格序副本的下标。
 //!
 //! 适用范围（**守死，宁可退回平铺档也不许静默错**）：
-//! - `cfg.n_fluid == cfg.n`（纯流体）：边界粒子会让 `j < P.n_fluid` 这条**标签**判断失效（空间排序
-//!   会把流体与边界混在一起），要支持它得把两类的格表分开建（见 §23.1 的后续项）；
+//! - **2b（流体 + 边界粒子）已开放**（§26.3 触点 5–7）：两类格表由各自那一遍网格装箱
+//!   （`two_class.rs`）⇒ 副本下标 < `n_fluid` 恒是流体 ⇒ 核里的**标签**判断在副本空间重新成立；
+//!   `pmass` 随之改成**每子步 gather**（边界质量是 Akinci 自标定，不是常量）；
 //! - 与壁面档**互斥**：壁面档改的是 `dens`（索引序），格序档下 `dens` 是副本 ⇒ 不搬它会**静默失效**。
 //!
-//! 这两条不满足时 `Packet::build` 直接不建（`PacketCfg::sort_copies` 被忽略），走平铺档。
+//! 壁面档那条不满足时 `Packet::build` 直接不建（`Packet::new_with_walls` 走平铺档）。
 
 use super::*;
 
@@ -32,12 +33,11 @@ pub(crate) fn make_sorted(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     n: u32,
-    mass: f32,
     bufs: &Bufs,
     prm: &Params,
     pipes: &Pipes,
 ) -> Sorted {
-    let c = CopyBufs::new(device, queue, n, mass);
+    let c = CopyBufs::new(device, queue, n);
     let sp = make_sorted_pipelines(device);
     let b = make_sorted_binds(device, &c, bufs, prm, pipes, &sp);
     Sorted {
@@ -51,7 +51,14 @@ pub(crate) fn make_sorted(
     }
 }
 
-/// 六张副本缓冲 + 一张恒等表（`pmass` 纯流体是常量 ⇒ 填一次，不必每子步重排）。
+/// **判据用的读点**（`PLAN-gpu.md` §26.3 判据 2）：**本包**里格序副本档真的建起来了吗。
+/// 为什么需要它：混合场景下"两档逐位相同"在**档没建**时会退化为"同一条路跑两遍"⇒ **绿 = 空过**。
+/// **自由函数而非方法**：`Packet` 是登记债务（方法只准减，见 `god.gate.json`）。
+pub fn sorted_active(pkt: &Packet) -> bool {
+    pkt.sorted.is_some()
+}
+
+/// 六张副本缓冲 + 一张恒等表。
 struct CopyBufs {
     pos_c: wgpu::Buffer,
     vel_c: wgpu::Buffer,
@@ -63,7 +70,7 @@ struct CopyBufs {
 }
 
 impl CopyBufs {
-    fn new(device: &wgpu::Device, queue: &wgpu::Queue, n: u32, mass: f32) -> Self {
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue, n: u32) -> Self {
         let storage = |label: &str, size: u64| -> wgpu::Buffer {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some(label),
@@ -76,19 +83,13 @@ impl CopyBufs {
         };
         let (nf, n3) = ((n as u64) * 4, (n as u64) * 12);
         // 恒等表：把核里那行 `j = cell_items[k]` 变成"取自己"⇒ 读格序副本的下标。
-        let mut id: Vec<u8> = Vec::with_capacity(n as usize * 4);
-        let mut pm: Vec<u8> = Vec::with_capacity(n as usize * 4);
-        for k in 0..n {
-            id.extend_from_slice(&k.to_le_bytes());
-            pm.extend_from_slice(&mass.to_le_bytes());
-        }
+        // （`pmass_c` 一栏**不再**在这里填常量：它每子步由 `gather` 的第 4 路重排。）
         let items_id = storage("s.items_id", (n as u64) * 4);
-        let pmass_c = storage("s.pmass_c", nf);
+        let id: Vec<u8> = (0..n).flat_map(|k| k.to_le_bytes()).collect();
         queue.write_buffer(&items_id, 0, &id);
-        queue.write_buffer(&pmass_c, 0, &pm);
         Self {
             items_id,
-            pmass_c,
+            pmass_c: storage("s.pmass_c", nf),
             pos_c: storage("s.pos_c", n3),
             vel_c: storage("s.vel_c", n3),
             press_c: storage("s.press_c", nf),
@@ -140,6 +141,8 @@ fn make_sorted_pipelines(device: &wgpu::Device) -> SortedPipes {
         (5, false),
         (6, false),
         (7, false),
+        (8, true),
+        (9, false),
     ];
     let (gather, bl_gather) = mk("s.gather", &gslots, "gather");
     let (scatter, bl_scatter) = mk("s.scatter", &[(1, true), (2, true), (5, false)], "scatter");
@@ -186,6 +189,8 @@ fn make_sorted_binds(
             ent(5, &c.pos_c),
             ent(6, &c.vel_c),
             ent(7, &c.press_c),
+            ent(8, &bufs.pmass_b),
+            ent(9, &c.pmass_c),
         ],
     );
     let bg_scatter = bg(
@@ -210,15 +215,8 @@ fn make_sorted_binds(
             ent(7, &c.dens_c),
         ],
     );
-    let bg_eos = bg(
-        "s.bg_eos",
-        &pipes.bl_eos,
-        &[
-            ent(0, &prm.eos_params_b),
-            ent(1, &c.dens_c),
-            ent(2, &c.press_c),
-        ],
-    );
+    let bg_eos =
+        super::two_class::sorted_eos_bind(device, pipes, &prm.eos_params_b, &c.dens_c, &c.press_c);
     let bg_force = bg(
         "s.bg_force",
         &pipes.bl_force,

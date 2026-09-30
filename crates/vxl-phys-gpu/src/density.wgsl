@@ -37,6 +37,8 @@ struct Params {
 @group(0) @binding(5) var<storage, read> cell_start: array<u32>;
 @group(0) @binding(6) var<storage, read> cell_items: array<u32>;
 @group(0) @binding(7) var<storage, read_write> dens: array<f32>;
+// 类 1（边界）的格表**不再单独绑定**：它就住在 `cell_start`（同一张 `start_b`）的后半段，
+// 基址 `tstride` 在核里按**运行时** dims 现算（见 `density` 内的注释）—— §28.2。
 
 fn p3(i: u32) -> vec3<f32> {
     return vec3<f32>(pos[i * 3u], pos[i * 3u + 1u], pos[i * 3u + 2u]);
@@ -61,6 +63,12 @@ fn density(@builtin(global_invocation_id) gid: vec3<u32>) {
     let az = axis_idx(P.gmin.z, pi.z, P.inv, P.nz);
     let ny = i32(P.ny);
     let nz = i32(P.nz);
+    // **类 1 表基址** = `table_stride`，与 `grid.wgsl` 同式、但从**运行时** dims 现算：
+    // `refresh_box` 每子步把新 dims 同时写进网格与相位两份 uniform ⇒ 这里算出的偏移与网格两遍
+    // 用的偏移**天然同源**（§28.2：早先由主机按建包时的 `cap_total` 切片绑定，`cap_total ≠ 运行时
+    // total` 时（箱跟随档必然发生）切片读进从未写入的区域 ⇒ 未初始化垃圾 ⇒ 死循环（device lost）
+    // 或边界段全空（静默的物理错误）。
+    let tstride = ((P.nx * P.ny * P.nz + 8u) / 8u) * 8u;
     var sum = P.w0;
     var sum_b = 0.0;
     /// 边界 i 用的流体项：**逐项** `pmass[j]*w`（与 CPU 的累积式一致）。
@@ -76,9 +84,18 @@ fn density(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let x = ax + dx;
                 if (x < 0 || x >= i32(P.nx)) { continue; }
                 let ci = u32((x * ny + y) * nz + z);
+                // **两段枚举**（`PLAN-gpu.md` §26.3）：流体段 ‖ 边界段。**段即类**：两张表由
+                // 各自那一遍网格（`class_lo` = 0 / `n_fluid`）分别装箱 ⇒ 流体段里 `j < n_fluid`
+                // 恒成立、边界段反之（单类档下第二段恒空）⇒ 判类用段序号、不必读 `j` 再比。
+                // ⚠️ 这条不变式靠"两遍网格都跑了"（`two_class::encode_grid`）⇒ 只派一遍会静默错。
                 let a = cell_start[ci];
                 let b = cell_start[ci + 1u];
-                for (var k = a; k < b; k = k + 1u) {
+                let g0 = P.n_fluid + cell_start[tstride + ci];
+                let g1 = P.n_fluid + cell_start[tstride + ci + 1u];
+                let seg1 = b - a;
+                for (var q = 0u; q < seg1 + (g1 - g0); q = q + 1u) {
+                    let fs = q < seg1;
+                    let k = select(g0 + (q - seg1), a + q, fs);
                     let j = cell_items[k];
                     if (j == i) { continue; }
                     let d = pi - p3(j);
@@ -91,7 +108,7 @@ fn density(@builtin(global_invocation_id) gid: vec3<u32>) {
                     if (r2 <= P.h2) {
                         let t = P.h2 - r2;
                         let w = P.k6 * t * t * t;
-                        if (j < P.n_fluid) {
+                        if (fs) {
                             sum = sum + w;
                             sum_bf = sum_bf + pmass[j] * w;
                         } else if (i < P.n_fluid) {

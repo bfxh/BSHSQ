@@ -410,8 +410,7 @@ impl NarrowTier {
                 cap_p = self.cap_pairs
             ));
         }
-        // 空对表直接返回：**别去映射 0 字节**（`map_async` 对零长区间不保证成立），
-        // 且真实 tick 里"一只都没碰"是常态（不必为它冒一次校验风险）。
+        // 空对表直接返回：**别去映射 0 字节**（`map_async` 对零长区间不保证成立）；"一只都没碰"是常态。
         if n_pairs == 0 {
             return Ok(NarrowRun {
                 slots: Vec::new(),
@@ -419,8 +418,7 @@ impl NarrowTier {
             });
         }
         // 每 tick 重写参数与两张表（容量不变 ⇒ 缓冲不重建）。参数 = `n_bodies|n_pairs|skin|min_sep`
-        // （后两个是 f32 位模式：两者都进几何判定 ⇒ 必须是**同一份** CPU 侧值的位）；第 5 槽 = 本趟要
-        // 散写的**变动记录数**（0 = 跳过；由 `upload_records` 记账）。
+        // （后两个是 f32 位模式 ⇒ 必须与 CPU 同值）；第 5 槽 = 待散写的**变动记录数**（`upload_records` 记账）。
         let n_upd = self.resident_upd.load(std::sync::atomic::Ordering::Relaxed);
         let mut prm: Vec<u8> = Vec::with_capacity(32);
         prm.extend_from_slice(&n_bodies.to_le_bytes());
@@ -449,24 +447,23 @@ impl NarrowTier {
         // 诊断字每趟清零（原子累加 ⇒ 不清就会跨趟累计，读数失去"本趟"含义）。
         enc.clear_buffer(&self.bufs.diag, 0, None);
         // **0) 变动记录散写**（常驻体表；`n_upd = 0` 时整趟跳过 ⇒ 非常驻档零影响）：
-        // 与主核**同一次提交**（省一趟同步），且在上传的同一编码器里、主核之前。
-        if n_upd > 0 {
-            let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: None,
-                timestamp_writes: None,
-            });
-            cp.set_pipeline(&self.pipes[1]);
-            cp.set_bind_group(0, &self.bg, &[]);
-            cp.dispatch_workgroups(n_upd.div_ceil(WG).max(1), 1, 1);
-        }
+        // 与主核**同一次提交**、在同一编码器里、主核之前（WebGPU 保证 pass 内 dispatch 有序）。
+        // 两个分派都走**二维**（核里同式展平，见 `narrow.wgsl`；§28.1：> 4.19M 时一维组数越上限）。
+        let (ux, uy) = crate::probe::split_2d(n_upd.div_ceil(WG).max(1));
+        let (gx, gy) = crate::probe::split_2d(n_pairs.div_ceil(WG).max(1));
         {
             let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: None,
                 timestamp_writes: None,
             });
+            if n_upd > 0 {
+                cp.set_pipeline(&self.pipes[1]);
+                cp.set_bind_group(0, &self.bg, &[]);
+                cp.dispatch_workgroups(ux, uy, 1);
+            }
             cp.set_pipeline(&self.pipes[0]);
             cp.set_bind_group(0, &self.bg, &[]);
-            cp.dispatch_workgroups(n_pairs.div_ceil(WG).max(1), 1, 1);
+            cp.dispatch_workgroups(gx, gy, 1);
         }
         prof::add(3, t_enc.elapsed().as_micros() as u64);
         let (out, diag) = self.finish(enc, n_pairs);

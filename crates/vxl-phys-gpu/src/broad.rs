@@ -219,8 +219,7 @@ fn build(
             })
             .collect::<Vec<_>>(),
     });
-    // ⚠️ 这个变量**必须叫 `shader`**：本仓的词汇门只豁免"计算管线描述符里那一字段取形参 `shader`"
-    // 这一种写法（见 `scripts/vocab_scan.sh` 头部）——改名会红。
+    // ⚠️ 此变量必须叫 `shader`：词汇门只豁免这一种写法（见 `scripts/vocab_scan.sh` 头部）——改名会红。
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("broad.wgsl"),
         source: wgpu::ShaderSource::Wgsl(include_str!("broad.wgsl").into()),
@@ -293,15 +292,16 @@ fn run(
     enc.clear_buffer(&p.bufs.cursor_b, 0, None);
     enc.clear_buffer(&p.bufs.pcnt_b, 0, None);
     enc.clear_buffer(&p.bufs.ovf_b, 0, None);
-    let ng = n.div_ceil(WG).max(1);
-    for (pipe, groups) in p.pipes.iter().zip([ng, 1, ng, ng]) {
+    // 二维分派（核里同式展平，见 `broad.wgsl`；§28.1 同族）。② `scan` 是单工作组。
+    let (gx, gy) = crate::probe::split_2d(n.div_ceil(WG).max(1));
+    for (pipe, (sx, sy)) in p.pipes.iter().zip([(gx, gy), (1, 1), (gx, gy), (gx, gy)]) {
         let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: None,
             timestamp_writes: None,
         });
         cp.set_pipeline(pipe);
         cp.set_bind_group(0, &p.bg, &[]);
-        cp.dispatch_workgroups(groups, 1, 1);
+        cp.dispatch_workgroups(sx, sy, 1);
     }
     enc.copy_buffer_to_buffer(&p.bufs.pairs_b, 0, &p.rb, 0, (cap_pairs as u64) * 8);
     enc.copy_buffer_to_buffer(&p.bufs.pcnt_b, 0, &p.rb, (cap_pairs as u64) * 8, 4);

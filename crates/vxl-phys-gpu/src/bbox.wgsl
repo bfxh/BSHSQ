@@ -108,6 +108,9 @@ fn box_setup() {
 }
 
 /// 全位置 min/max 归约（原子；跨组也用同一个数组 ⇒ 单次 dispatch 即可）。
+/// ⚠️ **二维分派展平**（与各相位核同式，见 `probe::split_2d`）：`n > 65535×64 ≈ 4.19M` 时一维组数
+/// 越单维上限（10M 档正是）⇒ 归约走同一套展开，而 `stride = rp.y × WG` 里的 `rp.y` 就是**总组数**
+/// （主机侧按 `gx×gy` 写）。覆盖仍是"每粒恰好一次" ⇒ 结果与一维档逐位相同（原子 min/max 与序无关）。
 @compute @workgroup_size(64)
 fn reduce(@builtin(global_invocation_id) gid: vec3<u32>) {
     let n = rp.x;
@@ -117,7 +120,7 @@ fn reduce(@builtin(global_invocation_id) gid: vec3<u32>) {
     let stride = rp.y * WG;
     var mn = vec3<u32>(0xFF800000u, 0xFF800000u, 0xFF800000u);
     var mx = vec3<u32>(0x007FFFFFu, 0x007FFFFFu, 0x007FFFFFu);
-    var i = gid.x;
+    var i = gid.x + gid.y * (65535u * 64u);
     loop {
         if (i >= n) {
             break;

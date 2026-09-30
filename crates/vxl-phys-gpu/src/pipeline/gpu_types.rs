@@ -75,7 +75,7 @@ pub struct Packet {
     pub(crate) overflow_b: wgpu::Buffer,
     pub(crate) int_params_b: wgpu::Buffer,
     /// 网格 uniform（每子步重算箱子时要改它前 36 字节）。
-    pub(crate) grid_params_b: wgpu::Buffer,
+    pub(crate) grid_params_b: [wgpu::Buffer; 2], // [0]=类0 [1]=类1（见 two_class.rs）
     /// 密度/力相位 uniform（同样含箱子三件套，偏移见 `make_params`）。
     pub(crate) phase_params_b: wgpu::Buffer,
     /// 常驻的包围盒归约阶段（`cfg.recompute_box` 时每子步用一次）。
@@ -90,7 +90,7 @@ pub struct Packet {
     pub(crate) p_eos: wgpu::ComputePipeline,
     pub(crate) p_force: wgpu::ComputePipeline,
     pub(crate) p_int: wgpu::ComputePipeline,
-    pub(crate) bg_grid: wgpu::BindGroup,
+    pub(crate) bg_grid: [wgpu::BindGroup; 2], // [0]=类0(全量/流体) [1]=类1(边界)
     pub(crate) bg_dens: wgpu::BindGroup,
     pub(crate) bg_force: wgpu::BindGroup,
     pub(crate) bg_eos: wgpu::BindGroup,

@@ -14,12 +14,16 @@
 | **M0 MVE** | 盒/圆柱/高度场 + 顺序冲量 + 岛 + 确定性哈希；1 万静态+1 千动态 ≥60Hz | ✅ 竖切可跑 |
 | **M0 骨架续建（V2 §11）** | 相位 arena + hot/cold 32B（`core/mem.rs`）、xxh3-128 规范化哈希（10 轮断言）、m0_gates 门槛（p50 1.09ms）、CI 四门 + 三编译器矩阵 + 词汇禁令扫描 | ✅ 交付（记录：`docs/M0-GATES.md`） |
 | **M1 刚体核心（在研）** | 稳定/金样/性能收口；性能档缺口与架构诊断见 `OPEN-PROBLEMS.md` P3、`DESIGN-staged-solver.md` | 🔄 在研 |
-| **M2 互操作核心** | 四接口（Provider/Medium/Bridge/Element）+ 迁移窄相/地形为 provider + 贯通示例；并入原「键图 + 双 ABI + trait 插件面」 | ⬜ |
-| **M3 破坏/地形（体素）** | Voronoi 预断裂 + 运行时切割 + 体素块→刚体/粒子 | ⬜ |
-| **M4 软体/布** | XPBD + 与刚体共求解器 | ⬜ |
-| **M5 液体** | WCSPH → PBF/FLIP + 刚体双向耦合 | ⬜ |
-| **M6 风/海洋/车辆/机械** | 面元气动 + 浮力 + 约束族 | ⬜ |
-| **M7 喷溅 + 收口** | 3DGS 三层用法（渲染桥/物理代理/隐式场）+ 全域收敛 | ⬜ |
+| **M2 互操作核心** | 四接口（Provider/Medium/Bridge/Element）+ 迁移窄相/地形为 provider + 贯通示例；并入原「键图 + 双 ABI + trait 插件面」 | 🟡 **部分**：四 trait + `Shape::Provider` 通道 + 刚体↔体素贯通已跑通（余项见 `ROUTE.md` §7） |
+| **M3 破坏/地形（体素）** | Voronoi 预断裂 + 运行时切割 + 体素块→刚体/粒子 | 🟡 **主体**：预断裂 + 运行时切割（体素 & 凸体外壳）+ 体素块→刚体 + 演示 `m3_impact`/`m3_voronoi`；坍塌金样未做 |
+| **M4 软体/布** | XPBD + 与刚体共求解器 | 🟡 **主体**：XPBD 绳索/布（三组约束 + 自碰撞·点-边·自摩擦 + 撕裂 + 塑性）+ 面元气动 + 刚体反作用两腿；刚度档表/金样未收口 |
+| **M5 液体** | WCSPH → PBF/FLIP 分层 + 刚体双向耦合 | 🟡 **主体**：WCSPH（CPU + 相位并行 + GPU 档）+ Akinci 边界粒子双向；PBF/FLIP 与 30 万粒档未做 |
+| **M6 风/海洋/车辆/机械** | 面元气动 + 浮力 + 约束族 | 🟡 **部分**：面元气动（力/力矩/升力）已落地；海洋/车辆/机械仍骨架 |
+| **M7 喷溅 + 收口** | 3DGS 三层用法（渲染桥/物理代理/隐式场）+ 全域收敛 | 🟡 **部分**：splat 隐式场 provider + 渲染桥 `export_splats`；三层用法余项与全域收口未做 |
+
+> **本表的状态列 = 2026-09-30 实测刷新**（此前 M2–M7 一律写 ⬜，与实况脱节）：以
+> `docs/ROUTE.md` §7 的实测注记为准；「主体」= 能力已在树**且带判据**，**≠ 出口达标**
+> ——每行的出口判据见 `ROUTE.md` §7 右列（金样/档位表/贯通示例）。
 
 > 三轴标准（**兼容 · 性能 · 真实化**）、域矩阵与「怎么搞」以 `docs/ROUTE.md` 为准；
 > 本表里程碑顺序按该文件修订（原 V2 §11 顺序已被替代）。
@@ -29,26 +33,31 @@
 
 ```
 crates/
-├─ vxl-phys-core        数学(严格f32)/质量属性/配置/SoA体数据/调度抽象   [零外部依赖]
+├─ vxl-phys-core        数学(严格f32)/质量属性/配置/SoA体数据/调度抽象/互操作 trait   [零外部依赖]
 ├─ vxl-phys-broad       宽相：均匀空间哈希网格（M1 增量 BVH bvh2 风格）
-├─ vxl-phys-narrow      窄相：SAT 凸-凸 + 参考面裁剪流形 + 球解析 + 高度场特化
+├─ vxl-phys-narrow      窄相：SAT 凸-凸 + 参考面裁剪流形 + 球解析 + 高度场特化 + GJK/EPA 外壳 + 三角网
 ├─ vxl-phys-solver      顺序冲量(TGS-Soft 同族) + 并查集分岛 + 休眠
-├─ vxl-phys-integrate   半隐式欧拉 + 固定步/子步
-├─ vxl-phys-field       力场注册表（重力/风/吸引）
-├─ vxl-phys-terrain     高度场账本（挖掘/包围盒）
+├─ vxl-phys-integrate   半隐式欧拉 + 固定步/子步                      [骨架]
+├─ vxl-phys-field       力场注册表（重力/风/吸引）                    [骨架]
+├─ vxl-phys-terrain     高度场账本（挖掘/包围盒）+ 稀疏体素 + 三角网
 ├─ vxl-phys-replay      状态哈希（FNV-1a→xxh3 可换）+ 回放记录器
-├─ vxl-phys             门面 World（默认管线组装）
-├─ vxl-phys-soft        软体/布料 XPBD 参数骨架        [M3]
-├─ vxl-phys-fluid       SPH/PBF/FLIP 参数骨架          [M3/M4]
-├─ vxl-phys-wheeled     地面行驶域骨架（悬挂/轮胎/传动） [M2]
-├─ vxl-phys-aero        气动域骨架（面元气动力）         [M2+]
-├─ vxl-phys-marine      浮力采样/波浪骨架              [M2+]
-├─ vxl-phys-mech        齿轮/皮带/活塞/马达骨架        [M2+]
-├─ vxl-phys-destruction Voronoi 预断裂/运行时断裂骨架  [M2]
-├─ vxl-phys-gpu         wgpu/rust-gpu 后端 trait 骨架  [M4]
-├─ vxl-phys-memfind     内存子串（标量基线）           [M1+]
-└─ vxl-phys-ffi         C ABI 批量接口约定             [M2]
+├─ vxl-phys             门面 World（默认管线组装 + 体素/网格/喷涂/软体/流体的接入与判据）
+├─ vxl-phys-soft        **XPBD 绳索/布**（结构·剪切·弯曲 + 自碰撞/点-边/自摩擦 + 撕裂 + 塑性（含弯曲对）+ 面元气动 + 刚体反作用两腿）
+├─ vxl-phys-fluid       **WCSPH**（poly6/spiky/Tait/人工黏度/XSPH）+ Akinci 边界粒子双向 + 相位并行 + GPU 档
+├─ vxl-phys-splat       3DGS 隐式场（σ 场 → SDF）+ `ProviderColliders` 三点查 + 渲染桥 `export_splats`
+├─ vxl-phys-destruction Voronoi 预断裂 + 运行时切割 + 体素块→刚体（`extract_boxes`/`spawn_box_debris`）
+├─ vxl-phys-gpu         wgpu 后端：流体全程 GPU 档（千万粒）+ 宽相上卡 + 两类格表
+├─ vxl-phys-aero        面元气动力（逐面力/力矩 + 线性升力）
+├─ vxl-phys-wheeled     地面行驶域骨架（悬挂/轮胎/传动）                [骨架·M2]
+├─ vxl-phys-marine      浮力采样/波浪骨架                             [骨架·M2+]
+├─ vxl-phys-mech        齿轮/皮带/活塞/马达骨架                       [骨架·M2+]
+├─ vxl-phys-memfind     内存子串（标量基线）
+└─ vxl-phys-ffi         C ABI 批量接口约定
 ```
+
+> **状态标注口径（2026-09-30 按实测刷新）**：无标记 = 有实现且在树带判据；**[骨架]** = 只有参数/接口壳
+> （`mech` 38 行 / `marine` 32 / `integrate` 112 / `field` 94）；`[Mx]` = 计划里程碑。清单此前漏列
+> `vxl-phys-splat`（`CATALOG.md` §0 已更正"工作区 20 个 crate"）。
 
 依赖注入：`BroadPhase` / `NarrowPhase` / `ForceField` / `StateHash` / `PhysGpuBackend`
 均为 trait，自定义实现不改核心。默认最小管线 = core+broad+narrow+solver+integrate+island。
