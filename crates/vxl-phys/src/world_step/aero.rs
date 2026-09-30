@@ -56,9 +56,9 @@ impl World {
             }
             st.forces.push(f_sum);
             st.torques.push(t_sum);
-            // 施加（静态体 inv_mass = 0 ⇒ 积分器里天然无操作，与重力同 precedent）。
-            self.bodies.force[i] += f_sum;
-            self.bodies.torque[i] += t_sum;
+            // 经受体门写（`PLAN-COUPLING.md` §3.2）：静态/睡眠体原先"写进去、被积分器丢弃"
+            // ⇒ C1 起统一为提前不写。**快照（`st.forces/torques`）不受影响**（判据 ③ 读它）。
+            coupling::add_force(&mut self.bodies, i, f_sum, t_sum);
         }
     }
 }

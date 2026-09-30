@@ -335,7 +335,19 @@ coupling::apply_round(&mut bodies, &rounds, &mut audit)
 > 总原则：**先有账，再改账**。C0/C1 只加观测与收口（**零行为变更**⇒ 冻结读数一字不动）；
 > C2 起才动口径，动口径 = 换代级 ⇒ 每片都要"重冻 + 登记 + 拍板"。
 
-### C0 观测层（**零行为变更**；本片独立可交付）
+### ✅ C0 观测层（**已落地 2026-09-30**，`world_step/coupling.rs`；零行为变更）
+
+**落地形态**（与本文档原设计的一处偏差，如实记）：审计**不持状态**——`World` 的成员位顶在 god 门棘轮上
+（`world_struct.rs` 基线 23/24 且该文件 `max_fn_lines = 0`，没有"函数变短"可交换）⇒ 账一律**现算**：
+`dropped_force_writes(&BodySet)`（静默丢弃的暴露面）与 `fluid_reaction_ledger(&World)`（2b 反作用
+"交给不动的体"多少力）都是纯查询。真消费者 = **`World::health()`**（`HealthReport` 加两字段
+`coupling_dropped_bodies/coupling_dropped_force`，**只记账、不进 `is_clean`**）⇒ 无死代码、无新方法。
+**5 条判据**（in-crate，`coupling.rs::tests`）：门真值表 · 经门写 + 丢弃可见 · 分账划分
+（含越界兜底）· **静态地板**端到端 · **睡眠地板**端到端（后两条断言"反作用非零 + 体不动 + 有账"）。
+⚠️ 判据卫生：分账断言全部取**可精确表示的二进制值**（`0.1+0.2+0.4+0.8 ≠ 1.5` 在 f32 下成立）——
+十进制小数值会让"账必须平"红在浮点上而不是账上。
+
+### C0 观测层（原设计；已被上面的落地形态取代，保留备查）
 
 | 项 | 内容 |
 |---|---|
@@ -343,7 +355,21 @@ coupling::apply_round(&mut bodies, &rounds, &mut audit)
 | 判据 | ① `coupling_audit_counts_dropped_writes`（睡眠体 + 外力 ⇒ dropped 计数 = 预期、体确实没动）② `coupling_momentum_residual_is_recorded`（2b 场景：`Δp_body + Δp_fluid` 相对残差 ≤ 登记阈值——**首次把这笔账量出来**）③ **四哈希 + 全部既有耦合判据逐位不变**（观测层不动行为的金丝雀） |
 | 风险 | 无（纯加法）；唯一注意：审计字段若挂 `World` ⇒ 用掉那 1 个字段位（或挂进既有诊断结构） |
 
-### C1 受体门统一（**行为等价改造**）
+### ✅ C1 受体门统一（**已落地 2026-09-30**，与 C0 同片；行为等价已验）
+
+**落地**：`world_step/coupling.rs::is_receptor` 是**唯一定义处**（`is_dynamic && awake && inv_mass > 0`），
+`add_force`/`add_tick_torque` 是**力的通道与 tick 末力矩通道的唯一收口**。门面侧五处写入点全部改走它：
+`splat_medium_pass`（原先只查 `is_dynamic`）· `medium_pass` 2a · `fluid_reaction_pass` 2b ·
+`aero_pass`（快照不受影响，仍逐体留读数）· `world_soft` 绳的**角反作用**（原先**无任何检查**，§2 A3；
+默认关 ⇒ 默认档逐位不变）。
+**行为等价证据**：`gate_all.sh` 全绿且**金样三条读数与改动前逐字相同**（col45 0.0034/0.0016、
+pile5 0.0041/0.0020、tower25 0.0950/0.0572）+ determinism 哈希一致；既有耦合判据 14 例全绿
+（`fluid_boundary` 4 · `fluid_coupling` 3 · `rope_scene` 4 · `cloth_reaction_scene` 1 ·
+`angular_impulse_contract` 2）。
+**未做（如实）**：`vxl-phys-field` 的力场写入仍不过门（另一个 crate，语义是"对全体动体累加"）
+⇒ 那部分暴露面由 `dropped_force_writes` 记账；软体两腿的门仍在**代理快照侧**（`inv_mass = 0`）不变。
+
+### C1 受体门统一（原设计；已被上面的落地形态取代，保留备查）
 
 | 项 | 内容 |
 |---|---|

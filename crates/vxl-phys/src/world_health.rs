@@ -4,10 +4,9 @@ use super::*;
 impl World {
     /// §3 稳定性指标采集。
     pub fn health(&self) -> HealthReport {
-        let mut rep = HealthReport {
-            max_depth: 0.0,
-            ..HealthReport::default()
-        };
+        let mut rep = HealthReport::default();
+        // 耦合审计（`PLAN-COUPLING.md` §5 C0）：把"睡眠/静态体收不到的作用"变成账。
+        crate::world_step::coupling::fill_health(&mut rep, self);
         for i in 0..self.bodies.len() {
             if !self.bodies.position[i].is_finite() || !self.bodies.linvel[i].is_finite() {
                 rep.nan_bodies += 1;
