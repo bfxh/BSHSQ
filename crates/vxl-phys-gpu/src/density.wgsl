@@ -79,16 +79,18 @@ fn density(@builtin(global_invocation_id) gid: vec3<u32>) {
                 let x = ax + dx;
                 if (x < 0 || x >= i32(P.nx)) { continue; }
                 let ci = u32((x * ny + y) * nz + z);
-                // **两段枚举**（`PLAN-gpu.md` §26.3）：流体段 ‖ 边界段（单类档 `bstart` 全零
-                // ⇒ 边界段恒空）。段内**仍逐项判类** —— 单类档的"流体段"含两类 ⇒ 这层是承重的；
-                // 两类档（第二遍网格）下它退化为常数、可再优化。
+                // **两段枚举**（`PLAN-gpu.md` §26.3）：流体段 ‖ 边界段。**段即类**：两张表由
+                // 各自那一遍网格（`class_lo` = 0 / `n_fluid`）分别装箱 ⇒ 流体段里 `j < n_fluid`
+                // 恒成立、边界段反之（单类档下第二段恒空）⇒ 判类用段序号、不必读 `j` 再比。
+                // ⚠️ 这条不变式靠"两遍网格都跑了"（`two_class::encode_grid`）⇒ 只派一遍会静默错。
                 let a = cell_start[ci];
                 let b = cell_start[ci + 1u];
                 let g0 = P.n_fluid + bstart[ci];
                 let g1 = P.n_fluid + bstart[ci + 1u];
                 let seg1 = b - a;
                 for (var q = 0u; q < seg1 + (g1 - g0); q = q + 1u) {
-                    let k = select(g0 + (q - seg1), a + q, q < seg1);
+                    let fs = q < seg1;
+                    let k = select(g0 + (q - seg1), a + q, fs);
                     let j = cell_items[k];
                     if (j == i) { continue; }
                     let d = pi - p3(j);
@@ -101,7 +103,7 @@ fn density(@builtin(global_invocation_id) gid: vec3<u32>) {
                     if (r2 <= P.h2) {
                         let t = P.h2 - r2;
                         let w = P.k6 * t * t * t;
-                        if (j < P.n_fluid) {
+                        if (fs) {
                             sum = sum + w;
                             sum_bf = sum_bf + pmass[j] * w;
                         } else if (i < P.n_fluid) {

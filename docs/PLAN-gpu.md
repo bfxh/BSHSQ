@@ -2740,8 +2740,8 @@ m0 压力哈希 `0x417be20a…`、金样门 col45 45/45 / pile5 2000/2000 / towe
    网格 uniform 序列化、网格分派）＋ sorted 的 EOS 绑定组，净缩之后才有空间；③ `gpu_types.rs`
    的字段注释要**同行化**（行数净零）。
 
-**开口（下一会话第一件事）**：定位设备丢失。证据：`two = false` ⇒ 该测试过（注意那是"两边都退化"
-的假过，只取"第二遍会炸"这一条）。
+**✅ 开口已收（2026-09-30）**：元凶 = **`refresh_box` 只刷类 0 的 params**（追查第 1 条那个设计
+缺口 —— 候选①猜对了）；修复与读数见本节末 **§26.3.3**。
 
 **2026-09-30 二分结论（第二遍网格；本轮实测，触发面很窄）**：
 - **只有 walls 档的包会炸**：`new_with_walls`（其诊断测试跑 `follow=false/true` 两档盒）✗；
@@ -2772,3 +2772,33 @@ m0 压力哈希 `0x417be20a…`、金样门 col45 45/45 / pile5 2000/2000 / towe
    **判据**：该测试转绿 + canary 哈希逐位不变 + 16 个测试二进制全绿。
 **验收**：`sorted_seed_localize` 转绿 + canary 哈希逐位不变 + `cargo test -p vxl-phys-gpu` 全绿
 （16 个二进制）+ 快门 25 道 + god 门 0 变胖。
+
+#### 26.3.3 修复与实测（2026-09-30 本轮；触点 1 后半 + 触点 4 全部落地）
+
+**修法（一处缺口、三行）**：`Packet` 的网格 uniform 从**单份**改成 `[wgpu::Buffer; 2]`
+（同行类型变更 ⇒ 登记债务的字段数不变），构造时收 `[grparams, grid2_params]`，`refresh_box`
+把同一份 box 写进**两份**（`grid_params_b[0]` / `[1]` 各三条 `copy_buffer_to_buffer`）。
+**为什么这能治 device lost**：`canon` 的段界是 `start[off + c]`，而 `off = table_stride()` 由
+`total` 算出 —— 类 1 的 params 停在构造时的旧 `total`/旧盒 ⇒ 类 1 那遍把**新几何的格号**写进
+**旧几何的表**、`scan` 又把陈旧的 `start` 段界交给 `canon` ⇒ `items[j] = …` 越界写（wgpu 对
+storage 写不做边界校验，症状就是 `Parent device is lost`）。这与二分的三条读数完全自洽：
+**只有 walls 档炸**（只有它的诊断测试跑 `follow=true` 即 `recompute_box=true`）、**bin 单独过而
+scan 单独炸**（scan 才是写 `start` 的那一步）、**放大 4× 仍炸**（不是尺寸问题而是几何不同源）。
+
+**顺带收掉触点 1 的后半（段内冗余判类）**：两段枚举里 `j < P.n_fluid` / `j >= P.n_fluid` 这两条
+**逐项**判类，在"两张表各由自己那一遍网格装箱"之后是**常数** ⇒ 改用段序号 `fs = q < seg1`
+（密度核一处、力核 `boundary && !fs` 一处）。**不变式写进核注释**：段即类 —— 只在**两遍都跑了**
+的前提下成立（`two_class::encode_grid` 里 `two = cfg.n_fluid < cfg.n`）。
+
+**读数（全部与 §26.3.1 的 A/B 基线逐位相同）**：
+- canary（8³ 晶格 + 地板、60 tick × 4 子步）：哈希 **`0x9fae52a5be7ed274`**、流体最低 y
+  **卡 −1.81740 / CPU 同源 −1.81726**（一字不动）；`sorted_seed_localize`（walls + 两档盒）**转绿**；
+- `cargo test -p vxl-phys-gpu` 全绿（lib 4 + 11 集成用例）；`scripts/gate_all.sh` **全绿**
+  （五项门禁 + 行为门 + 金样门三段）；
+- **纯流体回归**（判据 3 的前半）：`gpu_grid_probe 74`（= 405 224 粒）CPU ≡ GPU 表哈希
+  **`0x6308f0e1e5bee72b`**、start/items/逐粒 bin **全等 0 项**、overflow 0 ⇒ `n_fluid == n`
+  时第二遍确实被跳过、默认档一字未动。
+
+**剩余（§26.3 触点 5–8 + 判据 1/2/4）**：`sorted.rs` 的 `pmass_c` 改每子步 gather（边界粒子质量是
+Akinci 自标定、与流体不同 ⇒ 常量会静默错）、`make_sorted_binds` 补槽 9、放开 `n_fluid == cfg.n`
+那道门、2b 混合场景"格序 vs 平铺"逐位判据 + `is_sorted()` 读点 + 壁面档同开仍退回平铺。

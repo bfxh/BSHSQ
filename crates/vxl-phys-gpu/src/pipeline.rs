@@ -139,6 +139,8 @@ pub(crate) fn make_buffers(
 /// `Packet` 的四组 uniform（`new` 的第二段：字节布局 + 建缓冲）。
 pub(crate) struct Params {
     pub grid_params_b: wgpu::Buffer,
+    /// **类 1（边界）的网格 uniform**（两遍分派用；`n_fluid == n` 时不跑）。
+    pub grid2_params_b: wgpu::Buffer,
     pub phase_params_b: wgpu::Buffer,
     pub eos_params_b: wgpu::Buffer,
     pub int_params_b: wgpu::Buffer,
@@ -146,26 +148,9 @@ pub(crate) struct Params {
 
 pub(crate) fn make_params(device: &wgpu::Device, cfg: &PacketCfg, n: u32, total: u32) -> Params {
     // —— 四组 uniform ——
-    let grid_params = {
-        let mut b = Vec::with_capacity(48);
-        for x in cfg.gmin {
-            b.extend_from_slice(&x.to_le_bytes());
-        }
-        b.extend_from_slice(&cfg.inv.to_le_bytes());
-        for x in [
-            cfg.dims[0],
-            cfg.dims[1],
-            cfg.dims[2],
-            n,
-            total,
-            cfg.cap,
-            n, // 末两字段 = 两类格表的 `n_fluid`/`class_lo`；**本档单类** ⇒ 类 0 覆盖全量、写 `n`（写 0 ⇒ `cls_hi=0` 空转；写 `cfg.n_fluid` ⇒ 边界粒子不入格）
-            0,
-        ] {
-            b.extend_from_slice(&x.to_le_bytes());
-        }
-        b
-    };
+    // 网格 uniform 两套（类 0 / 类 1）：**两遍都用 `n_fluid = cfg.n_fluid`**、只差 `class_lo`。
+    let grid_params_b = two_class::grid_params_buf(device, cfg, n, total, 0);
+    let grid2_params_b = two_class::grid_params_buf(device, cfg, n, total, cfg.n_fluid);
     let phase_params = {
         let mut b = Vec::with_capacity(80);
         for x in cfg.gmin {
@@ -213,7 +198,6 @@ pub(crate) fn make_params(device: &wgpu::Device, cfg: &PacketCfg, n: u32, total:
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         })
     };
-    let grid_params_b = uniform("p.grid_params", &grid_params);
     let phase_params_b = uniform("p.phase_params", &phase_params);
     let eos_params_b = uniform("p.eos_params", &eos_params);
     let int_params_b = uniform(
@@ -223,6 +207,7 @@ pub(crate) fn make_params(device: &wgpu::Device, cfg: &PacketCfg, n: u32, total:
 
     Params {
         grid_params_b,
+        grid2_params_b,
         phase_params_b,
         eos_params_b,
         int_params_b,
@@ -329,7 +314,7 @@ pub(crate) fn make_pipelines(device: &wgpu::Device) -> Pipes {
 
 /// `Packet` 的五张 bind group（`new` 的第四段：把缓冲/参数/管线绑起来）。
 pub(crate) struct Binds {
-    pub bg_grid: wgpu::BindGroup,
+    pub bg_grid: [wgpu::BindGroup; 2], // [0]=类0 [1]=类1
     pub bg_dens: wgpu::BindGroup,
     pub bg_force: wgpu::BindGroup,
     pub bg_eos: wgpu::BindGroup,
@@ -445,7 +430,7 @@ impl Packet {
             cursor_b: bufs.cursor_b,
             overflow_b: bufs.overflow_b,
             int_params_b: prm.int_params_b,
-            grid_params_b: prm.grid_params_b,
+            grid_params_b: [prm.grid_params_b, prm.grid2_params_b],
             phase_params_b: prm.phase_params_b,
             bbox,
             out_b: bufs.out_b,
@@ -497,16 +482,9 @@ impl Packet {
         if stages & 0b000_0001 != 0 {
             enc.clear_buffer(&self.counts_b, 0, None);
             enc.clear_buffer(&self.overflow_b, 0, None);
-            dispatch(enc, &self.p_bin, &self.bg_grid, self.groups_n);
         }
-        if stages & 0b000_0010 != 0 {
-            dispatch(enc, &self.p_scan, &self.bg_grid, 1);
-            // 游标由 `scan` 自己写（见 `grid.wgsl`）⇒ 这里不再 `copy_buffer_to_buffer`。
-            dispatch(enc, &self.p_place, &self.bg_grid, self.groups_n);
-        }
-        if stages & 0b000_0100 != 0 {
-            dispatch(enc, &self.p_canon, &self.bg_grid, self.groups_total);
-        }
+        // 网格四入口（**两类档跑两遍**；见 `two_class.rs::encode_grid`）。
+        two_class::encode_grid(self, enc, cfg, stages);
         // **格序副本档**（`cfg.sort_copies`）：只要有一个相位要吃副本，就先搬一趟；`scatter` 紧跟
         // 力之后（**只在力跑过时**才回写——否则会把上一子步的 `out_c` 按**当前**置换乱写到 `out`）。
         let s = self.sorted.as_ref();
@@ -579,11 +557,16 @@ impl Packet {
         //   grid_params ：gmin 0..12 | inv 12..16 | dims 16..28 | n 28..32 | total 32..36
         //   phase_params：gmin 0..12 | inv 12..16 | … | n 60..64 | dims 64..76
         let src = self.bbox.box_out();
-        enc.copy_buffer_to_buffer(src, 0, &self.grid_params_b, 0, 16);
-        enc.copy_buffer_to_buffer(src, 16, &self.grid_params_b, 16, 12);
-        enc.copy_buffer_to_buffer(src, 28, &self.grid_params_b, 32, 4);
+        enc.copy_buffer_to_buffer(src, 0, &self.grid_params_b[0], 0, 16);
+        enc.copy_buffer_to_buffer(src, 16, &self.grid_params_b[0], 16, 12);
+        enc.copy_buffer_to_buffer(src, 28, &self.grid_params_b[0], 32, 4);
         enc.copy_buffer_to_buffer(src, 0, &self.phase_params_b, 0, 16);
         enc.copy_buffer_to_buffer(src, 16, &self.phase_params_b, 64, 12);
+        // ★ **类 1 的网格 uniform 也要同步**（否则两遍用不同的盒/total ⇒ 表几何不一致）；
+        // 与类 0 同形：gmin 0..16 | dims 16..28 | total 32..36。
+        enc.copy_buffer_to_buffer(src, 0, &self.grid_params_b[1], 0, 16);
+        enc.copy_buffer_to_buffer(src, 16, &self.grid_params_b[1], 16, 12);
+        enc.copy_buffer_to_buffer(src, 28, &self.grid_params_b[1], 32, 4);
         self.queue.submit(Some(enc.finish()));
         (t.elapsed().as_secs_f64() * 1e3) as f32
     }
