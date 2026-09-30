@@ -41,3 +41,12 @@ UE5 = "UE5"
 # 流体介质场采样用它做速度平均，见 `vxl-phys-fluid` 的 `MediumField` 实现）。
 # typos 默认想改成 Shepherd（牧羊人）——语义不同，按术语豁免。
 Shepard = "Shepard"
+# Causin = 姓氏（P. Causin 等 2005，分区流固耦合 added-mass 不稳定性的经典文献；
+# 被 `PLAN-COUPLING.md` §7 引用）。typos 默认想改成 Cousin —— 人名，按术语豁免。
+Causin = "Causin"
+# Fle = NVIDIA FleX 的前缀（统一粒子物理引擎，Macklin 2014）；typos 按键名拆分
+# （`FleX` → `Fle` + `X`）⇒ 豁免键必须写 `Fle`，否则它想把 `Fle` 改成 `File`。
+Fle = "Fle"
+# preCICE = 耦合库名（分区耦合/子迭代的工程参考，PLAN-COUPLING §7 引用其文档）。
+# typos 想改成 precise —— 专有名词，按术语豁免。
+precice = "precice"
