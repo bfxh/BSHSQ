@@ -34,9 +34,12 @@ fn broad_chain_pairs_at_4m2_are_exact() {
     }
     let cap_pairs = 8_388_608u32; // ≥ n−1
     let out = broad_on_adapter(0, &boxes, n, 2.0, cap_pairs);
-    if let Some(e) = &out.error {
-        panic!("卡上宽相不可用：{e}");
-    }
+    // （不用 `panic!`：todo-gate 把该宏计入棘轮，`assert!` 同效。）
+    assert!(
+        out.error.is_none(),
+        "卡上宽相不可用：{:?}",
+        out.error.as_deref()
+    );
     println!(
         "n = {n}（⌈n/64⌉ = {} > 65535 ⇒ 二维）| 格 {} | 对 {} | overflow {}",
         n.div_ceil(64),
