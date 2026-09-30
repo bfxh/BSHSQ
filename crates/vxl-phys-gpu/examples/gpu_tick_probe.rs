@@ -79,8 +79,8 @@ struct Args {
     cpu_threads: usize,
     /// `--pipe`：**管线档**回读演示（§19.1 ③）——只发起不等待 ⇒ 量"回读等待被下一 tick 的计算遮住"能省多少。
     pipe: bool,
-    /// `--sorted`：**格序副本档**（§23.1；判据 = 与平铺档**逐位相同**）。
-    sorted: bool,
+    /// `--flat`：**显式平铺档**对照（翻默认后默认 = 格序副本档；判据 = 与平铺档**逐位相同**）。
+    flat: bool,
 }
 
 fn parse_args() -> Args {
@@ -106,7 +106,7 @@ fn parse_args() -> Args {
             .and_then(|v| v.parse().ok())
             .unwrap_or(1),
         pipe: rest.iter().any(|a| a == "--pipe"),
-        sorted: rest.iter().any(|a| a == "--sorted"),
+        flat: rest.iter().any(|a| a == "--flat"),
     }
 }
 
@@ -181,7 +181,7 @@ fn build_packet(
     h: f32,
     adapter_index: usize,
     follow_box: bool,
-    sorted: bool,
+    flat: bool,
 ) -> Option<(Packet, PacketCfg)> {
     let (gmin, ginv, gdims) = {
         let gd = f.neighbor_grid();
@@ -237,11 +237,8 @@ fn build_packet(
         grid_bins_cap: if follow_box { 1 << 20 } else { total },
     };
     #[allow(clippy::type_complexity)] // fn 指针：两个构造器签名一致，按开关选一个
-    let mk: fn(usize, PacketCfg, &[f32], &[f32], &[f32]) -> Result<Packet, String> = if sorted {
-        Packet::new_sorted
-    } else {
-        Packet::new
-    };
+    let mk: fn(usize, PacketCfg, &[f32], &[f32], &[f32]) -> Result<Packet, String> =
+        if flat { Packet::new_flat } else { Packet::new };
     match mk(adapter_index, pc, &pos_flat, &vel_flat, &pmass) {
         Ok(p) => Some((p, pc)),
         Err(e) => {
@@ -563,7 +560,7 @@ fn main() {
     };
     let np = f.raw_particles().0.len();
     let n_fluid = f.raw_particles().3;
-    let Some((mut pk, pc)) = build_packet(&f, s.h, a.adapter_index, a.follow_box, a.sorted) else {
+    let Some((mut pk, pc)) = build_packet(&f, s.h, a.adapter_index, a.follow_box, a.flat) else {
         return;
     };
     stage("build_packet（建卡上管线/缓冲 + 首次上传）");

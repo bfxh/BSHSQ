@@ -46,7 +46,7 @@ crates/
 ├─ vxl-phys-fluid       **WCSPH**（poly6/spiky/Tait/人工黏度/XSPH）+ Akinci 边界粒子双向 + 相位并行 + GPU 档
 ├─ vxl-phys-splat       3DGS 隐式场（σ 场 → SDF）+ `ProviderColliders` 三点查 + 渲染桥 `export_splats`
 ├─ vxl-phys-destruction Voronoi 预断裂 + 运行时切割 + 体素块→刚体（`extract_boxes`/`spawn_box_debris`）
-├─ vxl-phys-gpu         wgpu 后端：流体全程 GPU 档（千万粒）+ 宽相上卡 + 两类格表
+├─ vxl-phys-gpu         wgpu 后端：流体全程 GPU 档（千万粒）+ 宽相/窄相上卡 + 默认**格序副本档**（2b 亦开）
 ├─ vxl-phys-aero        面元气动力（逐面力/力矩 + 线性升力）
 ├─ vxl-phys-wheeled     地面行驶域骨架（悬挂/轮胎/传动）                [骨架·M2]
 ├─ vxl-phys-marine      浮力采样/波浪骨架                             [骨架·M2+]
