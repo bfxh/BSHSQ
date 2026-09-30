@@ -338,6 +338,15 @@ pub(crate) struct Binds {
 
 impl Packet {
     /// 建全部缓冲/管线（**一次性**），并上传初始 `pos` / `vel` / `pmass`。
+    ///
+    /// **默认 = 格序副本档**（2026-09-30 翻默认，`PLAN-gpu.md` §29）：两个邻域相位吃"按格序摆"的
+    /// 副本（每子步一趟 `gather` 加一趟 `scatter`），与**平铺档逐位相同**（两端的判据：
+    /// `sorted_copies_bitwise` 纯流体 + `two_class_sorted_bitwise` 2b，邻域枚举序列逐条相同 ⇒
+    /// 累加序不变 ⇒ 任何机器/驱动下都逐位一致，不是本机的运气）；收益 = 10M 2b −19.0%、
+    /// 10M 纯流体 −9.0%。翻默认的逐位证明 = `packet_grid_canary` 的冻结哈希一字未动。
+    /// 显式平铺（省 ~60 B/粒 副本显存、或要平铺语义对照）用 [`new_flat`](Packet::new_flat)；
+    /// 壁面档走 [`new_with_walls`](Packet::new_with_walls)（强制平铺——壁面改的是索引序 `dens`，
+    /// 两档互斥，见那边文档）。
     pub fn new(
         adapter_index: usize,
         cfg: PacketCfg,
@@ -345,25 +354,20 @@ impl Packet {
         vel_flat: &[f32],
         pmass: &[f32],
     ) -> Result<Self, String> {
-        Self::build(adapter_index, cfg, pos_flat, vel_flat, pmass, false).map(|(p, _)| p)
+        Self::build(adapter_index, cfg, pos_flat, vel_flat, pmass, true).map(|(p, _)| p)
     }
 
-    /// **格序副本档**（`PLAN-gpu.md` §23.1）：两个邻域相位改吃"按格序摆"的副本（每子步一趟
-    /// `gather` 加一趟 `scatter`）。10M 档实测 **208.42 → 177.50 ms/tick（−14.8%）**，且与
-    /// [`new`](Packet::new) 的结果**逐位相同**（漂移表逐字相同 ⇒ 不是换代）。
-    ///
-    /// 做成**独立构造器**而不是 `PacketCfg` 的一个字段：一来"要不要这一档"是**整条管线**的选择
-    /// （不是某次运行的参数），二来 `PacketCfg` 的字面量在 5 个探针里各写一份，加字段会逼它们各长一行
-    /// （god 门是棘轮，见 §13.7 的"棘轮管既有文件"）。与 [`new_with_walls`](Packet::new_with_walls)
-    /// **互斥**：壁面档改的是索引序的 `dens`，格序档下 `dens` 是副本 ⇒ 同时开会**静默失效**。
-    pub fn new_sorted(
+    /// **显式平铺档**：不走格序副本（不建副本缓冲、不跑 gather/scatter）。判据/对照/显存受紧的
+    /// 宿主用。与 [`new`](Packet::new) 的结果**逐位相同**（§23/§26.3 的等价性论证 + 两端判据），
+    /// 差别只有性能与显存。
+    pub fn new_flat(
         adapter_index: usize,
         cfg: PacketCfg,
         pos_flat: &[f32],
         vel_flat: &[f32],
         pmass: &[f32],
     ) -> Result<Self, String> {
-        Self::build(adapter_index, cfg, pos_flat, vel_flat, pmass, true).map(|(p, _)| p)
+        Self::build(adapter_index, cfg, pos_flat, vel_flat, pmass, false).map(|(p, _)| p)
     }
 
     /// 同 [`new`](Packet::new)，并**顺带**建好**壁面鬼影阶段**（`wall_ghost.wgsl`）：它要绑

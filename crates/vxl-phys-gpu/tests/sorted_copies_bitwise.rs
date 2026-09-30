@@ -1,4 +1,4 @@
-//! **格序副本档的逐位判据**（`PLAN-gpu.md` §23；`Packet::new_sorted` vs `Packet::new`）。
+//! **格序副本档的逐位判据**（`PLAN-gpu.md` §23；`Packet::new`（默认=格序档）vs `Packet::new_flat`）。
 //!
 //! 为什么要有这条常驻判据：格序档**默认关**，所以没有任何既有门会碰它——它那"与平铺档逐位相同"的
 //! 性质此前只由**手动跑探针**（`gpu_tick_probe --sorted` 的 A/B）看着。这条测试把同一件事钉进
@@ -113,10 +113,8 @@ fn sorted_copies_are_bitwise_identical_to_flat() {
     }
     let f = scene();
     let pc = cfg_for(&f);
-    // **金丝雀（防"假绿"）**：格序档只在**纯流体**下建得起来（守门条件，见 `sorted.rs` 头注）。
-    // 若这里不成立，`new_sorted` 会退回平铺档 ⇒ 两边跑的是同一条路 ⇒ 这条测试**空过**。所以先钉住它。
-    // （残余盲区：若将来有人把 `want_sorted` 弄丢、档静默不建，本测试仍会空过——"档真的在跑"由
-    //   `gpu_tick_probe --sorted` 的 A/B 与 §23.2 的 10M 读数（−14.8%）看着，那两条是实测不是断言。）
+    // **金丝雀（防"假绿"）**：格序档的纯流体等价性是这条判据的语义域（2b 的对拍在
+    // `two_class_sorted_bitwise`）。
     assert_eq!(
         pc.n_fluid, pc.n,
         "本判据只在纯流体下有效（格序档的守门条件；否则测试会假绿）"
@@ -125,9 +123,9 @@ fn sorted_copies_are_bitwise_identical_to_flat() {
     let pmass = vec![f.particle_mass(); f.len()];
     let mk = |sorted: bool| -> Result<Packet, String> {
         if sorted {
-            Packet::new_sorted(0, pc, &pos, &vel, &pmass)
-        } else {
             Packet::new(0, pc, &pos, &vel, &pmass)
+        } else {
+            Packet::new_flat(0, pc, &pos, &vel, &pmass)
         }
     };
     let mut flat = mk(false).expect("平铺档建包失败");

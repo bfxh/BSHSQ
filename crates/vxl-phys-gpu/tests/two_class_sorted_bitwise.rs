@@ -111,8 +111,8 @@ fn mixed_2b_sorted_and_flat_are_bitwise_identical() {
         pc.n
     );
     let (pos, vel, pmass) = flatten_all(&f);
-    let mut flat = Packet::new(0, pc, &pos, &vel, &pmass).expect("平铺档建包失败");
-    let mut sorted = Packet::new_sorted(0, pc, &pos, &vel, &pmass).expect("格序档建包失败");
+    let mut flat = Packet::new_flat(0, pc, &pos, &vel, &pmass).expect("平铺档建包失败");
+    let mut sorted = Packet::new(0, pc, &pos, &vel, &pmass).expect("格序档建包失败");
     // **判据 2**：档没建起来时，两边跑的是同一条路 ⇒ 判据 1 是**空过**（§26.3 触点 7 之前必红）。
     // 两头都断言：读点若是"恒真"就证明不了任何事（平铺档必须给 false）。
     assert!(
