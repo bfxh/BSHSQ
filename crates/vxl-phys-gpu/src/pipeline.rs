@@ -561,8 +561,8 @@ impl Packet {
     ///
     /// 为什么必须每子步：CPU 引擎在 `substep()` 开头就 `self.grid.rebuild(&self.pos, self.h)`
     /// （见 `vxl-phys-fluid/src/fluid_step.rs`）⇒ GPU 若不与其同频，两条链的分箱/邻域就不同，
-    /// 逐 tick 漂移表失去意义。
-    fn refresh_box(&mut self) -> f32 {
+    /// 逐 tick 漂移表失去意义。（`pub(crate)`：`tick_average` 的逐子步提交也要用它。）
+    pub(crate) fn refresh_box(&mut self) -> f32 {
         let t = std::time::Instant::now();
         let mut enc = self
             .device

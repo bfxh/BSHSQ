@@ -527,16 +527,27 @@ fn report(r: &Report) {
     );
 }
 
-/// `--tank` 的③b：反作用验收——GPU 逐粒回读 + **卡上每体聚合**，与 CPU 的
-/// `boundary_forces()` / `boundary_reactions()` 对拍（判据与读数口径见 `PLAN-gpu.md` §13.3）。
-fn report_reactions(pk: &Packet, f: &FluidSystem, n_fluid: u32) {
+/// `--tank` 的③b：反作用验收——GPU 逐粒回读 + **每体 tick 平均**（C2 累加回路），与 CPU 的
+/// `boundary_forces()`（末子步）/ `boundary_reactions()`（tick 平均）对拍（判据与读数口径见
+/// `PLAN-gpu.md` §13.3）。**锁步驱动一个 tick**（两侧同拍才有 1e-5 级可比性——只推 GPU 一侧
+/// 会让状态错一拍，逐粒相对差从 6.7e-7 涨到 3.3e-4，看着像接线错其实是错位）。
+fn report_reactions(
+    pk: &mut Packet,
+    f: &mut FluidSystem,
+    n_fluid: u32,
+    pc: &PacketCfg,
+    substeps: usize,
+) {
     let mut stage = ReactionStage::new(pk);
+    f.step(1.0 / 60.0, &vxl_phys_core::interop::NoProviders);
+    let gpu_react = stage.tick_average(pk, pc, substeps, None, f.boundary_spans());
     let text = stage.report(
         pk,
         n_fluid,
         f.boundary_forces(),
         f.boundary_reactions(),
         f.boundary_spans(),
+        &gpu_react,
     );
     print!("{text}");
 }
@@ -567,11 +578,11 @@ fn main() {
 
     let (drift, nan_cnt) = run_drift(&mut f, &mut pk, &pc, a.ticks, s.substeps, dt_tick);
     stage("run_drift（CPU/GPU 各推 + 逐 tick 对拍）");
-    // ③b 反作用回读 + 聚合验收（`--tank`）：GPU 逐粒 / 每体（卡上聚合）vs CPU 的
-    // `boundary_forces()` / `boundary_reactions()`——同一末态、同一子步（两边都停在
-    // 末子步边界）⇒ 只该差浮点累加序（`PLAN-gpu.md` §13.2 / §13.3）。
+    // ③b 反作用回读 + 聚合验收（`--tank`）：GPU 逐粒（末子步）/ 每体（**tick 平均**，C2 累加
+    // 回路）vs CPU 的 `boundary_forces()` / `boundary_reactions()` ⇒ 只该差浮点累加序
+    // （`PLAN-gpu.md` §13.2 / §13.3；C2 口径见 `PLAN-COUPLING.md` §5）。
     if a.tank {
-        report_reactions(&pk, &f, n_fluid as u32);
+        report_reactions(&mut pk, &mut f, n_fluid as u32, &pc, s.substeps);
     }
     stage("report_reactions（--tank 未开则 ≈0）");
     let (cpu_phase_ms, cpu_wall_ms) = time_cpu(&mut f, a.ticks, dt_tick);

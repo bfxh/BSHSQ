@@ -22,15 +22,19 @@ const SPAN_STRIDE: usize = 32;
 /// 反作用聚合阶段：管线建一次；段表/输出缓冲按**体数**变化时重建（体数不变则复用）。
 pub struct ReactionStage {
     pipe: wgpu::ComputePipeline,
+    /// **C2 累加入口**（`reduce_add`）：向 `react_b` 就地累加；`pipe`（覆写入口）留作快照/自洽。
+    pipe_add: wgpu::ComputePipeline,
     bgl: wgpu::BindGroupLayout,
     spans_b: Option<wgpu::Buffer>,
     react_b: Option<wgpu::Buffer>,
     rb: Option<wgpu::Buffer>,
     n_bodies: usize,
+    /// `begin_tick` 清账用的全零字节（与 `react_b` 同尺寸，prepare 时重建 ⇒ 热路径零分配）。
+    zeros: Vec<u8>,
 }
 
 impl ReactionStage {
-    /// 建管线（`reduce.wgsl` 的 `reduce` 入口）。缓冲留到 `aggregate` 按体数分配。
+    /// 建管线（`reduce.wgsl` 的 `reduce`/`reduce_add` 两入口共用一张布局）。缓冲留到 `aggregate` 按体数分配。
     pub fn new(pkt: &Packet) -> Self {
         let sh = pkt
             .device
@@ -46,13 +50,16 @@ impl ReactionStage {
             &[(0, Kind::Ro), (1, Kind::Ro), (2, Kind::Ro), (3, Kind::Rw)],
         );
         let pipe = mk_pipe(&pkt.device, &bgl, &sh, "p.reduce", "reduce");
+        let pipe_add = mk_pipe(&pkt.device, &bgl, &sh, "p.reduce_add", "reduce_add");
         Self {
             pipe,
+            pipe_add,
             bgl,
             spans_b: None,
             react_b: None,
             rb: None,
             n_bodies: 0,
+            zeros: Vec::new(),
         }
     }
 
@@ -77,13 +84,17 @@ impl ReactionStage {
         self.react_b = Some(mk(
             "r.react",
             (n * 24) as u64,
-            wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            // COPY_DST：C2 的 `begin_tick` 每 tick 用 `write_buffer` 清账（缺它第二个 tick 即崩）。
+            wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
         ));
         self.rb = Some(mk(
             "r.rb",
             (n * 24) as u64,
             wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         ));
+        self.zeros = vec![0u8; n * 24];
         self.n_bodies = n;
     }
 
@@ -104,11 +115,30 @@ impl ReactionStage {
         }
     }
 
-    /// **聚合**：`out` 的边界段 → 每体 `(体 id, 力, 绕体原点的力矩)`。
+    /// 绑定组（三处同一张）：`pos | out | spans | react`。
+    fn make_bg(
+        &self,
+        pkt: &Packet,
+        spans_b: &wgpu::Buffer,
+        react_b: &wgpu::Buffer,
+    ) -> wgpu::BindGroup {
+        pkt.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("p.bg_reduce"),
+            layout: &self.bgl,
+            entries: &[
+                ent(0, &pkt.pos_b),
+                ent(1, &pkt.out_b),
+                ent(2, spans_b),
+                ent(3, react_b),
+            ],
+        })
+    }
+
+    /// **快照聚合**（覆写入口 `reduce`）：`out` 的边界段 → 每体 `(体 id, 力, 绕体原点的力矩)`。
     ///
     /// 返回序 = 传入 `spans` 的段序（与 CPU `boundary_reactions()` 同序 ⇒ 可直接对拍）。
-    /// 只在**末子步之后**调用（读的就是末子步的 `out` 与当时的 `pos`，与 CPU 的
-    /// `aggregate_reactions` 同一时刻口径）。
+    /// 读的是**当前** `out`（= 末子步快照口径）——C2 起耦合回路的 tick 平均走
+    /// [`Self::tick_average`]，本方法留给 report 的自洽腿（同一份 `out` 换序求和核对）。
     pub fn aggregate(
         &mut self,
         pkt: &Packet,
@@ -119,25 +149,11 @@ impl ReactionStage {
         }
         self.prepare(pkt, spans.len());
         self.upload_spans(pkt, spans);
-        let (Some(spans_b), Some(react_b), Some(rb)) = (
-            self.spans_b.as_ref(),
-            self.react_b.as_ref(),
-            self.rb.as_ref(),
-        ) else {
-            // `prepare` 之后不可能走到这里（缓冲三件套同生同灭）——留个明确出口而不是 unwrap。
+        let (Some(spans_b), Some(react_b)) = (self.spans_b.as_ref(), self.react_b.as_ref()) else {
+            // `prepare` 之后不可能走到这里（缓冲同生同灭）——留个明确出口而不是 unwrap。
             return Vec::new();
         };
-        let bg = pkt.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("p.bg_reduce"),
-            layout: &self.bgl,
-            entries: &[
-                ent(0, &pkt.pos_b),
-                ent(1, &pkt.out_b),
-                ent(2, spans_b),
-                ent(3, react_b),
-            ],
-        });
-        let bytes = (spans.len() * 24) as u64;
+        let bg = self.make_bg(pkt, spans_b, react_b);
         let mut enc = pkt
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -145,8 +161,21 @@ impl ReactionStage {
             });
         // 一个体一个 workgroup（段内并行会改求和序 ⇒ 只有 gid.x < 体数 的那条线程干活）。
         dispatch(&mut enc, &self.pipe, &bg, spans.len() as u32);
-        enc.copy_buffer_to_buffer(react_b, 0, rb, 0, bytes);
+        self.encode_copy(&mut enc);
         pkt.queue.submit(Some(enc.finish()));
+        self.download(pkt, spans)
+    }
+
+    /// **回读并解码** `rb`（`aggregate`/`read_tick` 共用）：映射 → 每体 `(体 id, 力, 力矩)`。
+    /// 段序 = 传入 `spans` 的段序。**不除子步数**（时间加权归调用方）。
+    fn download(
+        &mut self,
+        pkt: &Packet,
+        spans: &[(u32, Vec3, u32, u32)],
+    ) -> Vec<(u32, Vec3, Vec3)> {
+        let Some(rb) = self.rb.as_ref() else {
+            return Vec::new();
+        };
         pkt.poll_wait().ok();
         let slice = rb.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
@@ -174,11 +203,99 @@ impl ReactionStage {
         out
     }
 
-    /// **验收报告**（`gpu_tick_probe --tank` 用）：GPU 逐粒 vs CPU 逐粒 + GPU 每体聚合 vs
+    /// **tick 开头清账**（C2 累加口径）：`react_b` 写零。`queue.write_buffer` 排在**下一次提交
+    /// 之前**生效 ⇒ 必先于本 tick 的第一个子步；首 tick 缓冲未建时跳过（WebGPU 建缓冲即全零
+    /// ⇒ 同样正确）。
+    pub(crate) fn begin_tick(&self, pkt: &Packet) {
+        if let Some(b) = self.react_b.as_ref() {
+            pkt.queue.write_buffer(b, 0, &self.zeros);
+        }
+    }
+
+    /// **每子步一次**（C2）：派 `reduce_add`（向 `react_b` 累加本子步的每体聚合）。
+    /// 编进调用方的 encoder（与子步同一提交，不多付提交）；段表随调用上传（幂等、量小）。
+    pub(crate) fn encode_accumulate(
+        &mut self,
+        pkt: &Packet,
+        enc: &mut wgpu::CommandEncoder,
+        spans: &[(u32, Vec3, u32, u32)],
+    ) {
+        if spans.is_empty() {
+            return;
+        }
+        self.prepare(pkt, spans.len());
+        self.upload_spans(pkt, spans);
+        let (Some(spans_b), Some(react_b)) = (self.spans_b.as_ref(), self.react_b.as_ref()) else {
+            return;
+        };
+        let bg = self.make_bg(pkt, spans_b, react_b);
+        dispatch(enc, &self.pipe_add, &bg, spans.len() as u32);
+    }
+
+    /// 把 `react_b`（= Σ_s）拷进回读缓冲（编进调用方的 encoder；`aggregate` 编进自己的那趟）。
+    pub(crate) fn encode_copy(&self, enc: &mut wgpu::CommandEncoder) {
+        if let (Some(react_b), Some(rb)) = (self.react_b.as_ref(), self.rb.as_ref()) {
+            enc.copy_buffer_to_buffer(react_b, 0, rb, 0, (self.n_bodies * 24) as u64);
+        }
+    }
+
+    /// **tick 末读账**（配 `encode_copy`，整 tick 只此一次同步）：每体 `(体 id, Σ_s 力, Σ_s 力矩)`。
+    pub(crate) fn read_tick(
+        &mut self,
+        pkt: &Packet,
+        spans: &[(u32, Vec3, u32, u32)],
+    ) -> Vec<(u32, Vec3, Vec3)> {
+        if spans.is_empty() {
+            return Vec::new();
+        }
+        self.download(pkt, spans)
+    }
+
+    /// **C2 的整个 tick**（步进器/探针共用）：清账 →（每子步：子步命令链 + `reduce_add` 累加）→
+    /// 末子步回拷 → 一次回读 → ÷ 子步数。返回每体 **tick 平均力**，与 CPU
+    /// `boundary_reactions()` 同口径（`PLAN-COUPLING.md` §5 / D1(b)）。
+    /// 逐子步提交：`recompute_box` 档的 uniform 必须"每子步刷新 ⇒ 立即消费"（整批一提交会让
+    /// 所有子步读到最后一口箱子）；固定箱档的提交开销 µs 级、耦合 tick ≥ 数 ms ⇒ 可忽略。
+    pub fn tick_average(
+        &mut self,
+        pk: &mut Packet,
+        pc: &PacketCfg,
+        substeps: usize,
+        walls: Option<&WallStage>,
+        spans: &[(u32, Vec3, u32, u32)],
+    ) -> Vec<(u32, Vec3, Vec3)> {
+        let sub = substeps.max(1);
+        let dt_sub = (1.0f32 / 60.0) / sub as f32;
+        self.begin_tick(pk);
+        for si in 0..sub {
+            if pc.recompute_box {
+                pk.refresh_box();
+            }
+            let mut enc = pk
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+            pk.encode_substep(&mut enc, pc, dt_sub, 0b111_1111, walls);
+            self.encode_accumulate(pk, &mut enc, spans);
+            if si + 1 == sub {
+                self.encode_copy(&mut enc);
+            }
+            pk.queue.submit(Some(enc.finish()));
+        }
+        let inv = 1.0 / sub as f32;
+        self.read_tick(pk, spans)
+            .into_iter()
+            .map(|(b, f, t)| (b, f * inv, t * inv))
+            .collect()
+    }
+
+    /// **验收报告**（`gpu_tick_probe --tank` 用）：GPU 逐粒 vs CPU 逐粒 + GPU 每体 tick 平均 vs
     /// CPU `breact`，外加一条"同一批项换序求和"的自洽核对。
     ///
     /// 参数取**朴素类型**（本 crate 对 `vxl-phys-fluid` 只有 `[dev-dependencies]` ⇒ 不引用它的
     /// 类型）；CPU 侧直接喂 `boundary_forces()` / `boundary_reactions()` / `boundary_spans()`。
+    /// **C2**：每体一腿改收 `gpu_react`（**tick 平均**，调用方从 [`Self::tick_average`] 的累加
+    /// 回路取得——单份 `out` 里只有末子步快照，报告自身重造不出平均值）；自洽腿仍是快照口径
+    /// （`aggregate` 覆写重派一次，与逐粒同取末子步 ⇒ 换序只该差舍入）。
     pub fn report(
         &mut self,
         pkt: &Packet,
@@ -186,6 +303,7 @@ impl ReactionStage {
         cpu_force: &[Vec3],
         cpu_react: &[(u32, Vec3, Vec3)],
         spans: &[(u32, Vec3, u32, u32)],
+        gpu_react: &[(u32, Vec3, Vec3)],
     ) -> String {
         let gf = pkt.read_boundary_forces(n_fluid);
         if gf.len() < cpu_force.len() * 6 {
@@ -195,7 +313,7 @@ impl ReactionStage {
                 cpu_force.len() * 6
             );
         }
-        // ① 逐粒（与 §13.2 的验收口径同一组数）
+        // ① 逐粒（与 §13.2 的验收口径同一组数；两侧都是**末子步快照**口径）
         let (mut mx, mut scale) = (0.0f32, 0.0f32);
         let (mut sc, mut sg) = (Vec3::ZERO, Vec3::ZERO);
         for (k, b) in cpu_force.iter().enumerate() {
@@ -214,14 +332,12 @@ impl ReactionStage {
             sg.length(),
             (sc - sg).length()
         );
-        // ② 每体（卡上聚合）——相对量用 CPU 侧的 Σ|F|、Σ|τ| 标定
-        let gb = self.aggregate(pkt, spans);
+        // ② 每体（**tick 平均**：调用方从 C2 累加回路取得）——相对量用 CPU 侧的 Σ|F|、Σ|τ| 标定
         let (mut mf, mut mt) = (0.0f32, 0.0f32);
         let (mut sf, mut st) = (0.0f32, 0.0f32);
-        let mut tf = Vec3::ZERO;
         let mut rows = String::new();
         for (i, &(body, f, tau)) in cpu_react.iter().enumerate() {
-            let (g, gt) = match gb.get(i) {
+            let (g, gt) = match gpu_react.get(i) {
                 Some(&(_, g, gt)) => (g, gt),
                 None => (Vec3::ZERO, Vec3::ZERO),
             };
@@ -229,7 +345,6 @@ impl ReactionStage {
             mt = mt.max((tau - gt).length());
             sf += f.length();
             st += tau.length();
-            tf += g;
             if i < 8 {
                 rows.push_str(&format!(
                     "  │   体 {body}：|ΔF| {:.3e} N / |Δτ| {:.3e}\n",
@@ -239,16 +354,26 @@ impl ReactionStage {
             }
         }
         s.push_str(&format!(
-            "  ├ 反作用【每体】{} 体（卡上聚合）：max |ΔF| = {mf:.3e} N（相对 Σ|F_cpu| = {:.2e}）\
+            "  ├ 反作用【每体·tick 平均】{} 体：max |ΔF| = {mf:.3e} N（相对 Σ|F_cpu| = {:.2e}）\
              / max |Δτ| = {mt:.3e}（相对 Σ|τ_cpu| = {:.2e}）\n",
             cpu_react.len(),
             mf / sf.max(1e-30),
             mt / st.max(1e-30)
         ));
         s.push_str(&rows);
+        // ③ 自洽（**末子步快照**口径，②③不同口径别混）：`aggregate` 覆写重派一次，
+        // 与逐粒同取当前 `out` ⇒ 同一批项换序求和，只该差舍入。
+        let gb = self.aggregate(pkt, spans);
+        let (mut sb, mut sp) = (Vec3::ZERO, Vec3::ZERO);
+        for &(_, g, _) in gb.iter() {
+            sb += g;
+        }
+        for k in 0..cpu_force.len() {
+            sp += Vec3::new(gf[k * 6], gf[k * 6 + 1], gf[k * 6 + 2]);
+        }
         s.push_str(&format!(
-            "  └ 自洽：Σ_体 F_gpu − Σ_粒 F_gpu = {:.3e} N（同一批项换序求和 ⇒ 只该差舍入）\n",
-            (tf - sg).length()
+            "  └ 自洽：Σ_体 F_gpu(末子步) − Σ_粒 F_gpu = {:.3e} N（同一批项换序求和 ⇒ 只该差舍入）\n",
+            (sb - sp).length()
         ));
         s
     }

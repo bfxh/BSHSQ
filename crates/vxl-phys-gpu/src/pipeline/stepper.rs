@@ -2,7 +2,8 @@
 //!
 //! 用法：宿主用**全量**粒子（流体 + 边界段）建好 `Packet`（一次），交给门面；此后每 tick
 //! 门面重建好边界段后调 [`GpuFluidStepper::step`]，本档只把**边界段**写回卡上
-//! （`upload_boundary_segment`）→ 卡上推进一个 tick → 聚合每体 `(F, τ)`。
+//! （`upload_boundary_segment`）→ 卡上推进一个 tick → 聚合每体 `(F, τ)`
+//! （**C2 起 = 每子步卡上累加的 tick 平均**，与 CPU `boundary_reactions()` 同口径）。
 //!
 //! **三条不变式**（对应 `PLAN-gpu.md` §13.7 的契约）：
 //! - **粒子数固定**：`n_fluid` 与边界段长度必须与建 `Packet` 时一致（段长变了要重建 `Packet`；
@@ -95,18 +96,17 @@ impl FluidStepper for GpuFluidStepper {
         assert_eq!(pmass.len(), pos.len(), "pmass 长度与全粒子数不符");
         self.pk
             .upload_boundary_segment(n_fluid as u32, &pos[n_fluid..], &vel[n_fluid..]);
-        self.pk.run_stages_with(
-            &self.pc,
-            0b111_1111,
-            1,
-            self.substeps,
-            false,
-            self.walls.as_ref(),
-            // 门面默认同步（管线档由调用方按需走 `run_deferred`；见 `PLAN-gpu` §19.5）。
-            false,
-        );
+        // **C2（卡上同口径，`PLAN-COUPLING.md` §5）**：整 tick 交给 `tick_average` ——
+        // 每子步 `reduce_add` 卡上累加、末尾主机 ÷ 子步数 ⇒ `reactions()` 与 CPU
+        // `boundary_reactions()` 同为 **dt_sub 时间加权的 tick 平均力**（原为末子步快照）。
         self.reactions.clear();
-        self.reactions.extend(self.stage.aggregate(&self.pk, spans));
+        self.reactions.extend(self.stage.tick_average(
+            &mut self.pk,
+            &self.pc,
+            self.substeps,
+            self.walls.as_ref(),
+            spans,
+        ));
     }
 
     fn reactions(&self) -> &[(u32, Vec3, Vec3)] {
