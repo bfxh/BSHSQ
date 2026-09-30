@@ -1,8 +1,9 @@
 // **格序副本的"重排"与"回写"**（`PLAN-gpu.md` §23.1 第 1、3 步；默认关，见 `PacketCfg::sort_copies`）。
 //
 // 为什么要它：两个邻域相位吃"按格序摆"的数据时快 **1.56×**（10M 档 44.49 → 28.49 ms/子步，§21.2），
-// 但数据得先搬过去。这一版只搬**会变的三张**（pos/vel/press = 28 B/粒）：纯流体场景里 `pmass` 全是
-// 常量 ⇒ 在建管线时填一次，不必每子步重排。（成本实测 2.54 + 2.15 ms/子步，§22。）
+// 但数据得先搬过去。搬**四张**（pos/vel/press + pmass = 32 B/粒）：`pmass` **不能**当常量填一次 ——
+// 2b 的边界粒子质量是 **Akinci 自标定** `V_b = 1/ΣW`、与流体那个 `s³` 量级**不同**（§26.3 触点 5），
+// 沿用常量会让边界段的质量静默用错 ⇒ 力/反作用整片失真。（成本实测 2.54 + 2.15 ms/子步，§22。）
 //
 // 两个入口：
 //   - `gather` ：索引序 → 格序。`x_c[m] = x[items[m]]`（**散读 + 连续写**；`items` 就是引擎那张
@@ -18,7 +19,7 @@
 // ⚠️ 两个入口都按 `n_total`（全部粒子）搬运；`Params` 只读末段的 `n_total`，前 76 字节按相位 uniform
 // 的布局占位（不能只声明一个小 struct——字节偏移会错）。
 //
-// 绑定：0 params | gather: 1 items 2 pos 3 vel 4 press 5 pos_c 6 vel_c 7 press_c
+// 绑定：0 params | gather: 1 items 2 pos 3 vel 4 press 5 pos_c 6 vel_c 7 press_c 8 pmass 9 pmass_c
 //                   | scatter: 1 items 2 out_c 3 out
 
 struct Params {
@@ -37,6 +38,8 @@ struct Params {
 @group(0) @binding(5) var<storage, read_write> dst_a: array<f32>;
 @group(0) @binding(6) var<storage, read_write> dst_b: array<f32>;
 @group(0) @binding(7) var<storage, read_write> dst_c: array<f32>;
+@group(0) @binding(8) var<storage, read> src_d: array<f32>;
+@group(0) @binding(9) var<storage, read_write> dst_d: array<f32>;
 
 /// 二维分派展平（与各相位核同式，见 `probe::split_2d`）。
 fn flat(gid: vec3<u32>) -> u32 {
@@ -55,6 +58,7 @@ fn gather(@builtin(global_invocation_id) gid: vec3<u32>) {
         dst_b[m * 3u + c] = src_b[k * 3u + c];
     }
     dst_c[m] = src_c[k];
+    dst_d[m] = src_d[k];
 }
 
 @compute @workgroup_size(64)

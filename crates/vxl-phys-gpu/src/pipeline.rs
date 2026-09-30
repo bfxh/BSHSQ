@@ -29,7 +29,7 @@ mod gpu_setup;
 mod gpu_types;
 mod reaction;
 mod readback;
-mod sorted;
+pub mod sorted;
 mod stepper;
 mod two_class;
 mod wall_table;
@@ -392,12 +392,10 @@ impl Packet {
         let prm = make_params(&device, &cfg, n, total);
         let pipes = make_pipelines(&device);
         let binds = make_bind_groups(&device, &bufs, &prm, &pipes);
-        // **格序副本档**：见 `sorted.rs` 的适用范围说明——这里只做「纯流体」这条守门
-        //（壁面档那条由构造器分家保证：`new_with_walls` 走平铺档）。
-        let sorted = if want_sorted && cfg.n_fluid == cfg.n {
-            Some(sorted::make_sorted(
-                &device, &queue, n, cfg.mass, &bufs, &prm, &pipes,
-            ))
+        // **格序副本档**：2b 由 §26.3 触点 5–7 打开（两类格表 + 每子步 gather 的 `pmass`）；壁面档那条
+        // 由构造器分家保证（`new_with_walls` 走平铺档 ⇒ 两档同开时仍退回平铺）。
+        let sorted = if want_sorted {
+            Some(sorted::make_sorted(&device, &queue, n, &bufs, &prm, &pipes))
         } else {
             None
         };

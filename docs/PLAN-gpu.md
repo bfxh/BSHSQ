@@ -2802,3 +2802,41 @@ scan 单独炸**（scan 才是写 `start` 的那一步）、**放大 4× 仍炸*
 **剩余（§26.3 触点 5–8 + 判据 1/2/4）**：`sorted.rs` 的 `pmass_c` 改每子步 gather（边界粒子质量是
 Akinci 自标定、与流体不同 ⇒ 常量会静默错）、`make_sorted_binds` 补槽 9、放开 `n_fluid == cfg.n`
 那道门、2b 混合场景"格序 vs 平铺"逐位判据 + `is_sorted()` 读点 + 壁面档同开仍退回平铺。
+
+#### 26.3.4 触点 5–8 与判据 1/2/4（2026-09-30 本轮）：**2b 的格序副本档已开**
+
+**改动（三条）**：
+1. **触点 5（`pmass` 每子步重排）**：`reorder.wgsl` 的 `gather` 加第 4 路（槽 8/9 = `pmass`/`pmass_c`）；
+   `CopyBufs` 不再给 `pmass_c` 填常量（`make_sorted` 的 `mass` 参数随之删掉）。**为什么必须**：
+   2b 的边界粒子质量是 **Akinci 自标定** `V_b = 1/ΣW`，与流体那个 `s³` 量级不同 ⇒ 沿用常量会让
+   边界段的质量静默用错。**纯流体回归**：`cfg.mass` 与 `f.particle_mass()` 同值（探针/判据都这么
+   建 `pmass`）⇒ 第 4 路搬的是同一个位模式 ⇒ `sorted_copies_bitwise` 仍逐位相同（已验）。
+2. **触点 7（门）**：`Packet::build` 的 `want_sorted && cfg.n_fluid == cfg.n` → **只留 `want_sorted`**；
+   壁面档那条**不变**（`new_with_walls` 传 `want_sorted = false` ⇒ 两档同开仍退回平铺，判据 4 守）。
+   触点 6（`make_sorted_binds` 的槽 9 切片）与触点 8（回读语义）**本片前已就位**。
+3. **判据 2 的读点**：新增 `pipeline::sorted::sorted_active(&Packet)`（**自由函数**——`Packet` 是登记
+   债务，方法只准减）；`pipeline::sorted` 模块改 `pub`（同行改动，不涨行数）。
+
+**新判据 `tests/two_class_sorted_bitwise.rs`（2 例，需适配器）**：
+- **判据 1 + 2**：真 2b 场景（`support::scene_2b`：晶格 16³ + 地板 ⇒ **流体 4096 / 边界 5120**）
+  同 cfg 跑两档 3 tick × 4 子步 ⇒ **位置 27648/27648、速度 27648/27648 逐位相同**；
+  读点**两头断言**（`new_sorted` 建了、`new` 没建）——"档没建 ⇒ 空过"这条路径被堵住；
+- **判据 4**：`new_with_walls` 出来的包 `sorted_active == false`（退回平铺的读点）。
+
+**读数与门禁（本轮）**：`cargo test -p vxl-phys-gpu` 12 个测试二进制**全绿**（新增 1 个）；
+canary 哈希 `0x9fae52a5be7ed274` 与 y_min（−1.81740 / CPU −1.81726）**一字未动**；
+`gpu_grid_probe 74` 纯流体 CPU ≡ GPU 表哈希 `0x6308f0e1e5bee72b`、overflow 0；
+`scripts/gate_all.sh` 全绿（含金样门三段）。
+
+**性能读数**（本机 `gpu_tick_probe`，30 tick × 4 子步，3 次取最小；格序档这一步的**收益正面兑现**）：
+
+| 场景 | 平铺 | 格序 | 变化 |
+|---|---|---|---|
+| 2b（流体 64 000 + 边界 46 720，`--tank`） | 4.91 ms/tick | **4.14** ms/tick | **−15.7%** |
+| 纯流体 64 000 | 5.60 ms/tick | **5.09** ms/tick | −9.1% |
+
+相位消融里省的是**密度**（2.96 → 2.54）与**力**（4.70 → 4.14），网格两遍**不额外收费**（分箱 0.23/0.23、
+扫描占位 0.92 → 0.89、规范化 1.26 → 1.29）。两档的 GPU vs CPU 漂移表与反作用读数**逐字相同**
+（NaN 0 / overflow 0 / 逐粒 max|ΔF| 1.236e-4 N / 上位体自洽 4.134e-4 N）。
+⚠️ **未做的对照（如实记）**：本片给 `gather` 加了第 4 路（`pmass`，+4 B/粒）⇒ 格序档的成本构成变了，
+**"第 4 路值多少"没有前后 A/B**；§22 那组 `2.54 + 2.15 ms/子步`（10M 档）也应重测。
