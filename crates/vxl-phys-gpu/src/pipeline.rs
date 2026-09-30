@@ -473,7 +473,10 @@ impl Packet {
         for x in [dt_sub, vmax, cfg.xsph_eps] {
             ip.extend_from_slice(&x.to_le_bytes());
         }
-        ip.extend_from_slice(&self.n.to_le_bytes());
+        // ⚠️ 末段写的是**流体粒数**（不是总粒数 `self.n`）：积分只该跑 `[0, n_fluid)`，而分派覆盖会
+        // 越过它（`⌈n_fluid/64⌉×64`；二维展开后是 `65535×64×gy`）⇒ 守卫必须是 `nf`，否则 2b 档会把
+        // 尾部（或整段）边界粒子也积分了。见 `integrate.wgsl` 与 `tests/frozen_boundary.rs`。
+        ip.extend_from_slice(&cfg.n_fluid.to_le_bytes());
         ip.extend_from_slice(&[0u8; 16]);
         self.queue.write_buffer(&self.int_params_b, 0, &ip);
 
