@@ -3009,3 +3009,45 @@ Error in Device::poll: Validation Error / Caused by: Parent device is lost
 分配额度不同源，`scan` 会写到表尾之外（**storage 写不校验 ⇒ device lost**，与 §26.3.3 同一类机制）；
 ③ 判据：n=180 的 `--box=follow` 转绿 + 小档逐位不变。
 （本条**未修**，如实记档；它不影响默认档与本次的两处修复。）
+
+### 28.2 根因找到并修掉：类 1 表的**切片绑定**与核里偏移**不同源**（2026-09-30 同日）
+
+**复现收窄（两条诊断测试 `tests/follow_bisect.rs`，`#[ignore]`）**：
+- 修完 §28.1 的分派后，`--box=follow` 在 n=162 仍死（tick 1 内 device lost）；
+- 把**探针的 cfg** 逐字段搬进测试 ⇒ **炸**；把 `grid_bins_cap` 从 `1 << 20` 换回建包箱 ⇒ **活**。
+  ⇒ 触发条件 = **`cap_total > 建包箱`**（探针 follow 档正是给 `1 << 20`）。
+
+**机制（一条链）**：相位核的槽 9（类 1 表 `bstart`）由主机在**建包时**按 `start_b.size()/2`
+（= `align8(cap_total+1)`）做**静态切片绑定**；而核里的两段枚举按**运行时** `cls_off()`（=
+`align8(T_r+1)`）看待它。`cap_total ≠ T_r`（箱跟随档**必然**发生：运行时箱由卡上 `box_setup`
+现算）⇒ 切片与核里的偏移**错位 Δ = align8(cap+1) − align8(T_r+1)** ⇒
+- 错位段落在类 1 表**内部** ⇒ `bstart[ci]` 读到**别的格**的前缀值 ⇒ 幻影边界邻居（物理错误）；
+- 落在**从未写入的区域**（纯流体档永远不写类 1 区；2b 档 `scan` 只写 `[cls_off(T_r), 2·cls_off(T_r))`）
+  ⇒ **未初始化内存**：驱动给零 ⇒ 边界段全空（静默），给垃圾 ⇒ `g1−g0` 天文数字 ⇒ GPU 死循环 ⇒
+  **TDR ⇒ device lost**（n=162/180；n=40/140 拿到的是零 ⇒ 只有 0.009~0.011 m 的漂移）。
+
+**这一个 bug 解释了两件事**：follow 档的 device lost（§28.1 的"第二层"）**和** follow 档那两个
+数量级的漂移（n=40：0.00914 m、n=140：0.01052 m，对照 fixed 档 2e-5）——前者是垃圾、后者是零，
+同一处错位的两种颜料。
+
+**修法（根因档）**：**删除槽 9 的静态切片绑定**；相位核（density/force）从同一张 `start_b` 的
+`cell_start` 上按 `tstride = ((nx·ny·nz + 8)/8)·8` **现算**类 1 基址 —— 与 `grid.wgsl::table_stride`
+**同式同源**（refresh_box 每子步把新 dims 同时写进两份 uniform ⇒ 偏移永远一致）。配套：
+布局声明去掉槽 9（`"ur_r_rrw r"` → `"ur_r_rrw"`、力布局删 `(9, Kind::Ro)` 行）、两个绑定组删
+`class1_entry`（`two_class.rs` 整个函数删除）、**建包时一次性清零 `start_b`**（纯流体档类 1 区
+永不写入 ⇒ 必须是确定性的零）。
+
+**验证（全过）**：
+- **位级回归**：canary 哈希 `0x9fae52a5be7ed274` 一字未动；`two_class_sorted_bitwise`（2b 两档
+  27648/27648 逐位）、`frozen_boundary`、`sorted_copies_bitwise` 全绿（fixed 档本就同源 ⇒ 修法逐位中性）；
+- **follow 档**：n=162（探针 cfg）1 tick **存活**（修前 tick 1 即死）；n=180 跑完 6 tick（rc=0，
+  **163.49 ms/tick**@20 tick）；**n=40 漂移 0.00914 → 0.00000**（边界贡献恢复）；
+- **新常驻判据 `follow_box_drift_stays_bounded`**（非 ignore，110k 档 ≈6 s）：follow 档 2 tick 后
+  GPU vs CPU 的 |Δpos|max < 2e-3 m（修后 ~1e-5 ⇒ 100× 余量；修前 0.009 必红）。金丝雀断言
+  `cap_total > 建包箱`（否则判据测不到失配）。
+
+**教训（可移植，与 §28 同族）**：**"主机侧的静态偏移"与"核里按运行时参数现算的偏移"必须同源**——
+凡是核里按 uniform 参数推导基址/步长，主机就不得用建包时的快照去切缓冲；两者的参数源一旦分叉
+（这里 = 运行时箱 vs 建包箱），错位读进的要么是幻影数据要么是未初始化内存。判据侧：**cheap 场景
+（110k）+ 漂移阈值**就能钉住这一类失配，不必上 4.19M——但**触发条件要写进金丝雀**（cap > 建包箱），
+否则修复前它可能因驱动给零而"只是漂移大"，修复后则稳定绿。

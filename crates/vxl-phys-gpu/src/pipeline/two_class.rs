@@ -11,26 +11,13 @@
 //! ⚠️ **箱刷新（`recompute_box`）必须同步两份 uniform**（`refresh_box` 里已补）——否则两遍用
 //! 不同的盒/`total` ⇒ 表几何不一致。
 //!
-//! **对齐**：类 1 表以**切片**绑定 ⇒ 偏移须满足 `min_storage_buffer_offset_alignment`（本机 32 B）
-//! ⇒ 表步长 = `align8(total+1)`（与 `grid.wgsl::table_stride` 同式）；三张按格数的表各
-//! `2 × stride × 4` 字节，前段类 0、后段类 1。
+//! **类 1 表怎么被相位核看见**：不单独绑定 —— 相位核（density/force）从**同一张** `start_b`
+//! 的 `cell_start` 上按 `tstride = align8(运行时 total + 1)` 现算基址（与网格两遍同式同源）。
+//! ⚠️ §28.2 的教训：早先由主机按**建包时的 `cap_total`** 做静态切片绑定，`cap_total ≠ 运行时
+//! total`（箱跟随档必然发生）时切片与核里的偏移不同源 ⇒ 读进从未写入的区域 ⇒ 未初始化垃圾 ⇒
+//! 死循环（device lost）或边界段静默全空（物理错误）。
 use super::{dispatch, ent, Binds, Bufs, Packet, PacketCfg, Params, Pipes};
 use wgpu::util::DeviceExt;
-
-/// 类 1 表的**切片视图**（相位核的槽 9）：偏移/长度取 `start_b.size()/2`（缓冲 = `2 × 对齐步长`）
-/// ⇒ 不必知道 `total`。**必须切片**：绑整段会读到类 0 的错区（实测症状：`sorted_copies_bitwise`
-/// 红 —— 边界段取到类 0 的界 ⇒ 幻影邻居）。
-pub(crate) fn class1_entry(bufs: &Bufs) -> wgpu::BindGroupEntry<'_> {
-    let half = bufs.start_b.size() / 2;
-    wgpu::BindGroupEntry {
-        binding: 9,
-        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-            buffer: &bufs.start_b,
-            offset: half,
-            size: std::num::NonZeroU64::new(half),
-        }),
-    }
-}
 
 /// 网格 uniform（48 B）：`gmin(3f32) | inv | nx | ny | nz | n | total | cap | n_fluid | class_lo`。
 /// `class_lo = 0` ⇒ 类 0（`[0, n_fluid)`）；非 0 ⇒ 类 1（`[n_fluid, n)`）。
@@ -102,7 +89,6 @@ pub(crate) fn make_bind_groups(
             ent(5, &bufs.start_b),
             ent(6, &bufs.items_b),
             ent(7, &bufs.dens_b),
-            class1_entry(bufs),
         ],
     });
     let bg_force = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -118,7 +104,6 @@ pub(crate) fn make_bind_groups(
             ent(6, &bufs.items_b),
             ent(7, &bufs.dens_b),
             ent(8, &bufs.out_b),
-            class1_entry(bufs),
         ],
     });
     let bg_eos = device.create_bind_group(&wgpu::BindGroupDescriptor {

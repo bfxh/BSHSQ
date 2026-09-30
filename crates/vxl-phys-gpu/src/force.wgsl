@@ -41,9 +41,7 @@ struct Params {
 @group(0) @binding(6) var<storage, read> cell_items: array<u32>;
 @group(0) @binding(7) var<storage, read> dens: array<f32>;
 @group(0) @binding(8) var<storage, read_write> out: array<f32>;
-/// **类 1（边界）的格表**（`PLAN-gpu.md` §26.3）：两段枚举的边界段；单类档绑到 `start_b`
-/// 的后半段（全零）⇒ 边界段恒空。
-@group(0) @binding(9) var<storage, read> bstart: array<u32>;
+// 类 1（边界）的格表**不再单独绑定**：与 `density.wgsl` 同款，基址在核里按运行时 dims 现算。
 
 fn p3(i: u32) -> vec3<f32> {
     return vec3<f32>(pos[i * 3u], pos[i * 3u + 1u], pos[i * 3u + 2u]);
@@ -75,6 +73,9 @@ fn force(@builtin(global_invocation_id) gid: vec3<u32>) {
     let az = axis_idx(P.gmin.z, pi.z, P.inv, P.nz);
     let ny = i32(P.ny);
     let nz = i32(P.nz);
+    // **类 1 表基址** = `table_stride`（与 `grid.wgsl` 同式、从**运行时** dims 现算）——
+    // 理由见 `density.wgsl` 同处注释（§28.2）。
+    let tstride = ((P.nx * P.ny * P.nz + 8u) / 8u) * 8u;
     // 流体：以重力起手（加速度口径）；边界：从 0 起（反作用只含成对力——CPU 的 `bforce` 同此，
     // 且每子步清零重累）。
     var a = select(P.gvec, vec3<f32>(0.0, 0.0, 0.0), boundary);
@@ -93,8 +94,8 @@ fn force(@builtin(global_invocation_id) gid: vec3<u32>) {
                 // 自己那一遍网格装箱）⇒ 判类用段序号，见 `density.wgsl` 同处注释。
                 let a0 = cell_start[ci];
                 let b0 = cell_start[ci + 1u];
-                let g0 = P.n_fluid + bstart[ci];
-                let g1 = P.n_fluid + bstart[ci + 1u];
+                let g0 = P.n_fluid + cell_start[tstride + ci];
+                let g1 = P.n_fluid + cell_start[tstride + ci + 1u];
                 let seg1 = b0 - a0;
                 for (var q = 0u; q < seg1 + (g1 - g0); q = q + 1u) {
                     let fs = q < seg1;

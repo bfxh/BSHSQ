@@ -7,6 +7,7 @@
   "crates/vxl-phys-gpu/examples/gpu_narrow_probe/main.rs": 4,
   "crates/vxl-phys-gpu/examples/gpu_narrow_tier_probe/main.rs": 3,
   "crates/vxl-phys-gpu/examples/gpu_narrow_up_probe.rs": 10,
+  "crates/vxl-phys-gpu/tests/follow_bisect.rs": 3,
   "crates/vxl-phys-gpu/tests/frozen_boundary.rs": 1,
   "crates/vxl-phys-gpu/tests/packet_grid_canary.rs": 1,
   "crates/vxl-phys-gpu/tests/sorted_copies_bitwise.rs": 2,

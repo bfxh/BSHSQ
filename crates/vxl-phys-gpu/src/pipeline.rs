@@ -62,6 +62,7 @@ pub(crate) struct Bufs {
 
 pub(crate) fn make_buffers(
     device: &wgpu::Device,
+    queue: &wgpu::Queue,
     n: u32,
     cap_total: u32,
     pos_flat: &[f32],
@@ -109,6 +110,14 @@ pub(crate) fn make_buffers(
     let tbl = ((cap_total + 1).div_ceil(8) * 8) as u64 * 4;
     let counts_b = storage("p.counts", 2 * tbl, wgpu::BufferUsages::empty());
     let start_b = storage("p.start", 2 * tbl, wgpu::BufferUsages::empty());
+    // **一次性清零 `start_b`**：类 1 表区（`[tbl, 2tbl)`）在纯流体档**永不写入**，而相位核经
+    // `cell_start[tstride + ci]` 读它（§28.2）——未初始化读 = 驱动相关的垃圾 ⇒ 幻影边界段。
+    // 2b 档每子步由第二遍网格重写该区 ⇒ 清零只需建包时这一次（队列操作，落在后续提交之前）。
+    queue.write_buffer(
+        &start_b,
+        0,
+        &vec![0u8; 2 * ((cap_total + 1).div_ceil(8) * 8) as usize * 4],
+    );
     let items_b = storage("p.items", (n as u64) * 4, wgpu::BufferUsages::empty());
     let cursor_b = storage("p.cursor", 2 * tbl, wgpu::BufferUsages::empty());
     let overflow_b = storage("p.overflow", 4, wgpu::BufferUsages::empty());
@@ -251,8 +260,9 @@ pub(crate) fn make_pipelines(device: &wgpu::Device) -> Pipes {
 
     // 网格：0 uniform + 1(pos,只读) + 2..=7(读写)
     let bl_grid = mk_layout(device, "p.bl_grid", &bind_layout::spec("urwwwwww"));
-    // 密度：0 uniform | 1 pos(只读) | 3 pmass(只读) | 5/6 格表(只读) | 7 dens(读写) | 9 类 1 表(只读)
-    let bl_dens = mk_layout(device, "p.bl_dens", &bind_layout::spec("ur_r_rrw r"));
+    // 密度：0 uniform | 1 pos(只读) | 3 pmass(只读) | 5/6 格表(只读) | 7 dens(读写)
+    //（类 1 表不单独绑定：与网格同一张 `start_b`，基址在核里按运行时 dims 现算，§28.2）
+    let bl_dens = mk_layout(device, "p.bl_dens", &bind_layout::spec("ur_r_rrw"));
     // 力：0 uniform | 1..=7 只读（含 dens）| 8 out(读写)
     let bl_force = mk_layout(
         device,
@@ -267,7 +277,6 @@ pub(crate) fn make_pipelines(device: &wgpu::Device) -> Pipes {
             (6, Kind::Ro),
             (7, Kind::Ro),
             (8, Kind::Rw),
-            (9, Kind::Ro), // 类 1 格表（两段枚举的边界段）
         ],
     );
     let bl_eos = mk_layout(
@@ -388,7 +397,7 @@ impl Packet {
         // 四段各进一个 helper（`new` 由 310 行降到 ~90）：**持有结构体而不是就地解构**——
         // 后一段（bind group）要借前几段（`&bufs`/`&prm`/`&pipes`），解构会把它们移走。
         let cap_total = total.max(cfg.grid_bins_cap);
-        let bufs = make_buffers(&device, n, cap_total, pos_flat, vel_flat, pmass);
+        let bufs = make_buffers(&device, &queue, n, cap_total, pos_flat, vel_flat, pmass);
         let prm = make_params(&device, &cfg, n, total);
         let pipes = make_pipelines(&device);
         let binds = make_bind_groups(&device, &bufs, &prm, &pipes);

@@ -213,7 +213,6 @@ fn make_sorted_binds(
             ent(5, &bufs.start_b),
             ent(6, &c.items_id),
             ent(7, &c.dens_c),
-            super::two_class::class1_entry(bufs), // 槽 9：类 1 表切片（零区 ⇒ 边界段恒空）
         ],
     );
     let bg_eos =
@@ -231,7 +230,6 @@ fn make_sorted_binds(
             ent(6, &c.items_id),
             ent(7, &c.dens_c),
             ent(8, &c.out_c),
-            super::two_class::class1_entry(bufs), // 槽 9：同上
         ],
     );
     (bg_gather, bg_scatter, bg_dens, bg_force, bg_eos)
