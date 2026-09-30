@@ -39,7 +39,7 @@ pub(crate) use self::gpu_setup::*;
 pub use self::gpu_types::*;
 pub use self::reaction::*;
 pub use self::stepper::*;
-pub(crate) use self::two_class::*;
+pub(crate) use self::two_class::make_bind_groups;
 pub use self::walls::*;
 // ↑ 子模块顶层条目再导出（impl-only 模块不入 glob，避免 unused）
 

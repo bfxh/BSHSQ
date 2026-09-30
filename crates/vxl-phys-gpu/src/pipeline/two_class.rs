@@ -13,7 +13,7 @@
 //! **对齐**：类 1 表以**切片**绑定 ⇒ 偏移须满足 `min_storage_buffer_offset_alignment`（本机 32 B）
 //! ⇒ 表步长 = `align8(total+1)`（与 `grid.wgsl::table_stride` 同式）；三张按格数的表各
 //! `2 × stride × 4` 字节，前段类 0、后段类 1。
-use super::*;
+use super::{ent, Binds, Bufs, Params, Pipes};
 
 /// 类 1 表的**切片视图**（相位核的槽 9）：偏移/长度取 `start_b.size()/2`（缓冲 = `2 × 对齐步长`）
 /// ⇒ 不必知道 `total`。**必须切片**：绑整段会读到类 0 的错区（实测症状：`sorted_copies_bitwise`
