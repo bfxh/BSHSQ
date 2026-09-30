@@ -106,7 +106,7 @@ impl FluidSystem {
         self.spans.iter().map(|s| s.0)
     }
 
-    /// **反作用**（`step` 后有效；每子步重写）：每体 `(体 id, 力, 绕体原点的力矩)`。
+    /// **反作用**（`step` 后有效；**tick 平均** = dt_sub 时间加权，C2 口径）：每体 `(体 id, 力, 绕体原点的力矩)`。
     /// 体原点处的力与力矩都已是**力的量纲**（未乘 dt）；facade 按自己的子步施加。
     pub fn boundary_reactions(&self) -> &[(u32, Vec3, Vec3)] {
         &self.breact

@@ -258,8 +258,8 @@ impl World {
     }
 
     /// **2b 反作用回流**：把各 2b 流体的边界粒子反作用（力 + 绕体原点的力矩）加到体上。
-    /// 量纲 = **力**（不是冲量）：与 2a 一样在每个体子步施加一次 ⇒ 一个 tick 的冲量
-    /// = `F·dt`（施加次数 × 子步 dt = tick dt）。睡眠体不吃外力（与 2a 同口径）。
+    /// 量纲 = **力**、值 = **tick 平均**（C2：dt_sub 时间加权，见 `boundary_reactions`）；
+    /// 每个体子步施加一次 ⇒ 一个 tick 的冲量 = `F̄·dt`。睡眠体不吃外力（与 2a 同口径）。
     pub(crate) fn fluid_reaction_pass(&mut self) {
         for fi in 0..self.fluids.len() {
             if !self.fluid_boundary.is_two_b(fi) {

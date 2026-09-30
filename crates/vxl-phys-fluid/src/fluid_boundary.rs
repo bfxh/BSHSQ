@@ -2,11 +2,13 @@
 use super::*;
 
 impl FluidSystem {
-    /// 反作用聚合：逐粒 `bforce` → 每体 `(力, 绕**体原点**的力矩)`。
-    /// 求和序 = 段序（生成序）× 段内粒子索引序 ⇒ 确定性。
+    /// 反作用聚合：逐粒 `bforce` → 每体 `(力, 绕**体原点**的力矩)`；求和序 = 段序 × 段内索引序。
+    /// **C2（2026-10-01，`PLAN-COUPLING.md` §5 / D1(b)）**：向 `breact` **逐子步累加**（不再清空
+    /// 重写）——清零归 `step` 开头、÷ 子步数归 `step` 末尾 ⇒ `boundary_reactions()` =
+    /// **dt_sub 时间加权的 tick 平均力**。段序在 tick 内不变 ⇒ 按段位置就地累加；
+    /// 段表中途被换（不该发生）时就地改标签重起账。
     pub(crate) fn aggregate_reactions(&mut self) {
-        self.breact.clear();
-        for &(body, origin, start, end) in &self.spans {
+        for (si, &(body, origin, start, end)) in self.spans.iter().enumerate() {
             let mut f = Vec3::ZERO;
             let mut tau = Vec3::ZERO;
             for k in start..end {
@@ -14,7 +16,14 @@ impl FluidSystem {
                 f += fk;
                 tau += (self.pos[k as usize] - origin).cross(fk);
             }
-            self.breact.push((body, f, tau));
+            match self.breact.get_mut(si) {
+                Some(e) if e.0 == body => {
+                    e.1 += f;
+                    e.2 += tau;
+                }
+                Some(e) => *e = (body, f, tau),
+                None => self.breact.push((body, f, tau)),
+            }
         }
     }
 

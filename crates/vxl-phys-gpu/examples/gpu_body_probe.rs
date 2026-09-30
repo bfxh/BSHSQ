@@ -307,8 +307,11 @@ fn tick(r: &mut Rig, dt: f32) -> f32 {
         let (pos, vel, _, nf) = r.gpu.raw_particles();
         r.pk.upload_boundary_segment(nf as u32, &pos[nf..], &vel[nf..]);
     }
-    r.pk.run(&r.pc, 1, r.substeps, false);
-    let gb = r.stage.aggregate(&r.pk, r.gpu.boundary_spans());
+    // **C2**：GPU 半边 = **tick 平均**（每子步卡上累加、主机 ÷ 子步数），与 CPU 侧
+    // `boundary_reactions()` 同口径（`PLAN-COUPLING.md` §5）。
+    let gb = r
+        .stage
+        .tick_average(&mut r.pk, &r.pc, r.substeps, None, r.gpu.boundary_spans());
     let mut fg = Vec3::ZERO;
     let mut df = 0.0f32;
     let mut scale = 0.0f32;

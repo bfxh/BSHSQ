@@ -255,15 +255,18 @@ struct TickCmp {
 }
 
 /// **协议**：宿主重建边界 → 只上传边界段 → 两侧各推进一个 tick。
+/// 返回 GPU 侧的每体 **tick 平均**（C2：每子步卡上累加、主机 ÷ 子步数）。
+#[allow(clippy::too_many_arguments)]
 fn step_rig(
     f: &mut FluidSystem,
     pk: &mut Packet,
+    stage: &mut ReactionStage,
     pc: &PacketCfg,
     base: &[(u32, Shape, BodyPose)],
     dr: Drive,
     dt_tick: f32,
     substeps: usize,
-) {
+) -> Vec<(u32, Vec3, Vec3)> {
     // ① 宿主侧重建：地板姿态 + 体面速度（其余四壁不动）。
     if dr.reupload {
         let w = 2.0 * PI * dr.freq;
@@ -275,14 +278,13 @@ fn step_rig(
         let (pos, vel, _, nf) = f.raw_particles();
         pk.upload_boundary_segment(nf as u32, &pos[nf..], &vel[nf..]);
     }
-    // ③ 两侧各推进一个 tick。
+    // ③ 两侧各推进一个 tick（GPU = **C2 tick 平均**，与 CPU `boundary_reactions()` 同口径）。
     f.step(dt_tick, &NoProviders);
-    pk.run(pc, 1, substeps, false);
+    stage.tick_average(pk, pc, substeps, None, f.boundary_spans())
 }
 
-/// **验收**：卡上聚合（段表每次随调用上传 ⇒ 体原点跟着体走）并与 CPU 逐体对拍。
-fn compare(f: &FluidSystem, pk: &Packet, stage: &mut ReactionStage) -> TickCmp {
-    let gb = stage.aggregate(pk, f.boundary_spans());
+/// **验收**：卡上每体 tick 平均（调用方从 C2 累加回路取得）并与 CPU 逐体对拍。
+fn compare(f: &FluidSystem, gb: &[(u32, Vec3, Vec3)]) -> TickCmp {
     let mut out = TickCmp {
         max_df: 0.0,
         max_dt: 0.0,
@@ -349,16 +351,17 @@ fn run_loop(rig: &mut Rig, a: &Args) -> Run {
             time: (t as f32 + 1.0) * rig.dt_tick,
             reupload: a.reupload,
         };
-        step_rig(
+        let gb = step_rig(
             &mut rig.f,
             &mut rig.pk,
+            &mut rig.stage,
             &rig.pc,
             &rig.base,
             dr,
             rig.dt_tick,
             rig.substeps,
         );
-        let c = compare(&rig.f, &rig.pk, &mut rig.stage);
+        let c = compare(&rig.f, &gb);
         worst_f = worst_f.max(c.max_df);
         worst_t = worst_t.max(c.max_dt);
         rel_f = rel_f.max(c.max_df / c.scale_f.max(1e-30));
@@ -441,7 +444,7 @@ fn report(a: &Args, r: &Run) {
         r.scale_f, r.scale_t
     );
     println!(
-        "  ② 动量大账（Σ_体 ∫F dt 应 = −ΔP_流体；逐 tick 取末子步的力 ⇒ 绝对值含 O(dt) 采样项）："
+        "  ② 动量大账（Σ_体 ∫F dt 应 = −ΔP_流体；C2 起逐 tick 取 **tick 平均力**，末子步采样项已消）："
     );
     let dpt = r.dp_cpu.length().max(1e-30);
     println!(
