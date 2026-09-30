@@ -12,6 +12,7 @@
 //! **本片边界**：绳索的接触走**提供者**（地形）+ **刚体代理**（形状：Sphere/Box/Capsule）；
 //! 自碰撞、`Compound`/`Cylinder`/`Cone`/`ConvexHull` 代理、体积/弯曲约束都属后续切片。
 use super::*;
+use crate::world_step::coupling as cpl; // 耦合契约的短别名（本文件只用 `add_force`）
 
 /// 2b（Akinci 边界粒子）那一族的成组状态（原为 `World` 的 3 个散字段：开关 / 暂存 / 覆盖集）。
 #[derive(Default)]
@@ -180,10 +181,8 @@ impl World {
                 // （= `× substeps / dt`）才交付"整 tick 的角冲量 `r.torque`"。
                 let substeps = self.config.substeps.max(1) as f32;
                 for r in &rope.reactions {
-                    let b = r.body as usize;
-                    if b < self.bodies.len() {
-                        self.bodies.torque[b] += r.torque * (substeps / dt);
-                    }
+                    // 经受体门 + tick 末注入契约（`PLAN-COUPLING.md` §2 A3 / §3.5：原先无 awake 检查）。
+                    cpl::add_tick_torque(&mut self.bodies, r.body, r.torque, substeps, dt);
                 }
             }
         }

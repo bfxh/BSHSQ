@@ -2,6 +2,7 @@
 use super::*;
 
 mod aero;
+pub(crate) mod coupling;
 pub(crate) mod fluid_stepper;
 pub(crate) mod narrow_tier;
 
@@ -118,7 +119,9 @@ impl World {
             }
             let bb = self.provider_bounds[id as usize];
             for i in 0..self.bodies.len() {
-                if !self.bodies.is_dynamic(i) {
+                // 受体门（`PLAN-COUPLING.md` §3.2）：静态/睡眠/零质量体不收跨域作用——原先此处
+                // 只查 `is_dynamic`（写进去后被积分器静默丢弃），C1 起统一为提前不写。
+                if !coupling::is_receptor(&self.bodies, i) {
                     continue;
                 }
                 let p = self.bodies.position[i];
@@ -145,7 +148,13 @@ impl World {
                 if a <= 0.0 {
                     continue;
                 }
-                self.bodies.force[i] += v_rel * (-0.5 * m.density * DRAG_CD * a * sp);
+                // 经门写力（力通道的唯一收口，`coupling::add_force`）。
+                coupling::add_force(
+                    &mut self.bodies,
+                    i,
+                    v_rel * (-0.5 * m.density * DRAG_CD * a * sp),
+                    Vec3::ZERO,
+                );
             }
         }
     }
@@ -193,8 +202,8 @@ impl World {
             };
             let pad = sys.config().smoothing_radius; // 核半径余量：表面外仍有介质影响
             for i in 0..self.bodies.len() {
-                if !self.bodies.is_dynamic(i) || !self.bodies.awake[i] {
-                    continue; // 睡眠体不受外力（唤醒后自然恢复；与"睡眠按静态处理"一致）
+                if !coupling::is_receptor(&self.bodies, i) {
+                    continue; // 受体门（统一后与 2b/喷溅同一条判据；语义 = 睡眠/静态体不生效）
                 }
                 if two_b && self.fluid_boundary.covered.get(i).copied().unwrap_or(false) {
                     continue; // 2b 已覆盖 ⇒ 二选一，不叠加
@@ -258,20 +267,16 @@ impl World {
             }
             let reacts = fluid_stepper::reactions_of(&self.fluids[fi]);
             for &(body, f, tau) in reacts {
-                let i = body as usize;
-                if i >= self.bodies.len() || !self.bodies.is_dynamic(i) || !self.bodies.awake[i] {
-                    continue;
-                }
-                self.bodies.force[i] += f;
-                self.bodies.torque[i] += tau;
+                // 经门写（`coupling::add_force` 内含受体门：越界/静态/睡眠/零质量一个字都不写）。
+                // 被挡下的那部分**有账**：`coupling::fluid_reaction_ledger` 量它。
+                coupling::add_force(&mut self.bodies, body as usize, f, tau);
             }
         }
     }
 
     pub(crate) fn substep(&mut self, dt: f32, first: bool, reuse_manifolds: bool) {
         // 1) 力场（重力在 World::new 注入注册表）+ 介质耦合（喷溅场作介质）。
-        // 计时走跨目标探针：wasm32-unknown-unknown 无时钟（`Instant::now()`
-        // 会 panic），该目标下退化为 0；原生行为不变。
+        // 计时走跨目标探针：wasm32-unknown-unknown 无时钟（`Instant::now()` 会 panic），该目标下退化为 0。
         let t0 = vxl_phys_core::probe::start();
         self.fields.apply(&mut self.bodies);
         self.medium_pass();

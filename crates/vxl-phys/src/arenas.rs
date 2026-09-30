@@ -1,11 +1,8 @@
 //! arenas：从 lib.rs 按域拆出（纯搬移，语义未改）。
+//! `FrameArenas` = 帧级相位暂存（相内 bump、相末 reset、全帧零 free；M0 消费者 = 帧末哈希缓冲）；
+//! `HealthReport` = §3 稳定性报告 + **耦合审计**（`PLAN-COUPLING` C0）。
 use super::*;
 
-/// 帧级相位暂存（§0.1 #10：相内 bump，相末 reset，全帧零 free）。
-///
-/// M0 已接入的消费者 = 帧末状态哈希的规范化缓冲（每次哈希 alloc→打包→reset，
-/// 600 tick 内 high_water 恒定、overflows = 0）；宽/窄/求解三相的缓冲化与其
-/// R1 顶尖化同批接入（M1）——机制与计数在本相已实证。
 #[derive(Debug)]
 pub struct FrameArenas {
     pub hash: PhaseArena,
@@ -28,7 +25,7 @@ impl Default for FrameArenas {
 /// 哈希规范化暂存预算（固定 8KB；流式打包与体数无关，永不溢出）。
 pub const HASH_SCRATCH_BYTES: usize = 8 << 10;
 
-/// §3 稳定性健康报告（NaN/Inf 计数、静默穿透计数、抖动审计的输入）。
+/// §3 稳定性健康报告（NaN/Inf、静默穿透计数）+ **耦合审计**（C0）。
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct HealthReport {
     pub nan_bodies: u32,
@@ -37,6 +34,9 @@ pub struct HealthReport {
     pub max_depth: f32,
     pub awake_bodies: u32,
     pub contacts: u32,
+    /// **耦合审计**（`PLAN-COUPLING.md` §5 C0）：收不到跨域作用的体数 + 被挡下的合力模长；不进 `is_clean`。
+    pub coupling_dropped_bodies: u32,
+    pub coupling_dropped_force: f32,
 }
 
 impl HealthReport {
