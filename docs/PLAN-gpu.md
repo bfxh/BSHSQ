@@ -3051,3 +3051,23 @@ Error in Device::poll: Validation Error / Caused by: Parent device is lost
 （这里 = 运行时箱 vs 建包箱），错位读进的要么是幻影数据要么是未初始化内存。判据侧：**cheap 场景
 （110k）+ 漂移阈值**就能钉住这一类失配，不必上 4.19M——但**触发条件要写进金丝雀**（cap > 建包箱），
 否则修复前它可能因驱动给零而"只是漂移大"，修复后则稳定绿。
+
+**§28.1 同族收尾（2026-09-30 同日第三片）**：`broad` / `narrow` 的原始一维分派已修（与 `bbox` 同一套
+`split_2d` + 核内同式展平）：
+
+- `broad`：`bin_count`/`place`/`gen_pairs` 三个按体枚举的入口 + 主机一趟四遍的分派（② `scan` 保持
+  单工作组）；
+- `narrow`：`main`（按对）与 `scatter_records`（按变动记录）两个入口 + 主机两处分派——顺带把两趟
+  compute pass **合并为一趟**（WebGPU 保证 pass 内 dispatch 有序，散写在前、主核在后 ⇒ 语义不变）；
+- `dispatch_2d_lockstep` 金丝雀从 5 个核文件扩到 **8 个**（+`bbox`/`broad`/`narrow`）——常驻覆盖；
+- **一次性真规模验证**（`tests/broad_narrow_2d.rs`，`#[ignore]`，81 s）：① `broad` 链条场景
+  **4 200 000 体**（每体只与相邻体相交）⇒ 二维分派（65 625 组）下配对恰为 **n−1 = 4 199 999** 对、
+  全部是 `(i, i+1)`、连跑两次逐位相同（覆盖敏感：漏线程必然少对）；② `narrow` 在**触发窗口**内
+  （`cap_pairs ≤ MAX_ITEMS = 1<<22` ⇒ 只有 4 194 241..4 194 304 这 64 个对数能踩到二维）取
+  4 194 241 对 ⇒ **全部槽 count == 1**（漏线程的槽会是零/垃圾）；
+- **回归**：`gpu_broad_probe` 三档配对集合与 CPU **逐位相同**、连跑两次自证 ✓；
+  `gpu_narrow_probe` 判据通过 + 金丝雀如期 ✓；`cargo test -p vxl-phys-gpu` 16 个二进制全绿。
+
+**注**：narrow 的触发窗口只有 64 个对数（MAX_ITEMS 恰好 = 65535×64 + 64），产品里 Today 不现实
+⇒ 判据放 `#[ignore]` 一次性验证，常驻覆盖靠锁步金丝雀。broad 的 `n` 无容量上限（4.2M 体），
+判据同款。god 门：`narrow.rs` 净零（两趟 pass 合一、注释压缩）、`broad.rs` 净零（注释压缩）。

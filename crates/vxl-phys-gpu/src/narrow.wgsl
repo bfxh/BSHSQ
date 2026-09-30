@@ -81,7 +81,8 @@ struct Params {
 /// ≈ 0.176 ms ⇒ 只快 1.4×）⇒ 把"多次小写"换成"**一次大上传 + 卡上散写**"才真省（§17.10）。
 @compute @workgroup_size(64)
 fn scatter_records(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let g = gid.x;
+    // 二维分派展平（与各相位核同式，见 `probe::split_2d`；§28.1 同族）。
+    let g = gid.x + gid.y * (65535u * 64u);
     if (g >= prm.n_upd) {
         return;
     }
@@ -719,7 +720,8 @@ fn sphere_box(base: u32, sb: u32, bb: u32, sphere_is_a: bool) {
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-    let i = gid.x;
+    // 二维分派展平（与各相位核同式，见 `probe::split_2d`；§28.1 同族）。
+    let i = gid.x + gid.y * (65535u * 64u);
     if (i >= prm.n_pairs) {
         return;
     }
