@@ -3,6 +3,7 @@
   "crates/vxl-phys-fluid/src/fluid_density.rs": 1,
   "crates/vxl-phys-fluid/src/tests.rs": 2,
   "crates/vxl-phys-fluid/tests/boundary_accuracy_probe.rs": 1,
+  "crates/vxl-phys-fluid/tests/reaction_sampling_probe.rs": 1,
   "crates/vxl-phys-gpu/examples/gpu_coupling_probe.rs": 1,
   "crates/vxl-phys-gpu/examples/gpu_narrow_probe/main.rs": 3,
   "crates/vxl-phys-gpu/examples/gpu_narrow_tier_probe/diag.rs": 3,
