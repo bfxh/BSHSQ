@@ -39,7 +39,7 @@ pub struct FluidSystem {
     pub(crate) pmass: Vec<f32>,
     /// 每体边界段 `(体 id, 体原点, start, end)`（`start..end` = 全局粒子索引区间）。
     pub(crate) spans: Vec<(u32, Vec3, u32, u32)>,
-    /// 反作用输出：每体 `(体 id, 力, 绕体原点的力矩)`；每个子步末整体重写。
+    /// 反作用输出：每体 `(体 id, 力, 力矩)`；**tick 级累加器**（step 清零→逐子步累加→÷子步数，C2）。
     pub(crate) breact: Vec<(u32, Vec3, Vec3)>,
     /// 每边界粒子的受力累加（每子步清零；`force_pass` 里借出以便写入）。
     pub(crate) bforce: Vec<Vec3>,
