@@ -64,13 +64,24 @@ impl World {
     /// - 确定性：体按索引升序、`set_boundary_particles` 按参数序排布 ⇒ 求和序固定。
     pub(crate) fn refresh_fluid_boundary(&mut self, fi: usize) {
         self.fluid_boundary.scratch.clear();
-        self.fluid_boundary.covered.clear();
-        self.fluid_boundary.covered.resize(self.bodies.len(), false);
+        // 覆盖集**按流体**各一份（§2 C4）：只重写本流体那份，别的流体不动
+        //（原先跨流体单数组 ⇒ 最后一个 2b 流体的 refresh 清掉前面所有流体的让位集）。
+        let covered = {
+            let per = &mut self.fluid_boundary.covered;
+            while per.len() <= fi {
+                per.push(Vec::new());
+            }
+            let c = &mut per[fi];
+            c.clear();
+            c.resize(self.bodies.len(), false);
+            c
+        };
         let bb = fluid_stepper::bounds_of(&self.fluids[fi])
             .or_else(|| particle_bounds(&self.fluids[fi].0));
         if let Some((lo, hi)) = bb {
             let pad = self.fluids[fi].0.config().smoothing_radius;
-            for i in 0..self.bodies.len() {
+            // 覆盖集与体同长 ⇒ 用 `iter_mut` 配对遍历（`needless_range_loop` 的口径）。
+            for (i, cov) in covered.iter_mut().enumerate() {
                 let shape = self.bodies.shape[i];
                 if !vxl_phys_fluid::boundary::supports(&shape) {
                     continue;
@@ -96,7 +107,7 @@ impl World {
                         angvel: self.bodies.angvel(i),
                     },
                 ));
-                self.fluid_boundary.covered[i] = true;
+                *cov = true;
             }
         }
         // `set_boundary_particles` 要 `&scratch` 而 `self.fluids` 要 `&mut`：借出后归还
@@ -205,7 +216,14 @@ impl World {
                 if !coupling::is_receptor(&self.bodies, i) {
                     continue; // 受体门（统一后与 2b/喷溅同一条判据；语义 = 睡眠/静态体不生效）
                 }
-                if two_b && self.fluid_boundary.covered.get(i).copied().unwrap_or(false) {
+                // 让位集**按流体**查（§2 C4）：本流体的覆盖集，不是"最后一个 2b 流体"的。
+                if two_b
+                    && self
+                        .fluid_boundary
+                        .covered
+                        .get(fi)
+                        .is_some_and(|c| c.get(i).copied().unwrap_or(false))
+                {
                     continue; // 2b 已覆盖 ⇒ 二选一，不叠加
                 }
                 let c = self.bodies.position[i];

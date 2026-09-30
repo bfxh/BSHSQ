@@ -21,8 +21,11 @@ pub struct FluidBoundary {
     pub two_b: Vec<bool>,
     /// 边界粒子生成的暂存 `(体 id, 形状, 位姿)`（复用免每 tick 分配）。
     pub scratch: Vec<(u32, Shape, vxl_phys_fluid::BodyPose)>,
-    /// **覆盖集**（与 `bodies` 同序，每 tick 重建）：上次进了边界粒子集的体。
-    pub covered: Vec<bool>,
+    /// **覆盖集**（**按流体**各一份：`covered[fi]` 与 `bodies` 同序，每 tick 由该流体的
+    /// `refresh_fluid_boundary` 重建）= 2a 对该流体的让位集。修 §2 C4：原先跨流体单数组
+    /// ⇒ 只有最后一个 2b 流体的覆盖集有效 ⇒ 2a/2b 双重计账（判据 `fluid_covered_multi`：
+    /// 修前体被 2a 浮力从 y 1.27 弹到 5.85）。
+    pub covered: Vec<Vec<bool>>,
 }
 
 /// **软体域的成组状态**（原 `World` 的 `ropes`/`rope_proxies` 两个散字段收成一组，

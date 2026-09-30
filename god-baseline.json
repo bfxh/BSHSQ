@@ -1176,7 +1176,7 @@
    "max_type_members": 0
   },
   "crates/vxl-phys/src/world_body.rs": {
-   "file_lines": 335,
+   "file_lines": 339,
    "max_fn_lines": 49,
    "max_type_members": 24
   },
@@ -1201,12 +1201,12 @@
    "max_type_members": 9
   },
   "crates/vxl-phys/src/world_soft.rs": {
-   "file_lines": 234,
+   "file_lines": 237,
    "max_fn_lines": 41,
    "max_type_members": 10
   },
   "crates/vxl-phys/src/world_step.rs": {
-   "file_lines": 377,
+   "file_lines": 395,
    "max_fn_lines": 99,
    "max_type_members": 7
   },
@@ -1298,6 +1298,11 @@
   "crates/vxl-phys/tests/fluid_coupling.rs": {
    "file_lines": 138,
    "max_fn_lines": 37,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys/tests/fluid_covered_multi.rs": {
+   "file_lines": 96,
+   "max_fn_lines": 30,
    "max_type_members": 0
   },
   "crates/vxl-phys/tests/mesh_vs_mesh.rs": {
