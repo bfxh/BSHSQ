@@ -781,8 +781,8 @@
    "max_type_members": 8
   },
   "crates/vxl-phys-soft/src/rope.rs": {
-   "file_lines": 620,
-   "max_fn_lines": 108,
+   "file_lines": 628,
+   "max_fn_lines": 116,
    "max_type_members": 23
   },
   "crates/vxl-phys-soft/tests/angular_reaction_holds.rs": {
@@ -881,7 +881,7 @@
    "max_type_members": 0
   },
   "crates/vxl-phys-soft/tests/rope_rotation_awareness.rs": {
-   "file_lines": 96,
+   "file_lines": 100,
    "max_fn_lines": 45,
    "max_type_members": 0
   },
