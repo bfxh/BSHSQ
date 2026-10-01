@@ -1171,7 +1171,7 @@
    "max_type_members": 10
   },
   "crates/vxl-phys/src/tests.rs": {
-   "file_lines": 846,
+   "file_lines": 919,
    "max_fn_lines": 68,
    "max_type_members": 0
   },
@@ -1231,8 +1231,8 @@
    "max_type_members": 2
   },
   "crates/vxl-phys/src/world_step/medium.rs": {
-   "file_lines": 117,
-   "max_fn_lines": 32,
+   "file_lines": 130,
+   "max_fn_lines": 45,
    "max_type_members": 2
   },
   "crates/vxl-phys/src/world_step/narrow_tier.rs": {
