@@ -335,6 +335,7 @@ impl DefaultNarrowPhase {
     /// 对每根轴同时测两个方向（A 在负侧 / B 在负侧），取较大分离度；
     /// 法线统一取向为 a→b。此前单侧公式的取向错误会造成深度失真（能量泵）。
     pub(crate) fn sat(&mut self, _hint: Vec3) -> Option<(f32, Vec3, AxisSrc)> {
+        self.probe.sat_pairs += 1;
         let na = self.ws.poly_a.face_normal.len();
         let nb = self.ws.poly_b.face_normal.len();
         self.ws.axes.clear();
@@ -369,6 +370,7 @@ impl DefaultNarrowPhase {
         // 注：曾试「面轴/棱轴分段扫描（分离时跳过棱轴构建）」——实测**更慢**
         // （窄相峰 26.51 → 28.79，棱轴构建不是瓶颈、分段徒增重入）⇒ 已回退。
         if let Some(r) = self.box_pair_scan(box_axes, n_face_a, n_face_b) {
+            self.probe.sat_pairs_box += 1;
             return Some(r);
         }
         // ===== 非盒对（球/圆柱/高度场参与）：通用标量扫描 =====

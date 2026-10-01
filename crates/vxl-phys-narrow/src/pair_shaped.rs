@@ -512,10 +512,14 @@ impl DefaultNarrowPhase {
         if self.ws.cached_a != (a, ia as u64) {
             self.ws.poly_a.fill(&self.ws.polys[ia], pa, ra);
             self.ws.cached_a = (a, ia as u64);
+            self.probe.poly_fills += 1;
+            self.probe.poly_fill_verts += self.ws.poly_a.verts.len() as u64;
         }
         if self.ws.cached_b != (b, ib as u64) {
             self.ws.poly_b.fill(&self.ws.polys[ib], pb, rb);
             self.ws.cached_b = (b, ib as u64);
+            self.probe.poly_fills += 1;
+            self.probe.poly_fill_verts += self.ws.poly_b.verts.len() as u64;
         }
         // 盒对 SAT 快路径参数（圆柱 → None，走通用逐顶点路径）。
         self.ws.box_a = match sa {

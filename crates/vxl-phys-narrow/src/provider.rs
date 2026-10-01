@@ -24,10 +24,17 @@ impl DefaultNarrowPhase {
         providers: &dyn vxl_phys_core::interop::ProviderColliders,
         buf: &mut Vec<vxl_phys_core::interop::InteropContact>,
     ) -> bool {
+        self.probe.prov_pairs += 1;
         match *body_shape {
-            Shape::Box { half } => providers.contacts_box(id, half, bpos, brot, band, buf),
+            Shape::Box { half } => {
+                self.probe.prov_bulk += 1;
+                providers.contacts_box(id, half, bpos, brot, band, buf)
+            }
             // 球：SDF 类提供者解析求解（`depth = r − sdf(center)`）
-            Shape::Sphere { radius } => providers.contacts_sphere(id, bpos, radius, band, buf),
+            Shape::Sphere { radius } => {
+                self.probe.prov_bulk += 1;
+                providers.contacts_sphere(id, bpos, radius, band, buf)
+            }
             // 外壳 vs 提供者：**顶点采样**（逐顶点按 SDF 解析求深度/法线；多点 ⇒ 面接触稳定）。
             Shape::ConvexHull { .. } => self.hull_provider_contacts(
                 body_shape, body, bpos, brot, id, pr_is_a, band, providers, buf,
@@ -36,16 +43,34 @@ impl DefaultNarrowPhase {
             Shape::Capsule {
                 half_height,
                 radius,
-            } => {
-                capsule_provider_contacts(bpos, brot, half_height, radius, id, band, providers, buf)
-            }
+            } => capsule_provider_contacts(
+                bpos,
+                brot,
+                half_height,
+                radius,
+                id,
+                band,
+                &mut self.probe,
+                providers,
+                buf,
+            ),
             // 圆柱 / 圆锥 vs 提供者：**端面圆 + 母线采样**（逐点查询；见下方函数注）。
             Shape::Cylinder {
                 half_height,
                 radius,
             } => {
                 let rings = [(-half_height, radius), (0.0, radius), (half_height, radius)];
-                ring_provider_contacts(bpos, brot, rings, None, id, band, providers, buf)
+                ring_provider_contacts(
+                    bpos,
+                    brot,
+                    rings,
+                    None,
+                    id,
+                    band,
+                    &mut self.probe,
+                    providers,
+                    buf,
+                )
             }
             Shape::Cone {
                 half_height,
@@ -65,6 +90,7 @@ impl DefaultNarrowPhase {
                     Some(half_height),
                     id,
                     band,
+                    &mut self.probe,
                     providers,
                     buf,
                 )
@@ -100,6 +126,7 @@ impl DefaultNarrowPhase {
             return true;
         }
         let mut supported = false;
+        self.probe.prov_samples += self.ws.hull_pts[side].len() as u64;
         for k in 0..self.ws.hull_pts[side].len() {
             supported |= providers.contacts_point(id, self.ws.hull_pts[side][k], band, buf);
         }
@@ -133,6 +160,7 @@ fn capsule_provider_contacts(
     radius: f32,
     id: u32,
     band: f32,
+    probe: &mut ProbeCounters,
     providers: &dyn vxl_phys_core::interop::ProviderColliders,
     buf: &mut Vec<vxl_phys_core::interop::InteropContact>,
 ) -> bool {
@@ -155,6 +183,7 @@ fn capsule_provider_contacts(
         }
         centers[n] = c;
         n += 1;
+        probe.prov_samples += 1;
         supported |= providers.contacts_sphere(id, c, radius, band, buf);
     }
     supported
@@ -195,6 +224,7 @@ fn ring_provider_contacts(
     tip: Option<f32>,
     id: u32,
     band: f32,
+    probe: &mut ProbeCounters,
     providers: &dyn vxl_phys_core::interop::ProviderColliders,
     buf: &mut Vec<vxl_phys_core::interop::InteropContact>,
 ) -> bool {
@@ -214,10 +244,12 @@ fn ring_provider_contacts(
         for k in 0..4 {
             let th = phi + std::f32::consts::FRAC_PI_2 * k as f32;
             let local = Vec3::new(rho * th.cos(), cy, rho * th.sin());
+            probe.prov_samples += 1;
             supported |= providers.contacts_point(id, bpos + m.mul_vec3(local), band, buf);
         }
     }
     if let Some(ty) = tip {
+        probe.prov_samples += 1;
         supported |= providers.contacts_point(id, bpos + axis * ty, band, buf);
     }
     supported

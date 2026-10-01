@@ -85,6 +85,8 @@ impl DefaultNarrowPhase {
                 out.extend(h.points.iter().map(|p| pos + m.mul_vec3(*p)));
             }
             self.ws.cached_hull[side] = (body, fp);
+            self.probe.hull_fills += 1;
+            self.probe.hull_fill_verts += self.ws.hull_pts[side].len() as u64;
         }
         true
     }
@@ -357,13 +359,7 @@ impl DefaultNarrowPhase {
                 ref_v: Vec::new(),
                 out_hint: 256,
             },
-            probe: ProbeCounters {
-                clip_calls: 0,
-                clip_iters: 0,
-                clip_xings: 0,
-                cand_pts: 0,
-                clip_max: 0,
-            },
+            probe: ProbeCounters::default(),
         }
     }
 

@@ -651,14 +651,14 @@
    "max_type_members": 1
   },
   "crates/vxl-phys-narrow/src/pair_shaped.rs": {
-   "file_lines": 879,
+   "file_lines": 883,
    "max_fn_lines": 101,
    "max_type_members": 10
   },
   "crates/vxl-phys-narrow/src/phase.rs": {
-   "file_lines": 119,
-   "max_fn_lines": 9,
-   "max_type_members": 9
+   "file_lines": 175,
+   "max_fn_lines": 18,
+   "max_type_members": 14
   },
   "crates/vxl-phys-narrow/src/polytope.rs": {
    "file_lines": 256,
@@ -671,13 +671,13 @@
    "max_type_members": 4
   },
   "crates/vxl-phys-narrow/src/provider.rs": {
-   "file_lines": 225,
-   "max_fn_lines": 64,
+   "file_lines": 257,
+   "max_fn_lines": 90,
    "max_type_members": 2
   },
   "crates/vxl-phys-narrow/src/sat.rs": {
-   "file_lines": 453,
-   "max_fn_lines": 74,
+   "file_lines": 455,
+   "max_fn_lines": 76,
    "max_type_members": 10
   },
   "crates/vxl-phys-narrow/src/simd.rs": {
@@ -691,7 +691,7 @@
    "max_type_members": 5
   },
   "crates/vxl-phys-narrow/src/support.rs": {
-   "file_lines": 396,
+   "file_lines": 392,
    "max_fn_lines": 140,
    "max_type_members": 16
   },
@@ -1016,8 +1016,8 @@
    "max_type_members": 0
   },
   "crates/vxl-phys/examples/arena_bench/probes_a.rs": {
-   "file_lines": 486,
-   "max_fn_lines": 127,
+   "file_lines": 500,
+   "max_fn_lines": 141,
    "max_type_members": 14
   },
   "crates/vxl-phys/examples/arena_bench/probes_b.rs": {
@@ -2085,7 +2085,11 @@
    "methods": 0
   },
   "crates/vxl-phys-narrow::ProbeCounters": {
-   "fields": 5,
+   "fields": 14,
+   "methods": 0
+  },
+  "crates/vxl-phys-narrow::ProbeStats": {
+   "fields": 14,
    "methods": 0
   },
   "crates/vxl-phys-narrow::SphereSupport": {
