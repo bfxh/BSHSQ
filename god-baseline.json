@@ -966,9 +966,9 @@
    "max_type_members": 9
   },
   "crates/vxl-phys-splat/src/lib.rs": {
-   "file_lines": 684,
+   "file_lines": 695,
    "max_fn_lines": 58,
-   "max_type_members": 12
+   "max_type_members": 15
   },
   "crates/vxl-phys-terrain/src/lib.rs": {
    "file_lines": 112,
@@ -1171,7 +1171,7 @@
    "max_type_members": 10
   },
   "crates/vxl-phys/src/tests.rs": {
-   "file_lines": 919,
+   "file_lines": 968,
    "max_fn_lines": 68,
    "max_type_members": 0
   },
@@ -1231,7 +1231,7 @@
    "max_type_members": 2
   },
   "crates/vxl-phys/src/world_step/medium.rs": {
-   "file_lines": 130,
+   "file_lines": 289,
    "max_fn_lines": 45,
    "max_type_members": 2
   },
@@ -1263,6 +1263,11 @@
   "crates/vxl-phys/tests/capsule_drop.rs": {
    "file_lines": 76,
    "max_fn_lines": 59,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys/tests/cloth_on_supported_dynamic_box.rs": {
+   "file_lines": 117,
+   "max_fn_lines": 37,
    "max_type_members": 0
   },
   "crates/vxl-phys/tests/cloth_reaction_scene.rs": {
@@ -2254,7 +2259,7 @@
    "methods": 1
   },
   "crates/vxl-phys-splat::GaussianSplatField": {
-   "fields": 12,
+   "fields": 15,
    "methods": 21
   },
   "crates/vxl-phys-splat::Grid": {
