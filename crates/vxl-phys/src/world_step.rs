@@ -4,6 +4,7 @@ use super::*;
 mod aero;
 pub(crate) mod coupling;
 pub(crate) mod fluid_stepper;
+mod medium;
 pub(crate) mod narrow_tier;
 
 impl World {
@@ -117,64 +118,12 @@ impl World {
         self.fluid_boundary.scratch = scratch;
     }
 
-    /// 介质通道**段①**：喷溅场作介质（只累加二次阻力 `F = −½·ρ·Cd·A·|v_rel|·v_rel`；
-    /// 密度 0 的场直接跳过）。**冻结行为**（PhysArena/喷溅场景的哈希以它为基准）⇒ 纯搬移。
-    fn splat_medium_pass(&mut self) {
-        const DRAG_CD: f32 = 1.0;
-        for id in 0..self.providers.len() as u32 {
-            let Some(f) = self.providers.splat(id) else {
-                continue;
-            };
-            if f.medium_density <= 0.0 {
-                continue;
-            }
-            let bb = self.provider_bounds[id as usize];
-            for i in 0..self.bodies.len() {
-                // 受体门（`PLAN-COUPLING.md` §3.2）：静态/睡眠/零质量体不收跨域作用——原先此处
-                // 只查 `is_dynamic`（写进去后被积分器静默丢弃），C1 起统一为提前不写。
-                if !coupling::is_receptor(&self.bodies, i) {
-                    continue;
-                }
-                let p = self.bodies.position[i];
-                if p.x < bb.min.x
-                    || p.x > bb.max.x
-                    || p.y < bb.min.y
-                    || p.y > bb.max.y
-                    || p.z < bb.min.z
-                    || p.z > bb.max.z
-                {
-                    continue; // 场外 = 真空
-                }
-                use vxl_phys_core::interop::MediumField as _;
-                let m = f.sample(p);
-                if m.density <= 0.0 {
-                    continue;
-                }
-                let v_rel = self.bodies.linvel[i] - m.velocity;
-                let sp = v_rel.length();
-                if sp < 1e-6 {
-                    continue;
-                }
-                let a = cross_section_area(&self.bodies.shape[i]);
-                if a <= 0.0 {
-                    continue;
-                }
-                // 经门写力（力通道的唯一收口，`coupling::add_force`）。
-                coupling::add_force(
-                    &mut self.bodies,
-                    i,
-                    v_rel * (-0.5 * m.density * DRAG_CD * a * sp),
-                    Vec3::ZERO,
-                );
-            }
-        }
-    }
-
     /// **介质通道**：把「介质状提供者」的状态作用到刚体上（单侧：介质 → 体）。
     ///
     /// **两段，物理分量不同（别混）**：
-    /// ① **喷溅场作介质**（既有，2026-09 起）：只累加二次阻力 `F = −½·ρ·Cd·A·|v_rel|·v_rel`。
-    ///    密度 0 的场直接跳过；**本段是冻结行为**（PhysArena/喷溅场景的哈希以它为基准）⇒ 不动。
+    /// ① **喷溅场作介质**（实现见 `world_step/medium.rs`，含 D3 切片 1 双向、默认关）：
+    ///    只累加二次阻力 `F = −½·ρ·Cd·A·|v_rel|·v_rel`；密度 0 的场直接跳过；
+    ///    **本段是冻结行为**（PhysArena/喷溅场景的哈希以它为基准）⇒ 施加式不动。
     /// ② **流体作介质**（2a，2026-09-22，`ROUTE.md` §4「刚体↔液体」格）：**浮力 + 阻力**——
     ///    浮力按阿基米德 `F = −g·ρ_med·V·frac_sub`（`frac_sub` = 采样点占用率均值，
     ///    即"浸没体积分数"的代理），阻力同 ①。采样点 = **体心 + 4 个水平表面点**
@@ -184,9 +133,9 @@ impl World {
     /// 确定性：场/流体按注册序、体按索引序、采样点固定序 ⇒ 全索引序可复现；
     /// `v_rel` 取体心速度减介质流速（力矩本切片不施加，与 ① 一致）。
     /// **零成本短路**：无流体 / 无介质密度 / 体不在介质包围盒内 ⇒ 不采样。
-    pub(crate) fn medium_pass(&mut self) {
+    pub(crate) fn medium_pass(&mut self, dt: f32) {
         const DRAG_CD: f32 = 1.0;
-        self.splat_medium_pass();
+        self.splat_medium_pass(dt);
 
         // ── ② 流体作介质（2a，见上方文档）：浮力（阿基米德）+ 阻力 ──
         // （2b 覆盖的体在此**让位**：其浮力/阻力由 Akinci 反作用接管，见段③）
@@ -297,7 +246,7 @@ impl World {
         // 计时走跨目标探针：wasm32-unknown-unknown 无时钟（`Instant::now()` 会 panic），该目标下退化为 0。
         let t0 = vxl_phys_core::probe::start();
         self.fields.apply(&mut self.bodies);
-        self.medium_pass();
+        self.medium_pass(dt);
         // 面元气动（T4）：`set_aero` 显式开启才生效（Option 槽 ⇒ 未开启首行短路、逐位不变）。
         // 与介质/重力同段位 = **逐子步**施加（力累加器的已钉契约，§8.4.28）。
         self.aero_pass();

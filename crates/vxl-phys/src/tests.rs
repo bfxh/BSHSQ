@@ -274,6 +274,81 @@ fn splat_medium_drag_slows_falling_body() {
     );
 }
 
+/// **D3 切片 1（介质双向，`PLAN-COUPLING.md` §4.3）**：场景与 `splat_medium_drag_slows_falling_body`
+/// 同款（16 核稀薄云 + 落盒 90 tick），两条 run 仅差 `set_two_way`。判据三个方向：
+/// ① **关档金丝雀**：`kernel_velocities()` 空、`absorbed_momentum()` 零（旧单向路径逐位）；
+/// ② **开档有沉积**：核速度非零、审计动量非零，且**分量方向** = 体失去的（体下落 ⇒ 介质获 −y）；
+/// ③ **反馈方向（有分辨力）**：介质被体带起 ⇒ 相对速度变小 ⇒ 阻力更小 ⇒ 落得更快。
+#[test]
+fn splat_medium_two_way_reduces_drag() {
+    let run = |two_way: bool| -> (f32, f32, Vec<Vec3>, Vec3) {
+        let mut w = World::new(PhysConfig::default());
+        let mut f = vxl_phys_splat::GaussianSplatField::new(4.0); // iso 高 ⇒ 纯介质、无接触
+        for k in 0..16 {
+            f.push(vxl_phys_splat::Splat::isotropic(
+                Vec3::new(0.0, 1.0 + k as f32 * 0.5, 0.0),
+                0.45,
+                0.6,
+            ));
+        }
+        f.medium_density = 6.0;
+        f.set_two_way(two_way);
+        w.add_splat_field(f);
+        let b = w.add_dynamic(
+            Shape::Box {
+                half: Vec3::splat(0.3),
+            },
+            Vec3::new(0.0, 9.0, 0.0),
+            Quat::IDENTITY,
+            1.0,
+        );
+        for _ in 0..90 {
+            w.step();
+        }
+        assert!(w.providers.splat(0).is_some(), "splat field 已注册");
+        // 无 `.expect`（unwrap 棘轮只准减）：断言存在 + if-let 兜底 ⇒ 门与判据都不破。
+        let (kv, abs) = if let Some(fld) = w.providers.splat(0) {
+            (fld.kernel_velocities().to_vec(), fld.absorbed_momentum())
+        } else {
+            (Vec::new(), Vec3::ZERO)
+        };
+        (
+            w.bodies.position[b as usize].y,
+            w.bodies.linvel[b as usize].y,
+            kv,
+            abs,
+        )
+    };
+    let (y_off, v_off, kv_off, abs_off) = run(false);
+    let (y_on, v_on, kv_on, abs_on) = run(true);
+    // ① 关档金丝雀：不收集/不提交（旧单向语义零代际）。
+    assert!(kv_off.is_empty(), "关档不建速度场");
+    assert_eq!(abs_off, Vec3::ZERO, "关档无沉积");
+    // ② 开档有沉积（含方向：介质获得体失去的动量 ⇒ −y）。
+    assert!(
+        kv_on.iter().any(|v| v.length() > 0.0),
+        "开档核速度非零（沉积真发生）"
+    );
+    assert!(abs_on.length() > 0.0, "开档审计动量非零");
+    assert!(
+        abs_on.y < 0.0,
+        "反作用方向：介质获 −y 动量（abs={abs_on:?}）"
+    );
+    // ③ 反馈方向：阻力被自己带起的流减小 ⇒ 末速更负、位置更低。
+    assert!(
+        v_on < v_off,
+        "双向应减小阻力：v_off={v_off:.3} v_on={v_on:.3}"
+    );
+    assert!(
+        y_on < y_off,
+        "双向落得更快：y_off={y_off:.3} y_on={y_on:.3}"
+    );
+    println!(
+        "off: y={y_off:.3} v={v_off:.3} | on: y={y_on:.3} v={v_on:.3} | abs={abs_on:?} | kv#={}",
+        kv_on.iter().filter(|v| v.length() > 0.0).count()
+    );
+}
+
 /// **网格域（M3 扩展）**：盒落在三角网格地面上并停住（薄壳接触；
 /// 8 顶点 + 6 面心采样 ⇒ 底四角多点接触）。
 #[test]

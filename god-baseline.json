@@ -936,7 +936,7 @@
    "max_type_members": 0
   },
   "crates/vxl-phys-solver/src/solver_impl.rs": {
-   "file_lines": 814,
+   "file_lines": 824,
    "max_fn_lines": 87,
    "max_type_members": 15
   },
@@ -946,7 +946,7 @@
    "max_type_members": 0
   },
   "crates/vxl-phys-solver/src/types.rs": {
-   "file_lines": 220,
+   "file_lines": 227,
    "max_fn_lines": 28,
    "max_type_members": 21
   },
@@ -960,8 +960,13 @@
    "max_fn_lines": 3,
    "max_type_members": 1
   },
+  "crates/vxl-phys-splat/src/flow.rs": {
+   "file_lines": 243,
+   "max_fn_lines": 37,
+   "max_type_members": 9
+  },
   "crates/vxl-phys-splat/src/lib.rs": {
-   "file_lines": 686,
+   "file_lines": 684,
    "max_fn_lines": 58,
    "max_type_members": 12
   },
@@ -1011,8 +1016,8 @@
    "max_type_members": 0
   },
   "crates/vxl-phys/examples/arena_bench/probes_a.rs": {
-   "file_lines": 468,
-   "max_fn_lines": 109,
+   "file_lines": 486,
+   "max_fn_lines": 127,
    "max_type_members": 14
   },
   "crates/vxl-phys/examples/arena_bench/probes_b.rs": {
@@ -1166,8 +1171,8 @@
    "max_type_members": 10
   },
   "crates/vxl-phys/src/tests.rs": {
-   "file_lines": 709,
-   "max_fn_lines": 45,
+   "file_lines": 784,
+   "max_fn_lines": 68,
    "max_type_members": 0
   },
   "crates/vxl-phys/src/types.rs": {
@@ -1201,14 +1206,14 @@
    "max_type_members": 9
   },
   "crates/vxl-phys/src/world_soft.rs": {
-   "file_lines": 218,
+   "file_lines": 221,
    "max_fn_lines": 41,
    "max_type_members": 10
   },
   "crates/vxl-phys/src/world_step.rs": {
-   "file_lines": 395,
+   "file_lines": 344,
    "max_fn_lines": 99,
-   "max_type_members": 7
+   "max_type_members": 6
   },
   "crates/vxl-phys/src/world_step/aero.rs": {
    "file_lines": 65,
@@ -1223,6 +1228,11 @@
   "crates/vxl-phys/src/world_step/fluid_stepper.rs": {
    "file_lines": 81,
    "max_fn_lines": 14,
+   "max_type_members": 2
+  },
+  "crates/vxl-phys/src/world_step/medium.rs": {
+   "file_lines": 117,
+   "max_fn_lines": 32,
    "max_type_members": 2
   },
   "crates/vxl-phys/src/world_step/narrow_tier.rs": {
@@ -2211,7 +2221,7 @@
    "methods": 15
   },
   "crates/vxl-phys-solver::IslandDiag": {
-   "fields": 16,
+   "fields": 18,
    "methods": 0
   },
   "crates/vxl-phys-solver::Joint": {
@@ -2235,8 +2245,8 @@
    "methods": 1
   },
   "crates/vxl-phys-splat::GaussianSplatField": {
-   "fields": 8,
-   "methods": 12
+   "fields": 12,
+   "methods": 21
   },
   "crates/vxl-phys-splat::Grid": {
    "fields": 4,
@@ -2340,7 +2350,7 @@
   },
   "crates/vxl-phys::Providers": {
    "fields": 1,
-   "methods": 10
+   "methods": 12
   },
   "crates/vxl-phys::Read": {
    "fields": 4,

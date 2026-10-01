@@ -427,7 +427,6 @@ fn report(name: &str, w: &World, s: &Stats) {
         bsame,
         100.0 * bsame as f64 / bt,
     );
-    let (d_island, d_solve, d_sleep, _) = w.solver.last_phase_us;
     let dd = w.solver.last_detail_us;
     let dd_sum = (dd[0] + dd[1] + dd[2] + dd[3]).max(1) as f64;
     if dd[1] + dd[2] + dd[3] == 0 {
