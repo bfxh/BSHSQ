@@ -88,6 +88,18 @@ pub struct ProbeCounters {
     pub poly_fill_verts: u64,
     pub hull_fills: u64,
     pub hull_fill_verts: u64,
+    /// **provider 分派段（2026-10-01 第二刀）**：trimesh 场景的窄相时间在"体×提供者"这条路上，
+    /// 这里把它拆成两类：
+    /// - `prov_pairs`：进 `provider_shape_contacts` 分派的对数；
+    /// - `prov_bulk`：**一次解析查询解决整个形状**的次数（盒 `contacts_box` / 球 `contacts_sphere`）；
+    /// - `prov_samples`：**逐样本查询**总数（外壳顶点 / 胶囊沿轴球 / 圆柱圆锥环点与顶点）。
+    ///
+    /// 判读：`prov_samples/步` 与 `prov_pairs/步` 之比 ⇒ 平均每对样本数；两类查询的成本再与
+    /// `narrowphase_us` 对照（提供者侧的桶/三角搜索在 `vxl-phys-terrain` 内，不属本计数器
+    /// ——若两步都对不上，下一刀进提供者实现）。
+    pub prov_pairs: u64,
+    pub prov_bulk: u64,
+    pub prov_samples: u64,
 }
 
 /// 窄相剖析读数（`probe_stats` 的返回；字段语义见 `ProbeCounters`）。
@@ -104,6 +116,9 @@ pub struct ProbeStats {
     pub poly_fill_verts: u64,
     pub hull_fills: u64,
     pub hull_fill_verts: u64,
+    pub prov_pairs: u64,
+    pub prov_bulk: u64,
+    pub prov_samples: u64,
 }
 
 #[derive(Clone)]
@@ -151,6 +166,9 @@ impl DefaultNarrowPhase {
             poly_fill_verts: self.probe.poly_fill_verts,
             hull_fills: self.probe.hull_fills,
             hull_fill_verts: self.probe.hull_fill_verts,
+            prov_pairs: self.probe.prov_pairs,
+            prov_bulk: self.probe.prov_bulk,
+            prov_samples: self.probe.prov_samples,
         }
     }
 }

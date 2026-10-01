@@ -404,6 +404,12 @@ fn report(name: &str, w: &World, s: &Stats) {
         per(p.hull_fills),
         per(p.hull_fill_verts),
     );
+    println!(
+        "  provider 分派/步：对 {:.0}（盒/球一次性查询 {:.0}）· 逐样本查询 {:.0} 次（含胶囊沿轴球）",
+        per(p.prov_pairs),
+        per(p.prov_bulk),
+        per(p.prov_samples),
+    );
     let lp = w.solver.last_points;
     println!(
         "  点承载力（**上一次解算调用**＝一个子步）：被解算接触点 {} 个，其中法向冲量≈0 的 {} 个（{:.1}%）",
