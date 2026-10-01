@@ -109,3 +109,41 @@ fn scratch_free_cloth_on_frozen_dynamic_proxy() {
     let _ = run(w_p / 0.16, "0.16", 0.05, true);
     let _ = run(w_p / 2.0, "2", 0.05, true);
 }
+
+/// **单粒子降维**（去布片连通性）：一颗粒子自由落 → 冻结盒顶（w_b>0），逐 tick 打
+/// 位置/速度/体的 dv，量出"每子步被移除多少接近速度"。
+#[test]
+fn scratch_single_particle_removal_rate() {
+    let mut s = ClothSheet::new(
+        vec![Vec3::new(0.0, 0.35, 0.0)],
+        vec![],
+        1000.0,
+        0.01,
+        Stiffness::Hard,
+    );
+    s.substeps = 8;
+    s.contact.friction = 0.0;
+    let w_p = s.inv_mass[0];
+    println!("单粒子：w_p={w_p:.3}，盒顶 y=0（半高 0.05），冻结 w_b=w_p/0.16={:.3}", w_p / 0.16);
+    let shape = Shape::Box {
+        half: Vec3::new(0.2, 0.05, 0.2),
+    };
+    for t in 0..40 {
+        let proxy = RigidProxy {
+            body: 0,
+            shape,
+            pos: Vec3::new(0.0, -0.05, 0.0),
+            rot: Quat::IDENTITY,
+            linvel: Vec3::ZERO,
+            angvel: Vec3::ZERO,
+            local_inv_inertia: Vec3::ZERO,
+            inv_mass: w_p / 0.16,
+        };
+        s.step(DT, G, &NoProviders, 0, std::slice::from_ref(&proxy));
+        let y = s.pos[0].y;
+        let v = s.vel[0].y;
+        let dv = s.body.dv.first().map(|d| d.y).unwrap_or(0.0);
+        let dx = s.body.dx.first().map(|d| d.y).unwrap_or(0.0);
+        println!("t={t:>2} y={y:+.5} v={v:+.5} body_dv_y={dv:+.5} body_dx_y={dx:+.5}");
+    }
+}
