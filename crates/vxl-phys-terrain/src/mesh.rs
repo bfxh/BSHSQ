@@ -15,8 +15,45 @@
 //! （默认 `skin ≈ 0.02`、`bin ≥ 0.5` 时余量充足）。确定性：顶点/三角形序决定一切，
 //! 无 HashMap 迭代序依赖。
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use vxl_phys_core::interop::{InteropContact, ProviderColliders};
 use vxl_phys_core::{Aabb, Mat3, Quat, Vec3};
+
+/// **三角网查询的内部计数**（剖析用，`docs/EXPERIMENTS.md`「第三刀」）。全局原子、**按
+/// 1/256 采样**内外层（原子自增在大网格上会自己淹没被测段——本相 ~3.4k 次 closest/步）：
+/// - `TRI_QUERIES` / `TRI_FULL_SCANS`：**精确**（每次 closest / 每次全扫兜底）；
+/// - `TRI_BINS` / `TRI_TESTS`：采样查询里处理的**非空桶数** / **候选三角数**（= `closest_on_tri`
+///   调用数）；均值 = 计数 / `TRI_SAMPLES`。
+static TRI_QUERIES: AtomicU64 = AtomicU64::new(0);
+static TRI_SAMPLES: AtomicU64 = AtomicU64::new(0);
+static TRI_BINS: AtomicU64 = AtomicU64::new(0);
+static TRI_TESTS: AtomicU64 = AtomicU64::new(0);
+static TRI_FULL_SCANS: AtomicU64 = AtomicU64::new(0);
+
+/// 采样分母（每 N 次 closest 采 1 次内外层计数）。
+const TRI_PROBE_EVERY: u64 = 256;
+
+/// 三角网查询读数（字段语义见上方注释；`tests/samples` 即"每次采样查询的候选三角数"）。
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TriQueryStats {
+    pub queries: u64,
+    pub samples: u64,
+    pub bins: u64,
+    pub tests: u64,
+    pub full_scans: u64,
+}
+
+/// 读当前计数（全程累计；bench 除以步数得每步均值——与既有窄相计数同口径）。
+pub fn tri_query_stats() -> TriQueryStats {
+    TriQueryStats {
+        queries: TRI_QUERIES.load(Ordering::Relaxed),
+        samples: TRI_SAMPLES.load(Ordering::Relaxed),
+        bins: TRI_BINS.load(Ordering::Relaxed),
+        tests: TRI_TESTS.load(Ordering::Relaxed),
+        full_scans: TRI_FULL_SCANS.load(Ordering::Relaxed),
+    }
+}
 
 /// 桶边长下限（m）：保证「皮肤带 < bin/2」的精度前提在细网格上也成立。
 pub const MIN_BIN: f32 = 0.5;
@@ -197,6 +234,11 @@ impl TriMesh {
     /// 3×3×3 ≈100 三角形/查询）下窄相耗时大幅下降。`f32::INFINITY` = 不剪枝
     /// （测试里的精确对照用）。
     fn closest(&self, p: Vec3, max_d: f32) -> Option<(f32, Vec3, Vec3, usize)> {
+        let qn = TRI_QUERIES.fetch_add(1, Ordering::Relaxed);
+        let sampled = qn.is_multiple_of(TRI_PROBE_EVERY);
+        if sampled {
+            TRI_SAMPLES.fetch_add(1, Ordering::Relaxed);
+        }
         let mut best: Option<(f32, Vec3, Vec3, usize)> = None;
         let consider = |ti: usize, best: &mut Option<(f32, Vec3, Vec3, usize)>| {
             let t = self.tris[ti];
@@ -218,6 +260,7 @@ impl TriMesh {
                 let cz = ((p.z - g.origin.z) / g.bin).floor();
                 if cx < -1.0 || cy < -1.0 || cz < -1.0 {
                     // 远在场外：全扫（保守；上层有机体 AABB 早已筛掉绝大多数）
+                    TRI_FULL_SCANS.fetch_add(1, Ordering::Relaxed);
                     for ti in 0..self.tris.len() {
                         consider(ti, &mut best);
                     }
@@ -258,6 +301,10 @@ impl TriMesh {
                                     continue;
                                 }
                             }
+                            if sampled {
+                                TRI_BINS.fetch_add(1, Ordering::Relaxed);
+                                TRI_TESTS.fetch_add(g.bins[i].len() as u64, Ordering::Relaxed);
+                            }
                             for &ti in &g.bins[i] {
                                 consider(ti as usize, &mut best);
                             }
@@ -267,6 +314,7 @@ impl TriMesh {
                 best
             }
             None => {
+                TRI_FULL_SCANS.fetch_add(1, Ordering::Relaxed);
                 for ti in 0..self.tris.len() {
                     consider(ti, &mut best);
                 }

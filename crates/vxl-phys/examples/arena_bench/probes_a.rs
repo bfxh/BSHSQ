@@ -410,6 +410,14 @@ fn report(name: &str, w: &World, s: &Stats) {
         per(p.prov_bulk),
         per(p.prov_samples),
     );
+    let t = vxl_phys_terrain::mesh::tri_query_stats();
+    println!(
+        "  三角网内部/步：closest {:.0} 次 · 全扫兜底 {:.0} 次 · 采样 1/256：非空桶 {:.1}/查询、候选三角 {:.1}/查询",
+        per(t.queries),
+        per(t.full_scans),
+        t.bins as f64 / t.samples.max(1) as f64,
+        t.tests as f64 / t.samples.max(1) as f64,
+    );
     let lp = w.solver.last_points;
     println!(
         "  点承载力（**上一次解算调用**＝一个子步）：被解算接触点 {} 个，其中法向冲量≈0 的 {} 个（{:.1}%）",
