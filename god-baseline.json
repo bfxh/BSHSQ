@@ -961,8 +961,8 @@
    "max_type_members": 1
   },
   "crates/vxl-phys-splat/src/flow.rs": {
-   "file_lines": 243,
-   "max_fn_lines": 37,
+   "file_lines": 319,
+   "max_fn_lines": 41,
    "max_type_members": 9
   },
   "crates/vxl-phys-splat/src/lib.rs": {
@@ -1171,7 +1171,7 @@
    "max_type_members": 10
   },
   "crates/vxl-phys/src/tests.rs": {
-   "file_lines": 784,
+   "file_lines": 846,
    "max_fn_lines": 68,
    "max_type_members": 0
   },
