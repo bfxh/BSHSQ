@@ -8,11 +8,15 @@
 //! `max_type_members = 23/24`，且该文件 `max_fn_lines = 0` ⇒ 没有"函数变短"可交换）⇒ 加字段即红。
 //! 于是账一律**现算**：输入是既有状态（体集 + 反作用表），输出是一个可断言的数字。
 //!
-//! ## 契约两件（本文件的全部对外语义）
+//! ## 契约三件（本文件的全部对外语义）
 //!
 //! - [`is_receptor`] / [`add_force`]：**受体门的唯一定义处**。`PLAN-COUPLING.md` §2 B1 记录了原先
 //!   三种写法（无门 / 只看 `is_dynamic` / `+awake`）散在十条写入点上；C1 起，门面侧的写入
 //!   统一走这里。
+//! - [`Channel`] / [`Reaction`] / [`apply_round`]：**三通道与统一施加器**（§3.5/§3.6 的
+//!   `ReactionSink` 落地形态）。多通道域（流体 2b、软体两腿）把作用**产出**成 `Reaction`
+//!   迭代器交给 `apply_round`；单通道 Force 域（介质/气动）留在 [`add_force`] 这个唯一漏斗上
+//!   （段位在子步内、逐体即时施加，转经列表只增间接不改账——如实登记的偏差，见 §5 C3）。
 //! - [`dropped_force_writes`] / [`fluid_reaction_ledger`]：**两条账**。
 //!   前者量"静默丢弃的暴露面"（睡眠/静态体上仍挂着非零 `force/torque`——它们会被积分器置零丢掉）；
 //!   后者量"2b 反作用交给了不动的体多少力"（流体那边**照样付了**，这是 §2 A1 的账）。
@@ -49,6 +53,82 @@ pub(crate) fn add_force(bodies: &mut BodySet, i: usize, force: Vec3, torque: Vec
     if is_receptor(bodies, i) {
         bodies.force[i] += force;
         bodies.torque[i] += torque;
+    }
+}
+
+/// **通道**（`PLAN-COUPLING.md` §3.0：任何跨域作用都必须声明它走哪条通道）。
+///
+/// 三通道的**段位差别**就是"什么时候生效"的答案（§3.5）：Force 影响**下一个**子步的速度
+/// （累加器在子步 E 被消费）；Impulse 立即改速度（影响**本**子步的位置积分）；Position
+/// 直接改位置（不改速度）。**段位由产出侧决定**—— [`apply_round`] 只负责"按声明施加"。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Channel {
+    /// 力/力矩（子步开头累加到 `bodies.force/torque`，`Integrator` 消费）。
+    Force,
+    /// 速度增量 `Δv`（软体两腿的速度腿，§8.4.9）。
+    Impulse,
+    /// 位移 `Δx`（软体两腿的位置补足；只补位置不补速度）。
+    Position,
+}
+
+/// **一次跨域作用**（统一施加器的载荷；§4.2 的落地形态）。
+///
+/// `vec` 按通道解释：Force = 力、Impulse = `Δv`、Position = `Δx`；`torque` 只用于 Force
+/// （其余通道传 `Vec3::ZERO`）。**门不在本类型上**：Force 经 [`add_force`] 的受体门；
+/// Impulse/Position 的门在**产出侧**（软体 = 代理快照 `inv_mass > 0`，§8.4.27——与
+/// [`is_receptor`] 语义等价但求值时刻固定在代理重建点）。
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Reaction {
+    pub(crate) body: u32,
+    pub(crate) channel: Channel,
+    pub(crate) vec: Vec3,
+    pub(crate) torque: Vec3,
+}
+
+impl Reaction {
+    /// Force 通道（力 + 力矩；只写力的调用点传 `Vec3::ZERO`）。
+    pub(crate) fn force(body: u32, force: Vec3, torque: Vec3) -> Self {
+        Self {
+            body,
+            channel: Channel::Force,
+            vec: force,
+            torque,
+        }
+    }
+    /// Impulse 通道（速度增量 `Δv`）。
+    pub(crate) fn velocity(body: u32, dv: Vec3) -> Self {
+        Self {
+            body,
+            channel: Channel::Impulse,
+            vec: dv,
+            torque: Vec3::ZERO,
+        }
+    }
+    /// Position 通道（位移 `Δx`）。
+    pub(crate) fn position(body: u32, dx: Vec3) -> Self {
+        Self {
+            body,
+            channel: Channel::Position,
+            vec: dx,
+            torque: Vec3::ZERO,
+        }
+    }
+}
+
+/// **统一施加器**（§3.6 的 `ReactionSink`）：**唯一**允许把跨域量写进 `bodies` 的地方
+/// （引擎自用的求解器/关节/CCD 除外；"唯一落点"由 `tests/coupling_sole_writer.rs` 机械断言）。
+///
+/// 施加**逐条、按传入序** ⇒ 产出侧的序就是写入序（位级确定的载体）；**不设门**（门在
+/// [`Reaction`] 的文档里定了口径）。`rounds` 是迭代器 ⇒ **零分配**、也不用给 `World`
+/// 加缓冲字段（成员位是 god 门棘轮下的紧俏资源）。
+pub(crate) fn apply_round(bodies: &mut BodySet, rounds: impl IntoIterator<Item = Reaction>) {
+    for r in rounds {
+        let b = r.body as usize;
+        match r.channel {
+            Channel::Force => add_force(bodies, b, r.vec, r.torque),
+            Channel::Impulse => bodies.linvel[b] += r.vec,
+            Channel::Position => bodies.position[b] += r.vec,
+        }
     }
 }
 
@@ -154,35 +234,36 @@ pub(crate) fn add_tick_torque(
     }
 }
 
-/// **反作用两腿回填**（绳/布共用）= 软体耦合的施加器（Impulse 通道 `Δv` + Position 通道 `Δx`）。
-///
-/// `linvel += dv`（速度口径）+ `position += dx`（位置口径补足，§8.4.9 —— 只补位置不补速度，
-/// 否则会把位置修正反射成速度）。**静态/睡眠体不收反作用**（代理里 `inv_mass = 0`，§8.4.27）；
-/// `proxies` 与 `dv`/`dx` 同序（`rebuild_soft_proxies` 按 `0..bodies.len()` 建 ⇒ 体号恒在界内）。
+/// **软体两腿的产出侧 + 施加**（绳/布共用）：`(proxies, Δv, Δx)` → [`Reaction`] 序 →
+/// [`apply_round`]。`linvel += dv`（速度口径）+ `position += dx`（位置口径补足，§8.4.9 ——
+/// 只补位置不补速度，否则会把位置修正反射成速度）。**静态/睡眠体不收反作用**（代理里
+/// `inv_mass = 0`，§8.4.27——**门在产出侧**，与 [`is_receptor`] 语义等价但求值时刻固定在
+/// 代理重建点）；`proxies` 与 `dv`/`dx` 同序（`rebuild_soft_proxies` 按 `0..bodies.len()` 建）。
 /// **自由函数而不是方法**：调用点里 `rope`/`cloth` 已借着 `self.soft`，方法会与
 /// `&mut self.bodies` 冲突；自由函数让两个字段各自借用。
 ///
-/// **C3 片 2 第 1 步（2026-10-01）**：本体从 `world_soft.rs` **纯搬移**来此（施加侧的唯一落点，
-/// 行为逐位不变——同一循环、同一 `get` 语义、同一写入序）。
+/// **C3 片 2（2026-10-01）**：本体由 `world_soft.rs` 搬来（片 2 第 1 步）后依统一施加器重排
+/// （片 2 本体）——序 = 代理序 × `[Impulse, Position]`，与重排前的两腿循环**同一加法序
+/// ⇒ 行为逐位不变**；迭代器构造零分配。
 pub(crate) fn apply_two_leg_reactions(
     bodies: &mut BodySet,
     proxies: &[RigidProxy],
     dv: &[Vec3],
     dx: &[Vec3],
 ) {
-    for (j, p) in proxies.iter().enumerate() {
-        if p.inv_mass <= 0.0 {
-            continue; // 静态/睡眠体不收反作用
-        }
-        let b = p.body as usize;
-        // 与提取前**逐字同款**：`dv`/`dx` 取 `get`（长度不足即跳过），体的下标直接索引。
-        if let Some(v) = dv.get(j) {
-            bodies.linvel[b] += *v;
-        }
-        if let Some(d) = dx.get(j) {
-            bodies.position[b] += *d;
-        }
-    }
+    let rounds = proxies
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.inv_mass > 0.0)
+        .flat_map(|(j, p)| {
+            [
+                dv.get(j).copied().map(|v| Reaction::velocity(p.body, v)),
+                dx.get(j).copied().map(|d| Reaction::position(p.body, d)),
+            ]
+            .into_iter()
+            .flatten()
+        });
+    apply_round(bodies, rounds);
 }
 
 /// **把耦合的账填进 `HealthReport`**（`World::health()` 的调用点；真消费者 ⇒ 审计不是死代码）。
@@ -276,6 +357,30 @@ mod tests {
         assert_eq!(led.handed_tau, led.applied_tau + led.dropped_tau);
         assert_eq!((led.handed_bodies, led.dropped_bodies), (4, 3));
         assert_eq!(led.dropped_tau, mk(3.5));
+    }
+
+    /// ⑥ **统一施加器**：三通道各自落点正确；Force 过门（睡眠不收）、Impulse/Position 按产出侧
+    /// 序直写（语义钉死在 [`Reaction`] 的文档里：门在产出侧，施加器不再设门）。
+    #[test]
+    fn apply_round_dispatches_three_channels() {
+        use super::{apply_round, Reaction};
+        let (mut b, [dyn_id, sleep_id, _static_id]) = bodies3();
+        let f = Vec3::new(1.0, 2.0, 3.0);
+        let dv = Vec3::new(0.5, 0.0, 0.0);
+        let dx = Vec3::new(0.0, 0.25, 0.0);
+        apply_round(
+            &mut b,
+            [
+                Reaction::force(dyn_id as u32, f, Vec3::ZERO),
+                Reaction::force(sleep_id as u32, f, Vec3::ZERO), // 睡眠 ⇒ 受体门挡下
+                Reaction::velocity(dyn_id as u32, dv),
+                Reaction::position(dyn_id as u32, dx),
+            ],
+        );
+        assert_eq!(b.force[dyn_id], f, "Force 落点");
+        assert_eq!(b.force[sleep_id], Vec3::ZERO, "Force 过门（睡眠不收）");
+        assert_eq!(b.linvel[dyn_id], dv, "Impulse 落点");
+        assert_eq!(b.position[dyn_id], dx, "Position 落点");
     }
 
     /// ④ **端到端**：真 2b 场景（静态地板 + 水块）⇒ 流体确实把力交给了"不动的体"，

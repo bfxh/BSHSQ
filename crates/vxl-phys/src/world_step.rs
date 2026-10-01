@@ -219,7 +219,8 @@ impl World {
                 if a > 0.0 && sp > 1e-6 {
                     f += v_rel * (-0.5 * rho * DRAG_CD * a * sp);
                 }
-                self.bodies.force[i] += f;
+                // 经统一施加器的力通道（C3 片 2：原先就地写累加器，违反"唯一落点"）。
+                coupling::add_force(&mut self.bodies, i, f, Vec3::ZERO);
             }
         }
     }
@@ -232,12 +233,16 @@ impl World {
             if !self.fluid_boundary.is_two_b(fi) {
                 continue;
             }
+            // 经**统一施加器**（C3 片 2）：产出侧 = 段表序 × 段内序，施加器逐条按序施加
+            // （Force 通道内含受体门：越界/静态/睡眠/零质量一个字都不写）。被挡下的那部分
+            // **有账**：`coupling::fluid_reaction_ledger` 量它。
             let reacts = fluid_stepper::reactions_of(&self.fluids[fi]);
-            for &(body, f, tau) in reacts {
-                // 经门写（`coupling::add_force` 内含受体门：越界/静态/睡眠/零质量一个字都不写）。
-                // 被挡下的那部分**有账**：`coupling::fluid_reaction_ledger` 量它。
-                coupling::add_force(&mut self.bodies, body as usize, f, tau);
-            }
+            coupling::apply_round(
+                &mut self.bodies,
+                reacts
+                    .iter()
+                    .map(|&(body, f, tau)| coupling::Reaction::force(body, f, tau)),
+            );
         }
     }
 
