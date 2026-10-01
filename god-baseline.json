@@ -1211,7 +1211,7 @@
    "max_type_members": 10
   },
   "crates/vxl-phys/src/world_step.rs": {
-   "file_lines": 344,
+   "file_lines": 349,
    "max_fn_lines": 99,
    "max_type_members": 6
   },
@@ -1221,9 +1221,9 @@
    "max_type_members": 1
   },
   "crates/vxl-phys/src/world_step/coupling.rs": {
-   "file_lines": 359,
+   "file_lines": 464,
    "max_fn_lines": 34,
-   "max_type_members": 0
+   "max_type_members": 3
   },
   "crates/vxl-phys/src/world_step/fluid_stepper.rs": {
    "file_lines": 81,
@@ -1288,6 +1288,11 @@
   "crates/vxl-phys/tests/coupling_rounds.rs": {
    "file_lines": 92,
    "max_fn_lines": 34,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys/tests/coupling_sole_writer.rs": {
+   "file_lines": 75,
+   "max_fn_lines": 35,
    "max_type_members": 0
   },
   "crates/vxl-phys/tests/debris_mass.rs": {
@@ -2355,6 +2360,10 @@
   "crates/vxl-phys::Providers": {
    "fields": 1,
    "methods": 12
+  },
+  "crates/vxl-phys::Reaction": {
+   "fields": 0,
+   "methods": 3
   },
   "crates/vxl-phys::Read": {
    "fields": 4,
