@@ -72,6 +72,38 @@ pub struct ProbeCounters {
     /// 路径的面顶点数无小常数上界（圆柱面 = n 边形、凸包面可达数十顶点），
     /// 只有实测峰值才能支撑"定长 16 是否安全"的判断。
     pub clip_max: u64,
+    /// **窄相四段剖析（2026-10-01 第一刀）**：把"固定开销 vs 内层行走"的归因补齐到四段
+    /// （多面体填充 / SAT / 裁剪 / 特征+装配）——前两段原先没有计数：
+    /// - `sat_pairs` / `sat_pairs_box`：进 SAT 的对数 / 其中走**盒对快路径**（轴由体轴直生、
+    ///   **不填多面体**）的对数 ⇒ 盒对占比 = 快路径覆盖率；
+    /// - `poly_fills` / `poly_fill_verts`：世界多面体**未命中**填充次数 / 填充顶点总数
+    ///   （圆柱/圆锥等通用路径的固定开销来源；盒对恒 0）；
+    /// - `hull_fills` / `hull_fill_verts`：外壳世界点缓存未命中填充（GJK 路径）。
+    ///
+    /// 判读：`poly_fill_verts/步` 与 `clip_iters/步` 同尺比 ⇒ 填充 vs 裁剪谁在吃时间；
+    /// 二者之和远小于 `narrowphase_us` ⇒ 大头在**每对固定开销**（面选择/装配/归约）。
+    pub sat_pairs: u64,
+    pub sat_pairs_box: u64,
+    pub poly_fills: u64,
+    pub poly_fill_verts: u64,
+    pub hull_fills: u64,
+    pub hull_fill_verts: u64,
+}
+
+/// 窄相剖析读数（`probe_stats` 的返回；字段语义见 `ProbeCounters`）。
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ProbeStats {
+    pub clip_calls: u64,
+    pub clip_iters: u64,
+    pub clip_xings: u64,
+    pub cand_pts: u64,
+    pub clip_max: u64,
+    pub sat_pairs: u64,
+    pub sat_pairs_box: u64,
+    pub poly_fills: u64,
+    pub poly_fill_verts: u64,
+    pub hull_fills: u64,
+    pub hull_fill_verts: u64,
 }
 
 #[derive(Clone)]
@@ -105,14 +137,20 @@ pub struct DefaultNarrowPhase {
 }
 
 impl DefaultNarrowPhase {
-    /// 诊断读数：(裁剪调用数, 内层迭代总数, 插值总数, 候选点总数, 裁剪多边形峰值)。
-    pub fn probe_stats(&self) -> (u64, u64, u64, u64, u64) {
-        (
-            self.probe.clip_calls,
-            self.probe.clip_iters,
-            self.probe.clip_xings,
-            self.probe.cand_pts,
-            self.probe.clip_max,
-        )
+    /// 诊断读数（字段语义与判读见 `ProbeCounters`）。
+    pub fn probe_stats(&self) -> ProbeStats {
+        ProbeStats {
+            clip_calls: self.probe.clip_calls,
+            clip_iters: self.probe.clip_iters,
+            clip_xings: self.probe.clip_xings,
+            cand_pts: self.probe.cand_pts,
+            clip_max: self.probe.clip_max,
+            sat_pairs: self.probe.sat_pairs,
+            sat_pairs_box: self.probe.sat_pairs_box,
+            poly_fills: self.probe.poly_fills,
+            poly_fill_verts: self.probe.poly_fill_verts,
+            hull_fills: self.probe.hull_fills,
+            hull_fill_verts: self.probe.hull_fill_verts,
+        }
     }
 }

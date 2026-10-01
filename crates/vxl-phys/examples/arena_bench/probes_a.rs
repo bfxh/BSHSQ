@@ -389,11 +389,20 @@ fn report(name: &str, w: &World, s: &Stats) {
     let per = |v: u64| v as f64 / MEASURE as f64;
     println!(
         "  窄相计数/步：裁剪 {:.0} 次（内层迭代 {:.1}/次、插值 {:.2}/次、候选点 {:.2}/次）  裁剪多边形峰值 {} 顶点",
-        per(p.0),
-        per(p.1) / per(p.0).max(1.0),
-        per(p.2) / per(p.0).max(1.0),
-        per(p.3) / per(p.0).max(1.0),
-        p.4,
+        per(p.clip_calls),
+        per(p.clip_iters) / per(p.clip_calls).max(1.0),
+        per(p.clip_xings) / per(p.clip_calls).max(1.0),
+        per(p.cand_pts) / per(p.clip_calls).max(1.0),
+        p.clip_max,
+    );
+    println!(
+        "  窄相四段/步（**全为每步均值**）：SAT 对数 {:.0}（盒对快路径 {:.0}）· 多面体填充 {:.0} 次/{} 顶点 · 外壳填充 {:.0} 次/{} 顶点",
+        per(p.sat_pairs),
+        per(p.sat_pairs_box),
+        per(p.poly_fills),
+        per(p.poly_fill_verts),
+        per(p.hull_fills),
+        per(p.hull_fill_verts),
     );
     let lp = w.solver.last_points;
     println!(
