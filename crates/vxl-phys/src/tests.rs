@@ -349,6 +349,68 @@ fn splat_medium_two_way_reduces_drag() {
     );
 }
 
+/// **D3 切片 2（平流）**：同场景两条 run 仅差 `set_two_way`（与上一条同款 16 核云 + 落盒）。
+/// 判据：① 关档核中心**逐位不动**（advance 首行短路）；② 开档有位移且**净位移方向 = 体失去的
+/// 动量方向**（体下落 ⇒ 介质获 −y ⇒ 核朝 −y 漂）。
+#[test]
+fn splat_medium_two_way_advects_kernels() {
+    let run = |two_way: bool| -> (Vec<Vec3>, Vec<Vec3>) {
+        let mut w = World::new(PhysConfig::default());
+        let mut f = vxl_phys_splat::GaussianSplatField::new(4.0); // iso 高 ⇒ 纯介质、无接触
+        for k in 0..16 {
+            f.push(vxl_phys_splat::Splat::isotropic(
+                Vec3::new(0.0, 1.0 + k as f32 * 0.5, 0.0),
+                0.45,
+                0.6,
+            ));
+        }
+        f.medium_density = 6.0;
+        f.set_two_way(two_way);
+        let c0: Vec<Vec3> = f.splats().iter().map(|s| s.center).collect();
+        w.add_splat_field(f);
+        let _b = w.add_dynamic(
+            Shape::Box {
+                half: Vec3::splat(0.3),
+            },
+            Vec3::new(0.0, 9.0, 0.0),
+            Quat::IDENTITY,
+            1.0,
+        );
+        for _ in 0..90 {
+            w.step();
+        }
+        assert!(w.providers.splat(0).is_some(), "splat field 已注册");
+        if let Some(fld) = w.providers.splat(0) {
+            let dc: Vec<Vec3> = fld
+                .splats()
+                .iter()
+                .zip(&c0)
+                .map(|(s, c)| s.center - *c)
+                .collect();
+            (dc, fld.kernel_velocities().to_vec())
+        } else {
+            (Vec::new(), Vec::new())
+        }
+    };
+    let (dc_off, _) = run(false);
+    let (dc_on, kv_on) = run(true);
+    // ① 关档金丝雀：核中心逐位不动（默认档零代际的几何侧证据）。
+    assert!(dc_off.iter().all(|d| *d == Vec3::ZERO), "关档核不动");
+    // ② 开档：有位移 + 净向 −y（体失去的动量方向）+ 净位移量有分辨力。
+    let sum = dc_on.iter().fold(Vec3::ZERO, |a, d| a + *d);
+    let moved = dc_on.iter().filter(|d| **d != Vec3::ZERO).count();
+    assert!(moved > 0, "开档至少一个核发生平流");
+    assert!(kv_on.iter().any(|v| v.length() > 0.0), "开档速度场非空");
+    assert!(
+        sum.y < -0.01,
+        "净位移应朝 −y（体失去的动量方向）：sum={sum:?}（核数 moved={moved}）"
+    );
+    println!(
+        "平流：moved={moved}/16  ΣΔ={sum:?}（|Σ|={:.4} m）",
+        sum.length()
+    );
+}
+
 /// **网格域（M3 扩展）**：盒落在三角网格地面上并停住（薄壳接触；
 /// 8 顶点 + 6 面心采样 ⇒ 底四角多点接触）。
 #[test]

@@ -9,8 +9,11 @@
 //!   只是动量分摊的口径，不动核的几何）；
 //! - **`sample` 的速度项（介质→体）**：two_way 时读**核速度的 e 加权插值**
 //!   （无近核 ⇒ 回落常值 `medium_velocity`）；
-//! - **`advance(dt)`（域轮次加一格）**：逐核速度按 `damping` 衰减。本片**不移动核位置**
-//!   （位置演化 + `rebuild_grid` 一致性属切片 2，见 PLAN §4.3 的 ①②③）。
+//! - **`advance(dt)`（域轮次加一格）**：逐核**平流**（`center += v·dt`）后按 `damping` 衰减；
+//!   核一动均匀网格即脏（`grid = None` ⇒ 查询自动退回全扫，与网格逐位一致；需要加速由
+//!   消费者再 `rebuild_grid()`）。⚠️ 已知边界（切片 3 候选）：世界侧的提供者包围盒
+//!   （`provider_bounds`）与 `world_bounds` **不随核漂移刷新**——核漂出注册时的包围盒后，
+//!   介质采样与宽相 AABB 不覆盖新位置。
 //!
 //! **默认关（`two_way = false`）**：`sample` 速度恒为常值、`deposit`/`advance` 空操作
 //! ⇒ 默认档逐位不变（金样/四哈希守门）。确定性：候选走与 `density_grad` 同一
@@ -80,7 +83,7 @@ impl GaussianSplatField {
     }
 
     /// **体→介质的反作用沉积**（`MediumField::deposit` 的实现体；two_way 关 ⇒ 空操作）。
-    /// `mass`/`pressure_work` 本片只做审计参数（未消费，切片 2 的账本用）。
+    /// `mass`/`pressure_work` 暂只做审计参数（未消费；留给对称记账片）。
     pub(crate) fn deposit_flow(&mut self, x: Vec3, momentum: Vec3, mass: f32, pressure_work: f32) {
         let _ = (mass, pressure_work);
         if !self.two_way || momentum == Vec3::ZERO {
@@ -119,14 +122,24 @@ impl GaussianSplatField {
         self.absorbed += momentum;
     }
 
-    /// **介质推进**（域轮次加一格；每 tick 一次）：逐核速度按 `damping` 衰减。
-    /// 本片**不移动核位置**——`dt` 形参留给切片 2 的位置演化（`pos += v·dt` + `rebuild_grid`）。
-    pub fn advance(&mut self, _dt: f32) {
-        if !self.two_way {
+    /// **介质推进**（域轮次加一格；每 tick 一次）：逐核**平流**（`center += v·dt`）后按
+    /// `damping` 衰减。零速核跳过（不产生位移、也不动几何）⇒ 无流时逐位不变。核一动，
+    /// 均匀网格登记的中心即失效 ⇒ `grid = None`（查询退回全扫，与网格逐位一致）。
+    pub fn advance(&mut self, dt: f32) {
+        if !self.two_way || self.kern_vel.is_empty() {
             return;
         }
-        for v in &mut self.kern_vel {
+        let mut moved = false;
+        for (k, v) in self.kern_vel.iter_mut().enumerate() {
+            if *v == Vec3::ZERO {
+                continue;
+            }
+            self.splats[k].center += *v * dt;
             *v *= self.damping;
+            moved = true;
+        }
+        if moved {
+            self.grid = None; // 脏（切片 2 由消费者按需 rebuild；全扫与网格逐位一致）
         }
     }
 
@@ -238,5 +251,68 @@ mod tests {
         }
         let v1 = f.kernel_velocities()[1].x;
         assert_eq!(v1, v0 * 0.5 * 0.5 * 0.5, "三次衰减 = ×0.125（f32 精确）");
+    }
+
+    /// ⑤ **平流精确**（切片 2）：一步后 `center += v₀·dt`、同一步内 `v ← v₀·damping`（逐位）。
+    #[test]
+    fn advance_advects_exactly_one_step() {
+        let mut f = GaussianSplatField::new(0.5);
+        f.push(Splat::isotropic(Vec3::ZERO, 0.05, 1.0));
+        f.medium_density = 2.0;
+        f.set_two_way(true);
+        f.damping = 0.5;
+        f.deposit(Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0), 0.0, 0.0);
+        let v0 = f.kernel_velocities()[0];
+        let c0 = f.splats()[0].center;
+        let dt = 1.0f32 / 60.0;
+        f.advance(dt);
+        assert_eq!(f.splats()[0].center, c0 + v0 * dt, "平流一步（逐位）");
+        assert_eq!(f.kernel_velocities()[0], v0 * 0.5, "同一步内衰减 ×damping");
+        assert!(v0.x > 0.0, "用例非平凡：该核确实有速度");
+    }
+
+    /// ⑥ **平流后网格一致性**（切片 2）：移动若干步 + `rebuild_grid()` ⇒ 加速路径与**全扫**
+    /// 逐位相同（`candidate_ids` 是唯一定义处；网格只做候选裁剪，不改浮点求和序）。
+    #[test]
+    fn grid_agrees_with_brute_force_after_advection() {
+        let mut f = GaussianSplatField::new(0.5);
+        for k in 0..64 {
+            let c = Vec3::new((k % 8) as f32 * 0.3, (k / 8) as f32 * 0.3, 0.0);
+            f.push(Splat::isotropic(c, 0.35, 1.0));
+        }
+        f.medium_density = 1.0;
+        f.set_two_way(true);
+        for k in 0..64 {
+            let c = Vec3::new((k % 8) as f32 * 0.3, (k / 8) as f32 * 0.3, 0.0);
+            f.deposit(c, Vec3::new(0.02, -0.01, 0.0), 0.0, 0.0);
+        }
+        let c_before = f.splats()[0].center;
+        for _ in 0..10 {
+            f.advance(1.0 / 60.0);
+        }
+        assert_ne!(f.splats()[0].center, c_before, "平流确实发生（用例非平凡）");
+        f.rebuild_grid();
+        // 先取**网格路径**的读数，再借出网格走**全扫**对比，最后归还——免 `clone`（clone-gate：
+        // 只准减）且两侧查询的是同一份 splat 状态（唯一差异 = 候选集来源）。
+        let mut grid_got = Vec::new();
+        for i in 0..40 {
+            let p = Vec3::new(
+                -0.4 + i as f32 * 0.11,
+                0.35 + i as f32 * 0.06,
+                i as f32 * 0.05 - 0.25,
+            );
+            grid_got.push((p, f.density_grad(p)));
+        }
+        let grid = f.grid.take(); // 借出（None ⇒ candidates 走全扫）
+        for (p, (s1, g1)) in grid_got {
+            let (s2, g2) = f.density_grad(p);
+            assert_eq!(s1.to_bits(), s2.to_bits(), "σ 逐位（p={p:?}）");
+            assert_eq!(
+                (g1.x.to_bits(), g1.y.to_bits(), g1.z.to_bits()),
+                (g2.x.to_bits(), g2.y.to_bits(), g2.z.to_bits()),
+                "∇σ 逐位（p={p:?}）"
+            );
+        }
+        f.grid = grid; // 归还
     }
 }
