@@ -446,14 +446,26 @@ fn report(name: &str, w: &World, s: &Stats) {
         dd[3] as f64 / MEASURE as f64,
         100.0 * dd[3] as f64 / dd_sum,
     );
+    // **口径修正（2026-10-01）**：原式的两个百分比是坏的（岛构建自除恒 100%、休眠除以岛构建），
+    // 且把"最后一次解算（一个子步）"的快照又除了一遍窗口步数 ⇒ 混口径。改为**原值快照**，
+    // 并接上 `IslandDiag` 的 orchestration 分量（gather/岛构建/scope/scatter+warm）——
+    // arena 场景流形 < 4096 ⇒ `g_count == 1`（单组串行，无 spawn），scope 即"组解算墙钟"。
+    let (d_island, d_solve, d_sleep, _) = w.solver.last_phase_us;
     println!(
-        "  求解器内部：岛构建 {:>7.1} µs（{:>4.0}%） 迭代 {:>8.1} µs（{:>4.0}%） 休眠 {:>6.1} µs（{:>4.0}%）",
-        d_island as f64 / MEASURE as f64,
-        100.0 * d_island as f64 / d_island.max(1) as f64,
-        d_solve as f64 / MEASURE as f64,
-        100.0 * d_solve as f64 / (d_island + d_solve + d_sleep).max(1) as f64,
-        d_sleep as f64 / MEASURE as f64,
-        100.0 * d_sleep as f64 / d_island.max(1) as f64,
+        "  求解器相位（**最后一次解算＝一个子步**，原值）：岛 {:>7.1} · 解算 {:>8.1} · 休眠 {:>6.1} µs",
+        d_island as f64, d_solve as f64, d_sleep as f64,
+    );
+    let d = &w.solver.island_diag;
+    println!(
+        "  求解账本（同一子步原值）：gather {:>7.1} · 岛构建 {:>5.1} · scope/组 {:>7.1} · scatter+warm {:>7.1} µs（组数 {} · 流形 {} · 岛 {} · warm 槽 {}）",
+        d.fill_us as f64,
+        d.island_build_us as f64,
+        d.scope_us as f64,
+        d.scatter_us as f64,
+        d.g_count,
+        d.manifolds,
+        d.islands,
+        d.warm_count,
     );
 }
 
