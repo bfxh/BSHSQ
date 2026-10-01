@@ -411,6 +411,55 @@ fn splat_medium_two_way_advects_kernels() {
     );
 }
 
+/// **D3 切片 4a（端到端动量账）**：双向档**逐 tick 对账**——**场侧** `absorbed` 增量 ==
+/// **体侧**失去的动量（扣重力）：`Δabs = m·g·dt − m·Δv`。两侧来源独立（场累计 vs 体状态差），
+/// 把"体收到的作用 == 场吸收的动量"这条反对称钉在端到端判据上（场景与 two_way 判据同款）。
+#[test]
+fn splat_medium_momentum_ledger_matches_body_delta() {
+    let mut w = World::new(PhysConfig::default());
+    let mut f = vxl_phys_splat::GaussianSplatField::new(4.0);
+    for k in 0..16 {
+        f.push(vxl_phys_splat::Splat::isotropic(
+            Vec3::new(0.0, 1.0 + k as f32 * 0.5, 0.0),
+            0.45,
+            0.6,
+        ));
+    }
+    f.medium_density = 6.0;
+    f.set_two_way(true);
+    w.add_splat_field(f);
+    let b = w.add_dynamic(
+        Shape::Box {
+            half: Vec3::splat(0.3),
+        },
+        Vec3::new(0.0, 9.0, 0.0),
+        Quat::IDENTITY,
+        1.0,
+    ) as usize;
+    let im = w.bodies.inv_mass[b];
+    let m = if im > 0.0 { 1.0 / im } else { f32::NAN };
+    let (g_y, dt) = (w.config.gravity.y, w.config.dt);
+    let mut prev_v = w.bodies.linvel[b].y;
+    let mut prev_abs = 0.0f32;
+    let mut worst = 0.0f32;
+    for _ in 0..90 {
+        w.step();
+        let v = w.bodies.linvel[b].y;
+        let abs = match w.providers.splat(0) {
+            Some(fld) => fld.absorbed_momentum().y,
+            None => f32::NAN,
+        };
+        let dabs = abs - prev_abs;
+        let expected = m * g_y * dt - m * (v - prev_v);
+        let scale = (m * g_y * dt).abs().max((m * (v - prev_v)).abs()).max(1e-4);
+        worst = worst.max((dabs - expected).abs() / scale);
+        prev_v = v;
+        prev_abs = abs;
+    }
+    println!("动量账（90 tick，逐 tick 对账）：最坏相对误差 {worst:.3e}");
+    assert!(worst <= 1e-4, "逐 tick 账应平：最坏相对误差 {worst:.3e}");
+}
+
 /// **D3 切片 3（AABB 随核漂移刷新）**：单核场（σ=0.5 ⇒ 注册包围盒 ±2.0 m）被注入强 −y 速度
 /// 平流 1 s ⇒ 核漂 ≈1.5 m。判据：① 关档 `provider_bounds` **逐位不动**（默认档零代际）；
 /// ② 开档世界 AABB 跟随漂移（min.y 显著下移）；③ **修前会漏的几何**：漂移后的探点落在

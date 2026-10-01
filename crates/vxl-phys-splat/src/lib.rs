@@ -106,6 +106,14 @@ pub struct GaussianSplatField {
     pub medium_viscosity: f32,
     /// 介质自身的流速（风/水流；阻力按相对速度算）。**two_way 关时它是恒定背景流**。
     pub medium_velocity: Vec3,
+    /// **法向/切向分离开关**（D3 切片 4；默认关）。开 ⇒ 阻力按**等值面法线** `n̂ = −∇σ/|∇σ|`
+    /// 分离：`F = −½ρA|v|·(cd_n·v_n + cd_t·v_t)`；**零梯度处回落**为未分离式。`cd_n == cd_t`
+    /// 时也走未分离式（同式 ⇒ 逐位退化，供对拍）。
+    pub drag_split: bool,
+    /// 分离式**压力项**系数（默认 1.0 = 现行 `DRAG_CD`；仅 `drag_split` 开时被消费）。
+    pub cd_normal: f32,
+    /// 分离式**摩擦项**系数（默认 1.0；仅 `drag_split` 开时被消费）。
+    pub cd_tangent: f32,
     /// **双向耦合开关**（`flow.rs`，PLAN-COUPLING §4.3 切片 1；默认关）。
     /// 关 ⇒ `sample` 速度恒为 `medium_velocity`、`deposit`/`advance` 空操作（零代际）。
     two_way: bool,
@@ -139,6 +147,9 @@ impl GaussianSplatField {
             medium_density: 0.0,
             medium_viscosity: 0.0,
             medium_velocity: Vec3::ZERO,
+            drag_split: false,
+            cd_normal: 1.0,
+            cd_tangent: 1.0,
             two_way: false,
             kern_vel: Vec::new(),
             damping: 0.98,
