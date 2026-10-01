@@ -85,6 +85,10 @@ pub struct TriMesh {
     tris: Vec<[u32; 3]>,
     /// 面法线（单位；建时算好，查询零重算）。
     normals: Vec<Vec3>,
+    /// 三角 AABB（预计算；**分支限界**的下界查询用——让"不可能改写最优"的候选免于精确
+    /// 测试；`lb ≥ d_best` 判据数学上不改变结果，见 `closest` 内的注）。
+    tri_lo: Vec<Vec3>,
+    tri_hi: Vec<Vec3>,
     grid: Option<MeshGrid>,
 }
 
@@ -106,6 +110,8 @@ impl TriMesh {
         let n = verts.len() as u32;
         let mut kept: Vec<[u32; 3]> = Vec::with_capacity(tris.len());
         let mut normals: Vec<Vec3> = Vec::with_capacity(tris.len());
+        let mut tri_lo: Vec<Vec3> = Vec::with_capacity(tris.len());
+        let mut tri_hi: Vec<Vec3> = Vec::with_capacity(tris.len());
         for t in tris {
             if t[0] >= n || t[1] >= n || t[2] >= n {
                 continue;
@@ -120,11 +126,15 @@ impl TriMesh {
             let nrm = if ln > 1e-12 { nr * (1.0 / ln) } else { Vec3::Y };
             kept.push(t);
             normals.push(nrm);
+            tri_lo.push(a.min(b).min(c));
+            tri_hi.push(a.max(b).max(c));
         }
         Self {
             verts,
             tris: kept,
             normals,
+            tri_lo,
+            tri_hi,
             grid: None,
         }
     }
@@ -261,22 +271,18 @@ impl TriMesh {
         }
     }
 
-    /// 三角形 AABB 到 `p` 的**下界距离**（`lb ≤ 真实距离`；预筛诊断与实施共用）。
-    fn tri_aabb_lb(&self, ti: usize, p: Vec3) -> f32 {
-        let t = self.tris[ti];
-        let (a, b, c) = (
-            self.verts[t[0] as usize],
-            self.verts[t[1] as usize],
-            self.verts[t[2] as usize],
-        );
-        let lo = a.min(b).min(c);
-        let hi = a.max(b).max(c);
-        Vec3::new(
+    /// 三角形 AABB 到 `p` 的**下界距离平方**（`lb ≤ 真实距离`；分支限界与诊断共用）。
+    /// **返回平方**：判据只需比较（`lb ≥ bd ⟺ lb² ≥ bd²`，两者非负）——`length()` 的
+    /// sqrt 在热路径上比它省下的测试还贵（实测第一版带 sqrt 反而慢 13%，见 EXPERIMENTS 第五刀）。
+    fn tri_aabb_lb2(&self, ti: usize, p: Vec3) -> f32 {
+        let lo = self.tri_lo[ti];
+        let hi = self.tri_hi[ti];
+        let d = Vec3::new(
             (lo.x - p.x).max(p.x - hi.x).max(0.0),
             (lo.y - p.y).max(p.y - hi.y).max(0.0),
             (lo.z - p.z).max(p.z - hi.z).max(0.0),
-        )
-        .length()
+        );
+        d.x * d.x + d.y * d.y + d.z * d.z
     }
 
     /// 最近面查询：返回 `(距离, 面上最近点, 面法线, 三角形序号)`；空网格返回 None。
@@ -370,7 +376,7 @@ impl TriMesh {
                 }
                 if sampled && max_d.is_finite() {
                     if let Some((_, _, _, ti)) = best {
-                        if self.tri_aabb_lb(ti, p) > max_d {
+                        if self.tri_aabb_lb2(ti, p) > max_d * max_d {
                             TRI_SEL_FAR.fetch_add(1, Ordering::Relaxed);
                         }
                     }
@@ -460,7 +466,7 @@ impl ProviderColliders for TriMesh {
             return true; // 支持查询；不在带内
         }
         TRI_PUSHES.fetch_add(1, Ordering::Relaxed);
-        if self.tri_aabb_lb(ti, p) > skin {
+        if self.tri_aabb_lb2(ti, p) > skin * skin {
             TRI_PUSH_FAR.fetch_add(1, Ordering::Relaxed);
         }
         out.push(InteropContact {
@@ -490,7 +496,7 @@ impl ProviderColliders for TriMesh {
             return true;
         }
         TRI_PUSHES.fetch_add(1, Ordering::Relaxed);
-        if self.tri_aabb_lb(ti, center) > radius + skin {
+        if self.tri_aabb_lb2(ti, center) > (radius + skin) * (radius + skin) {
             TRI_PUSH_FAR.fetch_add(1, Ordering::Relaxed);
         }
         out.push(InteropContact {

@@ -976,7 +976,7 @@
    "max_type_members": 9
   },
   "crates/vxl-phys-terrain/src/mesh.rs": {
-   "file_lines": 653,
+   "file_lines": 659,
    "max_fn_lines": 99,
    "max_type_members": 10
   },
@@ -2273,7 +2273,7 @@
    "methods": 9
   },
   "crates/vxl-phys-terrain::TriMesh": {
-   "fields": 4,
+   "fields": 6,
    "methods": 10
   },
   "crates/vxl-phys-terrain::TriQueryStats": {
