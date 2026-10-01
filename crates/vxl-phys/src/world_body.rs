@@ -7,9 +7,13 @@ impl World {
         self.fluid_boundary.is_two_b(fluid)
     }
 
-    /// 2b **覆盖集**快照（与 `bodies` 同序；上次边界粒子生成的结果）。
-    pub fn fluid_boundary_covered(&self) -> &[bool] {
-        &self.fluid_boundary.covered
+    /// 2b **覆盖集**快照（第 `fi` 个流体那份，与 `bodies` 同序；越界给空切片）。
+    /// §2 C4 起按流体各一份（原先跨流体单数组，只有最后一个 2b 流体的有效）。
+    pub fn fluid_boundary_covered(&self, fluid: usize) -> &[bool] {
+        match self.fluid_boundary.covered.get(fluid) {
+            Some(c) => c,
+            None => &[],
+        }
     }
 
     /// 已注册流体系统及其边界 provider id（渲染读 `.0.positions()` / `.0.velocities()`；第三槽 = 卡上步进后端）。
