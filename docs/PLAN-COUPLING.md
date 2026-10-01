@@ -309,6 +309,10 @@ coupling::apply_round(&mut bodies, &rounds, &mut audit)
 
 ### 4.3 `MediumField` 真双向要补的签名（D3 若选 (b)）
 
+**✅ 切片 1 已落地（2026-10-01）**：下面 6 条缺口里第 1/4/5/6 条已按**最小口径**覆盖（第 4 条里的
+"网格一致性"以"本片不移动核"规避），法向/接触点集与来源 id（第 2/3 条）仍缺——留切片 2 做
+法向-切向分离与对称记账时再扩签名。细节、判据与读数见 §5「D3 切片 1」。
+
 现状 `deposit(&mut self, x: Vec3, momentum: Vec3, mass: f32, pressure_work: f32)`（`interop.rs:253`）**缺**：
 
 1. **`dt`（时间窗）**：否则无法区分"力"与"冲量"（对比 2b 明确定义为力，`world_step.rs:252-253`）；
@@ -319,6 +323,12 @@ coupling::apply_round(&mut bodies, &rounds, &mut audit)
    ③ 加速结构一致性（核一动，`rebuild_grid` 的网格就脏，`lib.rs:136`）。
 5. **`&mut` 通道**：`providers.splat(id)` 只给 `&GaussianSplatField`（`providers.rs:79`），要给 `&mut` 得加 `splat_mut`；
 6. **让位规则**：喷溅的"冻结行为阻力段"（`world_step.rs:108-109` 明文"不动"）与新反作用如何共存 ⇒ 效应键解决。
+
+**切片 1 覆盖状态（逐条对照）**：第 1 条 `dt`——不扩签名，**由调用侧折进冲量**（`deposit` 收到的就是
+`−F·dt`，注释点名）；第 2 条法向/接触点集——**未做**（切片 2）；第 3 条来源 id/对称记账——**未做**
+（切片 2）；第 4 条场侧状态——**已做**（`kern_vel` + `advance` + `damping`，落在**场**上、不动
+`Splat` 记录、渲染桥零变化；网格一致性以"本片不移动核位置"规避）；第 5 条 `&mut` 通道——**已做**
+（`splat_mut`）；第 6 条让位——**已做**（`two_way` 默认关 ⇒ 冻结段走原路径，开档才叠加反作用）。
 
 ### 4.4 `StateBridge`：表示转换 vs **物理交接**
 
@@ -477,6 +487,26 @@ pile5 0.0041/0.0020、tower25 0.0950/0.0572）+ determinism 哈希一致；既�
 | 判据 | ① 软体三条冻结哈希（`0x5a24_4091_4067_fe15` / `0xfaf4_d9e7_443d_dbef` / `0x36ea_adb9_02cc_8481`）**逐位不变** ② 四哈希 + 金样门不变 ③ 新门禁断言"域清单 == 轮次表"（新增域忘登记即红） |
 | 备注 | 本片**是**"以后好收"的关键：之后新增域只需声明"卡"，施加侧不再复制粘贴 |
 | C3'（换代，另拍板） | 若要把 Impulse 通道真正搬到"求解器同段位"（速度积分后、位置积分前），会改软体读数 ⇒ 单独一批、单独冻结 |
+
+### ✅ D3 切片 1 已落地（2026-10-01）：喷溅场作介质真双向（**默认关**，零代际）
+
+**落地形态**（相对下面施工单的收窄，如实记）：
+- 新文件 `crates/vxl-phys-splat/src/flow.rs`：`GaussianSplatField` 加 `two_way`（默认 false）/
+  `kern_vel`（逐核速度，与 `splats` 同序同长；`set_two_way(true)` 惰性补齐）/ `damping`（0.98）/
+  `absorbed`（审计）+ `advance(dt)`/`deposit`/`sample` 速度项改造。
+- **介质→体**：`sample` 速度项 = 核速度 **e 加权插值**（`exp(−α/2)·opacity`，与 `density_grad`
+  同式同 `cut`；候选走同一条 `candidate_ids` ⇒ 序列逐条相同、逐位确定）；无近核 ⇒ 回落常值
+  `medium_velocity`。
+- **体→介质**：`deposit` 按同一核权重分摊 `Δv_k = (−F·dt)·(e_k/Σe)/m_k`，核质量
+  `m_k = ρ·(4/3)π·σx σy σz`（1σ 椭球口径）。
+- **轮次**：`domain_pass` 加一格 `Providers::advance_medium`（逐核 ×`damping`）；**本片不移动核位置**
+  （位置演化 + `rebuild_grid` 一致性 = 切片 2）。
+- **接线**：段①整体拆到 `world_step/medium.rs`（含 `splat_mut`/`advance_medium` 的 `impl Providers`；
+  `world_step.rs` 文件行数净减、`providers.rs` 零改动）——god 门下的净账拆法（沿 `aero.rs` 先例）。
+- **默认关 ⇒ 零代际**：`sample` 速度恒为 `medium_velocity`、`deposit`/`advance` 空操作。
+
+**判据**（全绿）：in-crate 4 条（关档金丝雀 · `Σ m_k·Δv_k == J` rel<1e-4 · 单核场插值逐位退化 ·
+`advance` 阻尼 ×0.125 逐位）+ 端到端 1 条（下节「D3 切片 1」读数表）。守门证据见 EXPERIMENTS 同节。
 
 ### C4 介质真双向（**D3 决策后**）
 

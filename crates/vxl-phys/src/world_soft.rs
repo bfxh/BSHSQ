@@ -87,6 +87,9 @@ impl World {
     /// 刚体代理在**进域前重建一次**（绳/布共用同一份快照；任一域非空才建）。
     pub(crate) fn domain_pass(&mut self) {
         self.fluid_pass();
+        // 介质域推进（D3 切片 1）：喷溅场逐核速度衰减一格（two_way 关 ⇒ 每场首行短路、
+        // 逐位不变）。放在域轮次其余格之前——各格互不读对方状态，顺序只为确定性固定。
+        self.providers.advance_medium(self.config.dt);
         if !self.soft.ropes.is_empty() || !self.soft.cloths.is_empty() {
             self.rebuild_soft_proxies();
         }

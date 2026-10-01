@@ -33,6 +33,8 @@
 use vxl_phys_core::interop::{InteropContact, ProviderColliders};
 use vxl_phys_core::{Aabb, Mat3, Vec3};
 
+mod flow;
+
 /// `sdf()` 的**近场细化带**（米）：一阶值的绝对值超过它就直接返回一阶值、不做牛顿投影。
 /// 取 0.5 m 覆盖常见体半径与皮肤带量级（只在此带内接触才需要"真距离"）。
 const NEAR_BAND: f32 = 0.5;
@@ -102,8 +104,17 @@ pub struct GaussianSplatField {
     pub medium_density: f32,
     /// 介质黏性系数（Pa·s / σ 单位；单侧耦合用不到，供下游求解器消费）。
     pub medium_viscosity: f32,
-    /// 介质自身的流速（风/水流；阻力按相对速度算）。
+    /// 介质自身的流速（风/水流；阻力按相对速度算）。**two_way 关时它是恒定背景流**。
     pub medium_velocity: Vec3,
+    /// **双向耦合开关**（`flow.rs`，PLAN-COUPLING §4.3 切片 1；默认关）。
+    /// 关 ⇒ `sample` 速度恒为 `medium_velocity`、`deposit`/`advance` 空操作（零代际）。
+    two_way: bool,
+    /// 逐核速度场（与 `splats` 同序同长；`set_two_way(true)` 时惰性补齐）。渲染桥不导出。
+    kern_vel: Vec<Vec3>,
+    /// 逐核速度的每 tick 衰减（`advance` 用；1 = 不衰减）。
+    pub damping: f32,
+    /// 累计注入动量（审计：`deposit` 的向量和；N·s）。
+    absorbed: Vec3,
 }
 
 /// 建网格的桶数上限（超限不建，退回全扫；防内存灾难）。
@@ -128,11 +139,20 @@ impl GaussianSplatField {
             medium_density: 0.0,
             medium_viscosity: 0.0,
             medium_velocity: Vec3::ZERO,
+            two_way: false,
+            kern_vel: Vec::new(),
+            damping: 0.98,
+            absorbed: Vec3::ZERO,
         }
     }
 
     pub fn push(&mut self, s: Splat) {
         self.splats.push(s);
+        // 速度场与核同步（开着时逐核 push；关着时留空/留旧——`set_two_way(true)` 会按
+        // 索引补齐，旧核的速度不因 push 而错位）。
+        if self.two_way {
+            self.kern_vel.push(Vec3::ZERO);
+        }
         self.grid = None; // 脏（下次查询退回全扫；需要时重建）
     }
 
@@ -231,37 +251,12 @@ impl GaussianSplatField {
     }
 
     /// 候选核迭代（顺序 = 注册序；有网格时只取所在格的登记表 ⇒ 与全扫逐位一致）。
+    /// 唯一定义处是 [`GaussianSplatField::candidate_ids`]（`flow.rs`，双向沉积同用一条路）；
+    /// 本函数只是它的引用映射 ⇒ 两条路**序列逐条相同**。
     #[inline]
     fn candidates(&self, p: Vec3) -> impl Iterator<Item = &Splat> {
-        let empty: &[u32] = &[];
-        let (list, all) = match &self.grid {
-            Some(g) => {
-                let cx = ((p.x - g.origin.x) * g.inv_bin).floor();
-                let cy = ((p.y - g.origin.y) * g.inv_bin).floor();
-                let cz = ((p.z - g.origin.z) * g.inv_bin).floor();
-                if cx < 0.0 || cy < 0.0 || cz < 0.0 {
-                    (empty, false)
-                } else {
-                    let (cx, cy, cz) = (cx as u32, cy as u32, cz as u32);
-                    if cx >= g.dims.0 || cy >= g.dims.1 || cz >= g.dims.2 {
-                        (empty, false)
-                    } else {
-                        let i = ((cx * g.dims.1 + cy) * g.dims.2 + cz) as usize;
-                        (g.bins[i].as_slice(), false)
-                    }
-                }
-            }
-            None => (empty, true),
-        };
         let splats = &self.splats;
-        let len = if all { splats.len() } else { list.len() };
-        (0..len).map(move |k| {
-            if all {
-                &splats[k]
-            } else {
-                &splats[list[k] as usize]
-            }
-        })
+        self.candidate_ids(p).map(move |k| &splats[k])
     }
 
     /// 密度 σ(p) 与梯度 ∇σ(p)（解析；截断外核不计）。
@@ -493,7 +488,8 @@ impl vxl_phys_core::interop::MediumField for GaussianSplatField {
         }
         MediumSample {
             density: sigma * self.medium_density,
-            velocity: self.medium_velocity,
+            // 速度项：two_way 关 ⇒ 常值；开 ⇒ 核速度的 e 加权插值（flow.rs）。
+            velocity: self.flow_velocity(x),
             viscosity: sigma * self.medium_viscosity,
             temperature: 0.0,
             occupied: if self.iso > 0.0 {
@@ -504,9 +500,11 @@ impl vxl_phys_core::interop::MediumField for GaussianSplatField {
         }
     }
 
-    /// 沉积：**当前为单向耦合**（介质不因受力而改变——喷溅场是静态隐式场）。
-    /// 双向耦合（把动量沉积回核、驱动场演化）见 ROUTE §3.1 待办。
-    fn deposit(&mut self, _x: Vec3, _momentum: Vec3, _mass: f32, _pressure_work: f32) {}
+    /// 沉积（体→介质反作用）：`two_way` 开 ⇒ 按核权重分摊动量驱动场演化（`flow.rs`）；
+    /// 关 ⇒ 空操作（旧"单向"语义，逐位不变）。
+    fn deposit(&mut self, x: Vec3, momentum: Vec3, mass: f32, pressure_work: f32) {
+        self.deposit_flow(x, momentum, mass, pressure_work);
+    }
 }
 
 /// **渲染桥**：导出喷溅参数（中心/尺度/姿态/透明度/颜色）——不经物理表示往返。
