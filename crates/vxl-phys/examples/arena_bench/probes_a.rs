@@ -456,12 +456,18 @@ fn report(name: &str, w: &World, s: &Stats) {
         d_island as f64, d_solve as f64, d_sleep as f64,
     );
     let d = &w.solver.island_diag;
+    let sc_true = d
+        .scatter_us
+        .saturating_sub(d.solve_call_us)
+        .saturating_sub(d.warm_commit_us);
     println!(
-        "  求解账本（同一子步原值）：gather {:>7.1} · 岛构建 {:>5.1} · scope/组 {:>7.1} · scatter+warm {:>7.1} µs（组数 {} · 流形 {} · 岛 {} · warm 槽 {}）",
+        "  求解账本（同一子步原值）：gather {:>7.1} · 岛构建 {:>5.1} · scope/组 {:>7.1} · **解算 {:>7.1} · 散射 {:>5.1} · warm 回写 {:>6.1}** µs（组数 {} · 流形 {} · 岛 {} · warm 槽 {}）",
         d.fill_us as f64,
         d.island_build_us as f64,
         d.scope_us as f64,
-        d.scatter_us as f64,
+        d.solve_call_us as f64,
+        sc_true as f64,
+        d.warm_commit_us as f64,
         d.g_count,
         d.manifolds,
         d.islands,
