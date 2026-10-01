@@ -46,6 +46,9 @@ need_text "门槛场景不在 CI 里"            "--example m0_gates"
 #    少一条就变成"用例根本没跑"或"重试步被删"
 need_text "GPU 抖动用例的专用重试步不在 CI 里（issue #30）" "Test: sorted_copies_boundary（重试"
 need_text "工作区测试缺 skip（会与专用重试步重复跑）"        "-- --skip same_device_rerun_is_bitwise_identical"
+# ②c 重试步**必须钉 bash**：Windows 默认 pwsh 解析不了 `for … do` ⇒ 重试静默失效、
+#     该用例成覆盖盲区（2026-10-01 实测：PR #31/#33 的 MSVC 红其实是 ParserError，issue #30）
+need_text "重试步没钉 bash（pwsh 会解析错——issue #30）"      "shell: bash"
 
 # ③ 汇总门必须继续 needs 这些前置门（skipped 被 GitHub 视作通过 ⇒ 漏一个门就漏一片）
 for dep in static-text static-deps static-code matrix miri loom tsan asan \

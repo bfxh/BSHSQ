@@ -191,6 +191,10 @@ jobs:
       # 0xc0000005（STATUS_ACCESS_VIOLATION，历史"重跑即绿"）。把这两个用例从工作区跑里
       # 分出来、**重试 ≤3 次**：不掩盖任何断言失败（三次都挂 = 红），只吞掉运行器瞬态。
       - name: "Test: sorted_copies_boundary（重试 ≤3，issue #30）"
+        # ⚠️ **必须钉 bash**：Windows 运行器默认 pwsh 会把 `for i in 1 2 3; do` 报
+        # `ParserError: Missing opening '(' after keyword 'for'` ⇒ 重试从未执行、
+        # 该用例在 MSVC 上成为覆盖盲区（2026-10-01 实测根因，issue #30）。
+        shell: bash
         env:
           RUSTFLAGS: ${{ matrix.linker }}
           # 启动期 0xc0000005 在 Rust 运行时可打出 fault 栈（issue #30 的根因抓取用）。
