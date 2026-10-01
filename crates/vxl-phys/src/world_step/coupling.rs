@@ -21,13 +21,15 @@
 //!
 //! - `vxl-phys-field` 的力场写入**没有**过门（它在另一个 crate，且 `ForceField::apply` 的语义是
 //!   "对全体动体累加"）⇒ 那部分暴露面由 [`dropped_force_writes`] 记账，**不**在本片门化。
-//! - 软体两腿（`world_soft.rs` 的 `apply_two_leg_reactions`）的门在**代理快照侧**
-//!   （`inv_mass = 0` = "睡眠体对软体域呈现为静态"），语义不同、本片**不改**（只登记）。
+//! - 软体两腿的**施加函数本体住在这里**（[`apply_two_leg_reactions`]；C3 片 2 第 1 步收口，纯搬移
+//!   ⇒ 行为逐位不变）——门仍挂在**代理快照侧**的形态上（`inv_mass = 0` = "睡眠体对软体域
+//!   呈现为静态"），语义与 [`is_receptor`] 不同、**不合并**（§8.4.27，只登记）。
 //! - 引擎自用的接触/关节/CCD 通道不过这道门（它们是求解器内部语义）。
 
 // ⚠️ **显式导入**（不用 `use super::*`）：glob 门把新增 glob 一律算"新增"（棘轮）——仓内惯例
 // 是把新文件的导入写全（见 `vxl-phys-gpu` 的 `two_class.rs` 同款修法）。
 use crate::{BodySet, HealthReport, Vec3, World};
+use vxl_phys_soft::RigidProxy;
 
 /// **统一受体门**（契约的唯一定义处）：只有"动态 + 清醒 + 质量为正"的体收跨域作用。
 ///
@@ -149,6 +151,37 @@ pub(crate) fn add_tick_torque(
     let b = body as usize;
     if is_receptor(bodies, b) {
         bodies.torque[b] += tau_tick * (substeps / dt);
+    }
+}
+
+/// **反作用两腿回填**（绳/布共用）= 软体耦合的施加器（Impulse 通道 `Δv` + Position 通道 `Δx`）。
+///
+/// `linvel += dv`（速度口径）+ `position += dx`（位置口径补足，§8.4.9 —— 只补位置不补速度，
+/// 否则会把位置修正反射成速度）。**静态/睡眠体不收反作用**（代理里 `inv_mass = 0`，§8.4.27）；
+/// `proxies` 与 `dv`/`dx` 同序（`rebuild_soft_proxies` 按 `0..bodies.len()` 建 ⇒ 体号恒在界内）。
+/// **自由函数而不是方法**：调用点里 `rope`/`cloth` 已借着 `self.soft`，方法会与
+/// `&mut self.bodies` 冲突；自由函数让两个字段各自借用。
+///
+/// **C3 片 2 第 1 步（2026-10-01）**：本体从 `world_soft.rs` **纯搬移**来此（施加侧的唯一落点，
+/// 行为逐位不变——同一循环、同一 `get` 语义、同一写入序）。
+pub(crate) fn apply_two_leg_reactions(
+    bodies: &mut BodySet,
+    proxies: &[RigidProxy],
+    dv: &[Vec3],
+    dx: &[Vec3],
+) {
+    for (j, p) in proxies.iter().enumerate() {
+        if p.inv_mass <= 0.0 {
+            continue; // 静态/睡眠体不收反作用
+        }
+        let b = p.body as usize;
+        // 与提取前**逐字同款**：`dv`/`dx` 取 `get`（长度不足即跳过），体的下标直接索引。
+        if let Some(v) = dv.get(j) {
+            bodies.linvel[b] += *v;
+        }
+        if let Some(d) = dx.get(j) {
+            bodies.position[b] += *d;
+        }
     }
 }
 

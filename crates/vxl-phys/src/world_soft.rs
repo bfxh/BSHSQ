@@ -12,7 +12,7 @@
 //! **本片边界**：绳索的接触走**提供者**（地形）+ **刚体代理**（形状：Sphere/Box/Capsule）；
 //! 自碰撞、`Compound`/`Cylinder`/`Cone`/`ConvexHull` 代理、体积/弯曲约束都属后续切片。
 use super::*;
-use crate::world_step::coupling as cpl; // 耦合契约的短别名（本文件只用 `add_force`）
+use crate::world_step::coupling as cpl; // 耦合契约短别名（用 add_force / add_tick_torque / apply_two_leg_reactions）
 
 /// 2b（Akinci 边界粒子）那一族的成组状态（原为 `World` 的 3 个散字段：开关 / 暂存 / 覆盖集）。
 #[derive(Default)]
@@ -156,7 +156,7 @@ impl World {
             rope.step(dt, gravity, providers, count, &proxies);
             // **反作用两腿**（`Rope::body_dv` 速度口径 + `Rope::body_dx` 位置口径，§8.4.9）：
             // 与布料域**共用同一段实现**（切片 2b-ii 提取 —— 两处逐字相同，见 `apply_two_leg_reactions`）。
-            apply_two_leg_reactions(&mut self.bodies, &proxies, &rope.body_dv, &rope.body_dx);
+            cpl::apply_two_leg_reactions(&mut self.bodies, &proxies, &rope.body_dv, &rope.body_dx);
             // **角反作用**（计划 2c-3，**默认开** since 2026-10-01；此前默认关）：关闭的理由不是
             // "力矩算错了"，而是**接触模型看不见转动**：`body_disp` 只跟踪平移、摩擦的滑移用
             // `b.linvel` 而非 `linvel + ω×r`、`crossed_face` 用的是**冻结的** `rot` ⇒ 回填角动量
@@ -202,35 +202,16 @@ impl World {
             // **反作用两腿**（切片 2b-ii，与 `rope_pass` 同段位、同口径 —— 共用同一段实现）：
             // 静态/睡眠体（代理里 `inv_mass = 0`）不收反作用；角反作用**本片不引入**
             // （§8.4.20 条件②：接触模型看不见转动）。
-            apply_two_leg_reactions(&mut self.bodies, &proxies, &cloth.body.dv, &cloth.body.dx);
+            cpl::apply_two_leg_reactions(
+                &mut self.bodies,
+                &proxies,
+                &cloth.body.dv,
+                &cloth.body.dx,
+            );
         }
         self.soft.rope_proxies = proxies;
     }
 }
 
-/// **反作用两腿回填**（绳/布共用；切片 2b-ii 从 `rope_pass` 提取）：`linvel += dv`（速度口径）+
-/// `position += dx`（位置口径补足，§8.4.9 —— 只补位置不补速度，否则会把位置修正反射成速度）。
-/// **静态/睡眠体不收反作用**（代理里 `inv_mass = 0`，§8.4.27）；`proxies` 与 `dv`/`dx` **同序**。
-/// **写成自由函数而不是方法**：调用点里 `rope`/`cloth` 已借着 `self.soft`，方法会与 `&mut self.bodies`
-/// 冲突；自由函数让两个字段各自借用。
-fn apply_two_leg_reactions(
-    bodies: &mut BodySet,
-    proxies: &[vxl_phys_soft::RigidProxy],
-    dv: &[Vec3],
-    dx: &[Vec3],
-) {
-    for (j, p) in proxies.iter().enumerate() {
-        if p.inv_mass <= 0.0 {
-            continue; // 静态/睡眠体不收反作用
-        }
-        let b = p.body as usize;
-        // 与提取前**逐字同款**：`dv`/`dx` 取 `get`（长度不足即跳过），体的下标直接索引
-        // （`proxies` 由 `rebuild_soft_proxies` 按 `0..bodies.len()` 建 ⇒ 恒在界内）。
-        if let Some(v) = dv.get(j) {
-            bodies.linvel[b] += *v;
-        }
-        if let Some(d) = dx.get(j) {
-            bodies.position[b] += *d;
-        }
-    }
-}
+// **反作用两腿**的施加本体已收口进 `world_step/coupling.rs`（`cpl::apply_two_leg_reactions`，
+// C3 片 2 第 1 步纯搬移）——本文件不再直接写 `bodies.linvel` / `bodies.position`。
