@@ -42,6 +42,10 @@ need_text "TSan 不在 CI 里"               "-Zsanitizer=thread"
 need_text "ASan 不在 CI 里"               "-Zsanitizer=address"
 need_text "确定性 10 轮不在 CI 里"        "--example determinism"
 need_text "门槛场景不在 CI 里"            "--example m0_gates"
+# ②b GPU 抖动用例的**范围化重试**（issue #30）：工作区跑里 skip、专用步重试——两条都必须在，
+#    少一条就变成"用例根本没跑"或"重试步被删"
+need_text "GPU 抖动用例的专用重试步不在 CI 里（issue #30）" "Test: sorted_copies_boundary（重试"
+need_text "工作区测试缺 skip（会与专用重试步重复跑）"        "-- --skip same_device_rerun_is_bitwise_identical"
 
 # ③ 汇总门必须继续 needs 这些前置门（skipped 被 GitHub 视作通过 ⇒ 漏一个门就漏一片）
 for dep in static-text static-deps static-code matrix miri loom tsan asan \
