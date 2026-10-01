@@ -193,6 +193,8 @@ jobs:
       - name: "Test: sorted_copies_boundary（重试 ≤3，issue #30）"
         env:
           RUSTFLAGS: ${{ matrix.linker }}
+          # 启动期 0xc0000005 在 Rust 运行时可打出 fault 栈（issue #30 的根因抓取用）。
+          RUST_BACKTRACE: "1"
         run: |
           for i in 1 2 3; do
             if cargo test --release -p vxl-phys-gpu --test sorted_copies_boundary; then
