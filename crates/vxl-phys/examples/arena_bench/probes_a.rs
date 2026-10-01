@@ -410,6 +410,27 @@ fn report(name: &str, w: &World, s: &Stats) {
         per(p.prov_bulk),
         per(p.prov_samples),
     );
+    let t = vxl_phys_terrain::mesh::tri_query_stats();
+    println!(
+        "  三角网内部/步：closest {:.0} 次 · 全扫兜底 {:.0} 次 · 采样 1/256：非空桶 {:.1}/查询、候选三角 {:.1}/查询",
+        per(t.queries),
+        per(t.full_scans),
+        t.bins as f64 / t.samples.max(1) as f64,
+        t.tests as f64 / t.samples.max(1) as f64,
+    );
+    println!(
+        "  AABB 预筛可行性（采样）：会被跳过 {:.1}/查询（占候选 {:.0}%）· 误杀选中三角 {} 次 / {} 采样",
+        t.lb_rejects as f64 / t.samples.max(1) as f64,
+        100.0 * t.lb_rejects as f64 / t.tests.max(1) as f64,
+        t.sel_far,
+        t.samples,
+    );
+    println!(
+        "  预筛**判决**：推成接触 {} 次，其中 {} 次（{:.0}%）依赖远三角（lb > 带）—— 0 ⇒ 预筛不改变任何接触；> 0 ⇒ 不安全",
+        t.pushes,
+        t.push_far,
+        100.0 * t.push_far as f64 / t.pushes.max(1) as f64,
+    );
     let lp = w.solver.last_points;
     println!(
         "  点承载力（**上一次解算调用**＝一个子步）：被解算接触点 {} 个，其中法向冲量≈0 的 {} 个（{:.1}%）",

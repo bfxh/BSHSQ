@@ -976,9 +976,9 @@
    "max_type_members": 9
   },
   "crates/vxl-phys-terrain/src/mesh.rs": {
-   "file_lines": 533,
-   "max_fn_lines": 78,
-   "max_type_members": 8
+   "file_lines": 659,
+   "max_fn_lines": 99,
+   "max_type_members": 10
   },
   "crates/vxl-phys-terrain/src/plane_set.rs": {
    "file_lines": 369,
@@ -1016,8 +1016,8 @@
    "max_type_members": 0
   },
   "crates/vxl-phys/examples/arena_bench/probes_a.rs": {
-   "file_lines": 500,
-   "max_fn_lines": 141,
+   "file_lines": 521,
+   "max_fn_lines": 162,
    "max_type_members": 14
   },
   "crates/vxl-phys/examples/arena_bench/probes_b.rs": {
@@ -2278,8 +2278,12 @@
    "methods": 9
   },
   "crates/vxl-phys-terrain::TriMesh": {
-   "fields": 4,
-   "methods": 8
+   "fields": 6,
+   "methods": 10
+  },
+  "crates/vxl-phys-terrain::TriQueryStats": {
+   "fields": 9,
+   "methods": 0
   },
   "crates/vxl-phys-terrain::VoxelVolume": {
    "fields": 10,
