@@ -1201,7 +1201,7 @@
    "max_type_members": 9
   },
   "crates/vxl-phys/src/world_soft.rs": {
-   "file_lines": 237,
+   "file_lines": 218,
    "max_fn_lines": 41,
    "max_type_members": 10
   },
@@ -1216,7 +1216,7 @@
    "max_type_members": 1
   },
   "crates/vxl-phys/src/world_step/coupling.rs": {
-   "file_lines": 326,
+   "file_lines": 359,
    "max_fn_lines": 34,
    "max_type_members": 0
   },
@@ -1273,6 +1273,11 @@
   "crates/vxl-phys/tests/compound_warm.rs": {
    "file_lines": 90,
    "max_fn_lines": 60,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys/tests/coupling_rounds.rs": {
+   "file_lines": 92,
+   "max_fn_lines": 34,
    "max_type_members": 0
   },
   "crates/vxl-phys/tests/debris_mass.rs": {
