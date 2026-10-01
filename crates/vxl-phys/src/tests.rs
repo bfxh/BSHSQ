@@ -411,6 +411,79 @@ fn splat_medium_two_way_advects_kernels() {
     );
 }
 
+/// **D3 切片 3（AABB 随核漂移刷新）**：单核场（σ=0.5 ⇒ 注册包围盒 ±2.0 m）被注入强 −y 速度
+/// 平流 1 s ⇒ 核漂 ≈1.5 m。判据：① 关档 `provider_bounds` **逐位不动**（默认档零代际）；
+/// ② 开档世界 AABB 跟随漂移（min.y 显著下移）；③ **修前会漏的几何**：漂移后的探点落在
+/// 「新 AABB 内 ∧ 旧 AABB 外」——旧门会把它当真空跳过，新门放行（采样非真空）。
+#[test]
+fn drifting_medium_bounds_follow_kernels() {
+    // 探点：旧 AABB（±2.0）之外、核漂后的截断域（√cut·σ = 2.0）之内（两条 run 共用）。
+    let probe = Vec3::new(0.0, -3.0, 0.0);
+    let run = |two_way: bool| -> (Aabb, Aabb, f32, Vec3) {
+        let mut w = World::new(PhysConfig::default());
+        let mut f = vxl_phys_splat::GaussianSplatField::new(4.0);
+        f.push(vxl_phys_splat::Splat::isotropic(Vec3::ZERO, 0.5, 1.0));
+        f.medium_density = 3.0;
+        f.set_two_way(two_way);
+        f.damping = 1.0; // 不衰减：本判据量的是"几何跟随"，把动力学因素取直
+        w.add_splat_field(f);
+        let bb0 = w.provider_bounds[0]; // 注册时快照
+                                        // 直接给核注入 −y 动量（经 `MediumField::deposit`；不依赖体动力学。核质量
+                                        // ≈3.0·(4/3)π·0.125 ≈ 1.57 kg ⇒ J_y = −2.36 给 ≈1.5 m/s）
+        if let Some(fm) = w.providers.splat_mut(0) {
+            use vxl_phys_core::interop::MediumField as _;
+            fm.deposit(Vec3::ZERO, Vec3::new(0.0, -2.36, 0.0), 0.0, 0.0);
+        }
+        for _ in 0..60 {
+            w.step(); // 平流 1 s
+        }
+        let center = match w.providers.splat(0) {
+            Some(fld) => fld.splats()[0].center,
+            None => Vec3::ZERO,
+        };
+        let dens = match w.providers.splat(0) {
+            Some(fld) => {
+                use vxl_phys_core::interop::MediumField as _;
+                fld.sample(probe).density
+            }
+            None => 0.0,
+        };
+        (bb0, w.provider_bounds[0], dens, center)
+    };
+    let (bb0_off, bb1_off, dens_off, c_off) = run(false);
+    let (bb0_on, bb1_on, dens_on, c_on) = run(true);
+    // ① 关档金丝雀：核不动（逐位）+ AABB 不刷新（逐位）。
+    assert_eq!(c_off, Vec3::ZERO, "关档核不动（逐位）");
+    assert_eq!(
+        bb1_off.min.y.to_bits(),
+        bb0_off.min.y.to_bits(),
+        "关档 AABB 不动"
+    );
+    assert_eq!(
+        bb1_off.max.x.to_bits(),
+        bb0_off.max.x.to_bits(),
+        "关档 AABB 不动"
+    );
+    // ② 开档：核漂了、AABB 跟着漂。
+    assert!(c_on.y < -1.0, "核漂移量级：center.y={:.3}", c_on.y);
+    assert!(
+        bb1_on.min.y < bb0_on.min.y - 1.0,
+        "AABB 应跟随漂移：min.y {:.3} → {:.3}",
+        bb0_on.min.y,
+        bb1_on.min.y
+    );
+    // ③ 修前会漏的几何：探点在旧 AABB 外、新 AABB 内、且采样非真空。
+    let old_contains = probe.y >= bb0_on.min.y && probe.y <= bb0_on.max.y;
+    let new_contains = probe.y >= bb1_on.min.y && probe.y <= bb1_on.max.y;
+    assert!(!old_contains, "探点应在旧 AABB 之外（否则用例不自证）");
+    assert!(new_contains, "探点应落入新 AABB");
+    assert!(dens_on > 0.0, "新几何下采样非真空（dens_on={dens_on}）");
+    println!(
+        "AABB：min.y {:.3} → {:.3}（核 y={:.3}）；探点旧内={old_contains} 新内={new_contains} 密度={dens_on:.3e}（关档 {:.3e}）",
+        bb0_on.min.y, bb1_on.min.y, c_on.y, dens_off
+    );
+}
+
 /// **网格域（M3 扩展）**：盒落在三角网格地面上并停住（薄壳接触；
 /// 8 顶点 + 6 面心采样 ⇒ 底四角多点接触）。
 #[test]

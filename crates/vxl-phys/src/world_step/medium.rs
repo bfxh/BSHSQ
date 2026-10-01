@@ -22,10 +22,23 @@ impl World {
     /// 介质通道段①：每场一遍（体按索引序、采样点 = 体心）。
     pub(crate) fn splat_medium_pass(&mut self, dt: f32) {
         for id in 0..self.providers.len() as u32 {
-            let two_b = match self.providers.splat(id) {
-                Some(f) if f.medium_density > 0.0 => f.two_way(),
-                _ => continue, // 密度 0 的场 = 只作碰撞提供者（零成本短路）
+            let Some(f) = self.providers.splat(id) else {
+                continue;
             };
+            let two_b = f.two_way();
+            // **D3 切片 3：世界 AABB 随核漂移刷新**——双向场的核每 tick 被 `advance` 平流，
+            // 注册时的 `provider_bounds` 快照会过期（介质采样门与宽相 AABB 都读它）。
+            // 位置放在本 pass（每子步首段）⇒ 恰好在本子步宽相之前拿最新几何。单向场
+            // （默认）不进去 ⇒ 默认档逐位不变、零额外成本。
+            if two_b {
+                use vxl_phys_core::interop::ProviderColliders;
+                if let Some(nb) = f.bounds(id) {
+                    self.provider_bounds[id as usize] = nb;
+                }
+            }
+            if f.medium_density <= 0.0 {
+                continue; // 密度 0 的场 = 只作碰撞提供者（零成本短路）
+            }
             // 体→介质待沉积项（采样点、反作用、体质量、阻力功率·dt）。
             let mut pending: Vec<(Vec3, Vec3, f32, f32)> = Vec::new();
             for i in 0..self.bodies.len() {
