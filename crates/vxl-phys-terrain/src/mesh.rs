@@ -30,6 +30,18 @@ static TRI_SAMPLES: AtomicU64 = AtomicU64::new(0);
 static TRI_BINS: AtomicU64 = AtomicU64::new(0);
 static TRI_TESTS: AtomicU64 = AtomicU64::new(0);
 static TRI_FULL_SCANS: AtomicU64 = AtomicU64::new(0);
+/// **过滤器可行性度量（采样口径同 `TRI_BINS`/`TRI_TESTS`）**：若按"三角形 AABB 下界
+/// `lb > max_d` 即跳过"预筛——被跳过（`TRI_LB_REJECTS`）与**选中的最近三角本身会被误杀**
+/// （`TRI_SEL_FAR`，每采样查询至多 1）各多少。误杀 = 0 ⇒ 预筛在实测场景不改变
+/// "最近三角形"的选择（等价性的经验证据）。
+static TRI_LB_REJECTS: AtomicU64 = AtomicU64::new(0);
+static TRI_SEL_FAR: AtomicU64 = AtomicU64::new(0);
+/// **判决性计数（精确）**：本次**推成接触**时，所选三角的 AABB 下界 > 调用带（`p` 用 `skin`、
+/// 球用 `radius+skin`）——即接触依赖了"距离超带但面平面仍擦掠在带内"的远三角。
+/// **> 0 ⇒ AABB 预筛不安全**（会丢这种接触）；`= 0` ⇒ 预筛只改变"本就被丢弃的返回值"。
+static TRI_PUSH_FAR: AtomicU64 = AtomicU64::new(0);
+/// 推成接触总数（精确；`TRI_PUSH_FAR` 的分母——账要能逐项对上）。
+static TRI_PUSHES: AtomicU64 = AtomicU64::new(0);
 
 /// 采样分母（每 N 次 closest 采 1 次内外层计数）。
 const TRI_PROBE_EVERY: u64 = 256;
@@ -42,6 +54,10 @@ pub struct TriQueryStats {
     pub bins: u64,
     pub tests: u64,
     pub full_scans: u64,
+    pub lb_rejects: u64,
+    pub sel_far: u64,
+    pub push_far: u64,
+    pub pushes: u64,
 }
 
 /// 读当前计数（全程累计；bench 除以步数得每步均值——与既有窄相计数同口径）。
@@ -52,6 +68,10 @@ pub fn tri_query_stats() -> TriQueryStats {
         bins: TRI_BINS.load(Ordering::Relaxed),
         tests: TRI_TESTS.load(Ordering::Relaxed),
         full_scans: TRI_FULL_SCANS.load(Ordering::Relaxed),
+        lb_rejects: TRI_LB_REJECTS.load(Ordering::Relaxed),
+        sel_far: TRI_SEL_FAR.load(Ordering::Relaxed),
+        push_far: TRI_PUSH_FAR.load(Ordering::Relaxed),
+        pushes: TRI_PUSHES.load(Ordering::Relaxed),
     }
 }
 
@@ -225,6 +245,40 @@ impl TriMesh {
         });
     }
 
+    /// 诊断（采样路径）：该候选若按"三角形 AABB 下界 > `max_d`"预筛会被跳过吗。
+    /// 抽成助手是为了让 `closest` 留在函数长硬阈（120 行）内。
+    fn probe_candidate_far(&self, a: Vec3, b: Vec3, c: Vec3, p: Vec3, max_d: f32) {
+        let lo = a.min(b).min(c);
+        let hi = a.max(b).max(c);
+        let lb = Vec3::new(
+            (lo.x - p.x).max(p.x - hi.x).max(0.0),
+            (lo.y - p.y).max(p.y - hi.y).max(0.0),
+            (lo.z - p.z).max(p.z - hi.z).max(0.0),
+        )
+        .length();
+        if lb > max_d {
+            TRI_LB_REJECTS.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// 三角形 AABB 到 `p` 的**下界距离**（`lb ≤ 真实距离`；预筛诊断与实施共用）。
+    fn tri_aabb_lb(&self, ti: usize, p: Vec3) -> f32 {
+        let t = self.tris[ti];
+        let (a, b, c) = (
+            self.verts[t[0] as usize],
+            self.verts[t[1] as usize],
+            self.verts[t[2] as usize],
+        );
+        let lo = a.min(b).min(c);
+        let hi = a.max(b).max(c);
+        Vec3::new(
+            (lo.x - p.x).max(p.x - hi.x).max(0.0),
+            (lo.y - p.y).max(p.y - hi.y).max(0.0),
+            (lo.z - p.z).max(p.z - hi.z).max(0.0),
+        )
+        .length()
+    }
+
     /// 最近面查询：返回 `(距离, 面上最近点, 面法线, 三角形序号)`；空网格返回 None。
     /// 有网格时只搜查询点所在桶的 3×3×3 邻域（覆盖「覆盖点」与「近而不覆盖」两类面）。
     ///
@@ -247,6 +301,9 @@ impl TriMesh {
                 self.verts[t[1] as usize],
                 self.verts[t[2] as usize],
             );
+            if sampled && max_d.is_finite() {
+                self.probe_candidate_far(a, b, c, p, max_d);
+            }
             let q = closest_on_tri(p, a, b, c);
             let d = (p - q).length();
             if best.is_none_or(|(bd, _, _, _)| d < bd) {
@@ -308,6 +365,13 @@ impl TriMesh {
                             for &ti in &g.bins[i] {
                                 consider(ti as usize, &mut best);
                             }
+                        }
+                    }
+                }
+                if sampled && max_d.is_finite() {
+                    if let Some((_, _, _, ti)) = best {
+                        if self.tri_aabb_lb(ti, p) > max_d {
+                            TRI_SEL_FAR.fetch_add(1, Ordering::Relaxed);
                         }
                     }
                 }
@@ -395,6 +459,10 @@ impl ProviderColliders for TriMesh {
         if depth < -skin {
             return true; // 支持查询；不在带内
         }
+        TRI_PUSHES.fetch_add(1, Ordering::Relaxed);
+        if self.tri_aabb_lb(ti, p) > skin {
+            TRI_PUSH_FAR.fetch_add(1, Ordering::Relaxed);
+        }
         out.push(InteropContact {
             point: q,
             normal: n,
@@ -420,6 +488,10 @@ impl ProviderColliders for TriMesh {
         let depth = radius - sd;
         if depth < -skin {
             return true;
+        }
+        TRI_PUSHES.fetch_add(1, Ordering::Relaxed);
+        if self.tri_aabb_lb(ti, center) > radius + skin {
+            TRI_PUSH_FAR.fetch_add(1, Ordering::Relaxed);
         }
         out.push(InteropContact {
             point: q,
