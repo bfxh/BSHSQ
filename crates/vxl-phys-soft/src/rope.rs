@@ -550,8 +550,16 @@ impl Rope {
         // **位置口径的补足**（§8.4.9）：被速度钳位压掉的那一份**只补位置、不补速度**
         //（静载下钳位恒 0 ⇒ 不补就是"只回速度不回位置"的位置漏）。速度侧不动 ⇒
         // 不会把位置修正反射成速度；钳位生效时（运动/冲击）该项恒 0 ⇒ 既有工况逐位不变。
+        //
+        // ⚠️ 补足量**同时累加进 `body_disp`**（布料 294849f 吃过的同一刀，2026-10-01 补到绳）：
+        // `vpos = b.pos + body_disp` 是"体在本子步真实位置"的模拟，位置腿是这条轨迹的一部分——
+        // 不进 ⇒ 下一子步**重新测到同一份穿透** ⇒ 一份穿透被"接触数 × 子步数"重复计账
+        // ⇒ 深穿时单 tick 上抛十几厘米 ⇒ 弹起 ⇒ 接触丢失 ⇒ 弹跳极限环。`disp` **只用于接触
+        // 检测**、不落盘到体的真实位置（门面的 `position += body_dx` 不重复施加）。
         if b.inv_mass > 0.0 && lam_geom > lam {
-            self.body_dx[j] -= n * (b.inv_mass * (lam_geom - lam));
+            let make_up = n * (b.inv_mass * (lam_geom - lam));
+            self.body_dx[j] -= make_up;
+            self.body_disp[j] -= make_up;
         }
         if lam <= 0.0 {
             return;
