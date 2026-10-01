@@ -134,6 +134,13 @@ pub struct IslandDiag {
     pub scope_us: u64,
     /// 散射回写 + warm 回写/剪枝（串行）。
     pub scatter_us: u64,
+    /// **`solve_groups` 一段的真实墙钟（2026-10-01 补）**：串行档 = 解算本体；
+    /// 并行档 = `thread::scope` 墙钟（与 `scope_us` 同值）。与 `warm_commit_us` 一起，
+    /// 让"串行档的求解段内部"（解算 / 散射 / warm 回写）可分账——`scatter_us` 在串行档
+    /// 会退化成"整段"（scope=0），分不开。
+    pub solve_call_us: u64,
+    /// **`commit_warm_slots` 一段的真实墙钟**（warm 表回写/剪枝；每子步一次）。
+    pub warm_commit_us: u64,
     /// 每组的解算墙钟（µs）与流形数（工作量代理）。
     pub group_us: Vec<u64>,
     pub group_manifs: Vec<u32>,

@@ -116,9 +116,16 @@ impl ImpulseSolver {
         let t_solve = vxl_phys_core::probe::start();
 
         // 4) 解算 → scatter → warm 回写（顺序 = 数据流序，不可换）。
+        // **两段实测（2026-10-01）**：串行档下原 `scatter_us = d_solve − scope` 把
+        // "解算 + 散射 + warm 回写"整体都算进 scatter（arena 场景全是单组串行 ⇒ 该列退化）。
+        // 这里另测两个真实点（并行档下 `solve_call_us` 即 scope 墙钟，语义同样有定义）。
+        let t_sg = vxl_phys_core::probe::start();
         self.solve_groups(bodies, manifolds, islands, &gr, &mut bufs, &p);
+        let d_sg = vxl_phys_core::probe::us(t_sg);
         self.scatter_groups(bodies, islands, &gr, &bufs);
+        let t_wc = vxl_phys_core::probe::start();
         self.commit_warm_slots(bodies, manifolds, &mut bufs);
+        let d_wc = vxl_phys_core::probe::us(t_wc);
         bufs.restore(self);
 
         // （M1 软接触形态起，位置修正走 erp 偏置速度进速度通道 + CFM 正则化，
@@ -132,7 +139,10 @@ impl ImpulseSolver {
         self.island_diag.g_count = g_count as u32;
         self.island_diag.gather_us = d_island;
         // `d_solve` 只覆盖 scope 之后的部分（t_solve 在 gather 之后才起）⇒ 别重复减 gather。
+        // `scatter_us` 保持旧语义（并行档：d_solve − scope = 串行尾段上界）；两个新字段是真实测点。
         self.island_diag.scatter_us = d_solve.saturating_sub(self.island_diag.scope_us);
+        self.island_diag.solve_call_us = d_sg;
+        self.island_diag.warm_commit_us = d_wc;
         self.island_diag.warm_count = self.warm_slots.len() as u32;
         self.island_diag.warm_bytes_per_slot = std::mem::size_of::<WarmManifold>() as u32;
 
