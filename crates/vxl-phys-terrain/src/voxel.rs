@@ -13,11 +13,13 @@ use vxl_phys_core::interop::{CollisionProvider, SurfaceHit};
 use vxl_phys_core::{Aabb, Quat, Vec3};
 
 // ── 按域拆出的子模块（子目录 voxel/）
+mod surface;
 mod voxel_contacts;
 mod voxel_provider;
 mod voxel_volume;
 pub use self::{voxel_contacts::*, voxel_volume::*};
 // ↑ 子模块顶层条目再导出（impl-only 模块不入 glob，避免 unused）
+pub use self::surface::{surface_mesh, SurfaceMesh};
 
 #[cfg(test)]
 mod tests {
