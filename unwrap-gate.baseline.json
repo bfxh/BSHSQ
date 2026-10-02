@@ -42,5 +42,6 @@
   "crates/vxl-phys/tests/aero_face_torque.rs": 10,
   "crates/vxl-phys/tests/cloth_reaction_scene.rs": 1,
   "crates/vxl-phys/tests/cloth_scene.rs": 1,
-  "crates/vxl-phys/tests/rope_scene.rs": 2
+  "crates/vxl-phys/tests/rope_scene.rs": 2,
+  "crates/vxl-phys/tests/voxel_mesh_extract_rest.rs": 2
 }
