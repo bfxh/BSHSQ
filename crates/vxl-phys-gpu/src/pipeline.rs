@@ -757,7 +757,7 @@ impl Packet {
         });
         self.poll_wait().ok();
         rx.recv().ok();
-        slice.get_mapped_range();
+        crate::mapped::mapped_view(slice);
         self.readback_b.unmap();
         (t.elapsed().as_secs_f64() * 1e3) as f32
     }

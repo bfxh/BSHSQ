@@ -43,7 +43,7 @@ impl Packet {
         });
         self.poll_wait().ok();
         rx.recv().ok();
-        let data = slice.get_mapped_range();
+        let data = crate::mapped::mapped_view(slice);
         // 按索引解码（**别用 `chunks_exact(4)`**：CI 的 clippy 比本机新，会判
         // "using `chunks_exact` with a constant chunk size" ⇒ 门红。`bbox.rs` 的 `decode_bb` 同写法。）
         let n4 = (bytes / 4) as usize;
@@ -86,7 +86,7 @@ impl Packet {
         });
         self.poll_wait().ok();
         rx.recv().ok();
-        let data = slice.get_mapped_range();
+        let data = crate::mapped::mapped_view(slice);
         let mut out = Vec::with_capacity(n);
         for k in 0..n {
             let o = k * 4;
@@ -135,7 +135,7 @@ impl Packet {
         });
         self.poll_wait().ok();
         rx.recv().ok();
-        let data = slice.get_mapped_range();
+        let data = crate::mapped::mapped_view(slice);
         // 按索引解码（**别用 `chunks_exact`**：CI 的 clippy 比本机新，会判"constant chunk size"）。
         let f = |o: usize| f32::from_le_bytes([data[o], data[o + 1], data[o + 2], data[o + 3]]);
         let inv = f(12);
@@ -173,7 +173,7 @@ impl Packet {
         });
         self.poll_wait().ok();
         rx.recv().ok();
-        let data = slice.get_mapped_range();
+        let data = crate::mapped::mapped_view(slice);
         let v = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
         drop(data);
         rb.unmap();
@@ -202,7 +202,7 @@ impl Packet {
         });
         self.poll_wait().ok();
         rx.recv().ok();
-        let data = slice.get_mapped_range();
+        let data = crate::mapped::mapped_view(slice);
         let parse = |off: usize| -> Vec<f32> {
             (0..self.n as usize * 3)
                 .map(|i| {
@@ -235,7 +235,7 @@ impl Packet {
         });
         self.poll_wait().ok();
         rx.recv().ok();
-        let data = slice.get_mapped_range();
+        let data = crate::mapped::mapped_view(slice);
         let bytes: &[u8] = &data;
         let n3 = self.n as usize * 3;
         let mut out = vec![0f32; n3];

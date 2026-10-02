@@ -184,7 +184,7 @@ impl ReactionStage {
         });
         pkt.poll_wait().ok();
         rx.recv().ok();
-        let data = slice.get_mapped_range();
+        let data = crate::mapped::mapped_view(slice);
         // 按索引解码（**别用 `chunks_exact`**：CI 的 clippy 比本机新，会判
         // "using `chunks_exact` with a constant chunk size" ⇒ 门红）。
         let g = |o: usize| f32::from_le_bytes([data[o], data[o + 1], data[o + 2], data[o + 3]]);

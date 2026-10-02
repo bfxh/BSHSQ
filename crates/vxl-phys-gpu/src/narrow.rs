@@ -249,8 +249,8 @@ fn build_pipeline(
     });
     let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("narrow.pl"),
-        bind_group_layouts: &[&layout],
-        push_constant_ranges: &[],
+        bind_group_layouts: &[Some(&layout)],
+        immediate_size: 0,
     });
     let mk_pipe = |entry: &str| {
         device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -511,7 +511,7 @@ impl NarrowTier {
         rx.recv().ok();
         prof::add(4, t_wait.elapsed().as_micros() as u64);
         let t_dec = std::time::Instant::now();
-        let data = slice.get_mapped_range();
+        let data = crate::mapped::mapped_view(slice);
         let mut out: Vec<Slot> = Vec::with_capacity(n_pairs as usize);
         // ⚠️ **别用 `chunks_exact`**（常量块长）：CI 的 clippy 比本机新，会判
         // `chunks_exact_to_as_chunks` ⇒ `-D warnings` 下门红（`pipeline/readback.rs` 早记过同一条）。

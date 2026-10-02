@@ -224,8 +224,8 @@ pub(crate) fn make_grid_pipes(
     });
     let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("grid.pl"),
-        bind_group_layouts: &[&bgl],
-        push_constant_ranges: &[],
+        bind_group_layouts: &[Some(&bgl)],
+        immediate_size: 0,
     });
     let mk_pipe = |label: &str, entry: &str| {
         device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -362,7 +362,7 @@ fn read_back_grid(
         })
         .ok();
     rx.recv().ok();
-    let data = slice.get_mapped_range();
+    let data = crate::mapped::mapped_view(slice);
     let out = parse_grid(n, total, bufs, &data);
     // 映射出的范围要在 `unmap` 前先释放（顺序不能反）。
     drop(data);
