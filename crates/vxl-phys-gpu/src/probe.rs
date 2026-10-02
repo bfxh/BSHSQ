@@ -56,8 +56,7 @@ fn block_on<F: std::future::Future>(fut: F) -> F::Output {
 /// 适配器清单（名字 / 后端 / 类型）——用于"不绑厂商"核对（Intel iGPU 也要在列）。
 pub fn adapters() -> Vec<String> {
     let instance = wgpu::Instance::default();
-    instance
-        .enumerate_adapters(wgpu::Backends::all())
+    block_on(instance.enumerate_adapters(wgpu::Backends::all()))
         .into_iter()
         .map(|a| {
             let info = a.get_info();
@@ -100,7 +99,7 @@ pub struct PhasesOut {
 /// 返回 `(适配器名字, device, queue)`；不可用时给中文错误串（调用方原样报出）。
 pub fn device_for(adapter_index: usize) -> Result<(String, wgpu::Device, wgpu::Queue), String> {
     let instance = wgpu::Instance::default();
-    let list = instance.enumerate_adapters(wgpu::Backends::all());
+    let list = block_on(instance.enumerate_adapters(wgpu::Backends::all()));
     let Some(adapter) = list.into_iter().nth(adapter_index) else {
         return Err(format!(
             "没有第 {adapter_index} 个适配器（本机无 GPU 或后端不可用）"
@@ -128,7 +127,7 @@ pub fn device_for(adapter_index: usize) -> Result<(String, wgpu::Device, wgpu::Q
 pub fn binding_limits(device: &wgpu::Device) -> (u64, u64) {
     let l = device.limits();
     (
-        l.max_storage_buffer_binding_size as u64 / (1024 * 1024),
+        l.max_storage_buffer_binding_size / (1024 * 1024),
         l.max_buffer_size / (1024 * 1024),
     )
 }
@@ -417,8 +416,8 @@ pub(crate) fn make_phase_pipes(
         |label: &str, shader: &wgpu::ShaderModule, entry: &str, bgl: &wgpu::BindGroupLayout| {
             let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some(label),
-                bind_group_layouts: &[bgl],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(bgl)],
+                immediate_size: 0,
             });
             device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
                 label: Some(label),
@@ -523,7 +522,7 @@ pub fn phases_on_adapter(
         .ok();
     rx.recv().ok();
     let per_dispatch_ms = (t_disp.elapsed().as_secs_f64() * 1e3) as f32 / reps as f32;
-    let data = slice.get_mapped_range();
+    let data = crate::mapped::mapped_view(slice);
     let (dens, acc, xsph) = parse_phases(n, &data);
     drop(data);
     bufs.readback.unmap();

@@ -2,8 +2,8 @@
   "deps": {
     "<root>·workspace": {
       "wgpu": {
-        "why": "GPU 档（SPEC §8 / M4）的统一入口：Vulkan/Metal/DX12/WebGPU 由它在运行时自选 ⇒ **不绑单一厂商**，与骨架硬性要求一致（另需 CPU 回退且结果一致）。它是**本仓最大的一次依赖扩张**（+101 个传递 crate、冷构建 debug ≈31 s、需 nightly 的 rust-gpu 是另一条工具链问题），因此理由必须写实：① 只给 `vxl-phys-gpu` 用（引擎其它 crate 不依赖它 ⇒ CPU 档的依赖面不变）；② 首个里程碑（密度+力相位）要拿它与 CPU 对拍（同数学/同场景/同哈希口径），**在拿到加速比与一致性读数之前不扩面**；③ 版本钉死（`27`），靠本基线的 ratchet 与 `cargo-deny` 双守。",
-        "version": "27.0.1"
+        "why": "GPU 档（SPEC §8 / M4）的统一入口：Vulkan/Metal/DX12/WebGPU 由它在运行时自选 ⇒ **不绑单一厂商**，与骨架硬性要求一致（另需 CPU 回退且结果一致）。它是**本仓最大的一次依赖扩张**（+101 个传递 crate、冷构建 debug ≈31 s、需 nightly 的 rust-gpu 是另一条工具链问题），因此理由必须写实：① 只给 `vxl-phys-gpu` 用（引擎其它 crate 不依赖它 ⇒ CPU 档的依赖面不变）；② 首个里程碑（密度+力相位）要拿它与 CPU 对拍（同数学/同场景/同哈希口径），**在拿到加速比与一致性读数之前不扩面**；③ 版本钉死（`30`；2026-10-03 由 27.0.1 迁移至此，起因 = wgpu 30 的 API 断裂：push constants 机制移除（新机制 = immediate data；本仓 7 处全为空区间 ⇒ 原位换 `immediate_size: 0`，无卡上立即数，行为不变）、`get_mapped_range` 改返回 `Result`（统一收口 `mapped.rs` 的 `mapped_view`，失败语义与 27 的内部 panic 等价）、`bind_group_layouts` 项改 `Option`、`enumerate_adapters` 改异步（用仓内既有 `block_on` 收口）），靠本基线的 ratchet 与 `cargo-deny` 双守。",
+        "version": "30.0.1"
       }
     },
     "vxl-phys-core": {
@@ -14,14 +14,14 @@
     },
     "vxl-phys-gpu": {
       "wgpu": {
-        "why": "GPU 档（SPEC §8 / M4）的统一入口：Vulkan/Metal/DX12/WebGPU 由它在运行时自选 ⇒ **不绑单一厂商**，与骨架硬性要求一致（另需 CPU 回退且结果一致）。它是**本仓最大的一次依赖扩张**（+101 个传递 crate、冷构建 debug ≈31 s、需 nightly 的 rust-gpu 是另一条工具链问题），因此理由必须写实：① 只给 `vxl-phys-gpu` 用（引擎其它 crate 不依赖它 ⇒ CPU 档的依赖面不变）；② 首个里程碑（密度+力相位）要拿它与 CPU 对拍（同数学/同场景/同哈希口径），**在拿到加速比与一致性读数之前不扩面**；③ 版本钉死（`27`），靠本基线的 ratchet 与 `cargo-deny` 双守。",
-        "version": "27.0.1"
+        "why": "GPU 档（SPEC §8 / M4）的统一入口：Vulkan/Metal/DX12/WebGPU 由它在运行时自选 ⇒ **不绑单一厂商**，与骨架硬性要求一致（另需 CPU 回退且结果一致）。它是**本仓最大的一次依赖扩张**（+101 个传递 crate、冷构建 debug ≈31 s、需 nightly 的 rust-gpu 是另一条工具链问题），因此理由必须写实：① 只给 `vxl-phys-gpu` 用（引擎其它 crate 不依赖它 ⇒ CPU 档的依赖面不变）；② 首个里程碑（密度+力相位）要拿它与 CPU 对拍（同数学/同场景/同哈希口径），**在拿到加速比与一致性读数之前不扩面**；③ 版本钉死（`30`；2026-10-03 由 27.0.1 迁移至此，起因 = wgpu 30 的 API 断裂：push constants 机制移除（新机制 = immediate data；本仓 7 处全为空区间 ⇒ 原位换 `immediate_size: 0`，无卡上立即数，行为不变）、`get_mapped_range` 改返回 `Result`（统一收口 `mapped.rs` 的 `mapped_view`，失败语义与 27 的内部 panic 等价）、`bind_group_layouts` 项改 `Option`、`enumerate_adapters` 改异步（用仓内既有 `block_on` 收口）），靠本基线的 ratchet 与 `cargo-deny` 双守。",
+        "version": "30.0.1"
       }
     },
     "vxl-phys-replay": {
       "xxhash-rust": {
         "why": "xxh3-128 规范化哈希的实现来源（§5：跨三编译器 + aarch64 必须逐位一致）。确定性契约要求「同一份哈希算法」，自研一份等于把契约建在自己的实现上，标准算法 + 钉版本更可审计。风险待盯：它的 SIMD 特性若随 target 变体，哈希值可能分叉——现有跨平台哈希门（determinism/hash-compare）是这条依赖的验收仪器。",
-        "version": "0.8.18"
+        "version": "0.8.19"
       }
     }
   },
@@ -32,6 +32,10 @@
     [
       "aho-corasick",
       "1.1.5"
+    ],
+    [
+      "allocator-api2",
+      "0.2.21"
     ],
     [
       "android_system_properties",
@@ -51,19 +55,19 @@
     ],
     [
       "bit-set",
-      "0.8.0"
+      "0.10.0"
     ],
     [
       "bit-vec",
-      "0.8.0"
+      "0.9.1"
     ],
     [
       "bitflags",
       "2.13.2"
     ],
     [
-      "block",
-      "0.1.6"
+      "block2",
+      "0.6.2"
     ],
     [
       "bumpalo",
@@ -79,11 +83,11 @@
     ],
     [
       "cc",
-      "1.4.5"
+      "1.5.1"
     ],
     [
       "cfg-if",
-      "1.0.4"
+      "1.0.5"
     ],
     [
       "cfg_aliases",
@@ -91,23 +95,19 @@
     ],
     [
       "codespan-reporting",
-      "0.12.0"
-    ],
-    [
-      "core-foundation",
-      "0.10.1"
-    ],
-    [
-      "core-foundation-sys",
-      "0.8.7"
-    ],
-    [
-      "core-graphics-types",
-      "0.2.0"
+      "0.13.1"
     ],
     [
       "crunchy",
       "0.2.4"
+    ],
+    [
+      "dispatch2",
+      "0.3.1"
+    ],
+    [
+      "dlib",
+      "0.5.3"
     ],
     [
       "document-features",
@@ -119,27 +119,11 @@
     ],
     [
       "find-msvc-tools",
-      "0.1.12"
-    ],
-    [
-      "foldhash",
-      "0.1.5"
+      "0.1.14"
     ],
     [
       "foldhash",
       "0.2.0"
-    ],
-    [
-      "foreign-types",
-      "0.5.0"
-    ],
-    [
-      "foreign-types-macros",
-      "0.2.4"
-    ],
-    [
-      "foreign-types-shared",
-      "0.3.1"
     ],
     [
       "futures-core",
@@ -155,7 +139,7 @@
     ],
     [
       "generator",
-      "0.8.9"
+      "0.8.10"
     ],
     [
       "gl_generator",
@@ -163,39 +147,19 @@
     ],
     [
       "glow",
-      "0.16.0"
+      "0.17.0"
     ],
     [
       "glutin_wgl_sys",
       "0.6.1"
     ],
     [
-      "gpu-alloc",
-      "0.6.2"
-    ],
-    [
-      "gpu-alloc-types",
-      "0.3.1"
-    ],
-    [
       "gpu-allocator",
-      "0.27.0"
-    ],
-    [
-      "gpu-descriptor",
-      "0.3.2"
-    ],
-    [
-      "gpu-descriptor-types",
-      "0.2.0"
+      "0.28.0"
     ],
     [
       "half",
       "2.7.1"
-    ],
-    [
-      "hashbrown",
-      "0.15.5"
     ],
     [
       "hashbrown",
@@ -204,10 +168,6 @@
     [
       "hashbrown",
       "0.17.1"
-    ],
-    [
-      "hexf-parse",
-      "0.2.1"
     ],
     [
       "indexmap",
@@ -270,10 +230,6 @@
       "0.7.2"
     ],
     [
-      "malloc_buf",
-      "0.0.6"
-    ],
-    [
       "matchers",
       "0.2.0"
     ],
@@ -282,12 +238,12 @@
       "2.8.3"
     ],
     [
-      "metal",
-      "0.32.0"
+      "naga",
+      "30.0.1"
     ],
     [
-      "naga",
-      "27.0.3"
+      "naga-types",
+      "30.0.1"
     ],
     [
       "ndk-sys",
@@ -302,8 +258,36 @@
       "0.2.19"
     ],
     [
-      "objc",
-      "0.2.7"
+      "objc2",
+      "0.6.4"
+    ],
+    [
+      "objc2-core-foundation",
+      "0.3.2"
+    ],
+    [
+      "objc2-core-graphics",
+      "0.3.2"
+    ],
+    [
+      "objc2-encode",
+      "4.1.0"
+    ],
+    [
+      "objc2-foundation",
+      "0.3.2"
+    ],
+    [
+      "objc2-io-surface",
+      "0.3.2"
+    ],
+    [
+      "objc2-metal",
+      "0.3.2"
+    ],
+    [
+      "objc2-quartz-core",
+      "0.3.2"
     ],
     [
       "once_cell",
@@ -320,10 +304,6 @@
     [
       "parking_lot_core",
       "0.9.12"
-    ],
-    [
-      "paste",
-      "1.0.15"
     ],
     [
       "pin-project-lite",
@@ -364,6 +344,10 @@
     [
       "raw-window-handle",
       "0.6.2"
+    ],
+    [
+      "raw-window-metal",
+      "1.1.0"
     ],
     [
       "redox_syscall",
@@ -427,11 +411,11 @@
     ],
     [
       "smallvec",
-      "1.16.1"
+      "1.16.2"
     ],
     [
       "spirv",
-      "0.3.0+sdk-1.3.268.0"
+      "0.4.0+sdk-1.4.341.0"
     ],
     [
       "static_assertions",
@@ -451,19 +435,11 @@
     ],
     [
       "thiserror",
-      "1.0.69"
-    ],
-    [
-      "thiserror",
-      "2.0.20"
+      "2.0.21"
     ],
     [
       "thiserror-impl",
-      "1.0.69"
-    ],
-    [
-      "thiserror-impl",
-      "2.0.20"
+      "2.0.21"
     ],
     [
       "thread_local",
@@ -602,36 +578,44 @@
       "0.2.128"
     ],
     [
+      "wayland-sys",
+      "0.31.11"
+    ],
+    [
       "web-sys",
       "0.3.105"
     ],
     [
       "wgpu",
-      "27.0.1"
+      "30.0.1"
     ],
     [
       "wgpu-core",
-      "27.0.3"
+      "30.0.1"
     ],
     [
       "wgpu-core-deps-apple",
-      "27.0.0"
+      "30.0.1"
     ],
     [
       "wgpu-core-deps-emscripten",
-      "27.0.0"
+      "30.0.1"
     ],
     [
       "wgpu-core-deps-windows-linux-android",
-      "27.0.0"
+      "30.0.1"
     ],
     [
       "wgpu-hal",
-      "27.0.4"
+      "30.0.1"
+    ],
+    [
+      "wgpu-naga-bridge",
+      "30.0.1"
     ],
     [
       "wgpu-types",
-      "27.0.1"
+      "30.0.1"
     ],
     [
       "winapi-util",
@@ -639,27 +623,35 @@
     ],
     [
       "windows",
-      "0.58.0"
+      "0.62.2"
+    ],
+    [
+      "windows-collections",
+      "0.3.2"
     ],
     [
       "windows-core",
-      "0.58.0"
+      "0.62.2"
+    ],
+    [
+      "windows-future",
+      "0.3.2"
     ],
     [
       "windows-implement",
-      "0.58.0"
+      "0.60.2"
     ],
     [
       "windows-interface",
-      "0.58.0"
+      "0.59.3"
     ],
     [
       "windows-link",
       "0.2.1"
     ],
     [
-      "windows-result",
-      "0.2.0"
+      "windows-numerics",
+      "0.3.1"
     ],
     [
       "windows-result",
@@ -667,47 +659,15 @@
     ],
     [
       "windows-strings",
-      "0.1.0"
+      "0.5.1"
     ],
     [
       "windows-sys",
       "0.61.2"
     ],
     [
-      "windows-targets",
-      "0.52.6"
-    ],
-    [
-      "windows_aarch64_gnullvm",
-      "0.52.6"
-    ],
-    [
-      "windows_aarch64_msvc",
-      "0.52.6"
-    ],
-    [
-      "windows_i686_gnu",
-      "0.52.6"
-    ],
-    [
-      "windows_i686_gnullvm",
-      "0.52.6"
-    ],
-    [
-      "windows_i686_msvc",
-      "0.52.6"
-    ],
-    [
-      "windows_x86_64_gnu",
-      "0.52.6"
-    ],
-    [
-      "windows_x86_64_gnullvm",
-      "0.52.6"
-    ],
-    [
-      "windows_x86_64_msvc",
-      "0.52.6"
+      "windows-threading",
+      "0.2.1"
     ],
     [
       "xml-rs",
@@ -715,15 +675,15 @@
     ],
     [
       "xxhash-rust",
-      "0.8.18"
+      "0.8.19"
     ],
     [
       "zerocopy",
-      "0.8.57"
+      "0.8.59"
     ],
     [
       "zerocopy-derive",
-      "0.8.57"
+      "0.8.59"
     ]
   ]
 }

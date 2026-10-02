@@ -226,8 +226,8 @@ fn make_pipes(device: &wgpu::Device, b: &Buffers) -> Pipes {
     });
     let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("reorder.pl"),
-        bind_group_layouts: &[&bgl],
-        push_constant_ranges: &[],
+        bind_group_layouts: &[Some(&bgl)],
+        immediate_size: 0,
     });
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("reorder.wgsl"),
@@ -391,7 +391,7 @@ impl Runner<'_> {
         });
         self.wait();
         rx.recv().ok();
-        let data = slice.get_mapped_range();
+        let data = vxl_phys_gpu::mapped::mapped_view(slice);
         let mut bad = 0usize;
         for (m, it) in items.iter().take(k / 3).enumerate() {
             let ki = *it as usize;

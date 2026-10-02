@@ -147,8 +147,8 @@ fn make_bbox_pipes(
     });
     let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("bbox.pl"),
-        bind_group_layouts: &[&bgl],
-        push_constant_ranges: &[],
+        bind_group_layouts: &[Some(&bgl)],
+        immediate_size: 0,
     });
     let p_reduce = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
         label: Some("bbox.reduce"),
@@ -315,7 +315,7 @@ pub fn box_on_adapter(adapter_index: usize, pos_flat: &[f32], h: f32, max_bins: 
         })
         .ok();
     rx.recv().ok();
-    let data = slice.get_mapped_range();
+    let data = crate::mapped::mapped_view(slice);
     let bb = decode_bb(&data);
     let (lo, hi) = bb_to_corners(bb);
     let u = |k: usize| {
@@ -493,7 +493,7 @@ impl BboxStage {
             })
             .ok();
         rx.recv().ok();
-        let data = slice.get_mapped_range();
+        let data = crate::mapped::mapped_view(slice);
         let corners = bb_to_corners(decode_bb(&data));
         // 映射出的范围要在 `unmap` 前先释放（顺序不能反）。
         drop(data);

@@ -119,8 +119,8 @@ fn make_sorted_pipelines(device: &wgpu::Device) -> SortedPipes {
         let bl = make_layout(device, label, slots);
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(label),
-            bind_group_layouts: &[&bl],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bl)],
+            immediate_size: 0,
         });
         let p = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some(label),

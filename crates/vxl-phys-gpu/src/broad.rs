@@ -227,8 +227,8 @@ fn build(
     let mk = |entry: &str| {
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("broad.pl"),
-            bind_group_layouts: &[&layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&layout)],
+            immediate_size: 0,
         });
         device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some(entry),
@@ -319,7 +319,7 @@ fn run(
         })
         .ok();
     rx.recv().ok();
-    let data = slice.get_mapped_range();
+    let data = crate::mapped::mapped_view(slice);
     let f = |o: usize| u32::from_le_bytes([data[o], data[o + 1], data[o + 2], data[o + 3]]);
     let cap = cap_pairs as usize;
     let cnt = (f(cap * 8) as usize).min(cap);
