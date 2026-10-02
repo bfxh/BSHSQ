@@ -986,9 +986,14 @@
    "max_type_members": 7
   },
   "crates/vxl-phys-terrain/src/voxel.rs": {
-   "file_lines": 222,
+   "file_lines": 224,
    "max_fn_lines": 48,
    "max_type_members": 0
+  },
+  "crates/vxl-phys-terrain/src/voxel/surface.rs": {
+   "file_lines": 419,
+   "max_fn_lines": 86,
+   "max_type_members": 6
   },
   "crates/vxl-phys-terrain/src/voxel/voxel_contacts.rs": {
    "file_lines": 375,
@@ -1138,6 +1143,11 @@
   "crates/vxl-phys/examples/trimesh_sphere_rest_probe.rs": {
    "file_lines": 230,
    "max_fn_lines": 112,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys/examples/voxel_mesh_extract.rs": {
+   "file_lines": 123,
+   "max_fn_lines": 37,
    "max_type_members": 0
   },
   "crates/vxl-phys/examples/voxel_rest_probe.rs": {
@@ -1363,6 +1373,11 @@
   "crates/vxl-phys/tests/sleep_wake_contract.rs": {
    "file_lines": 161,
    "max_fn_lines": 60,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys/tests/voxel_mesh_extract_rest.rs": {
+   "file_lines": 86,
+   "max_fn_lines": 39,
    "max_type_members": 0
   },
   "crates/vxl-phys/tests/warm_counter_probe.rs": {
@@ -2270,12 +2285,20 @@
    "fields": 5,
    "methods": 2
   },
+  "crates/vxl-phys-terrain::Field": {
+   "fields": 6,
+   "methods": 2
+  },
   "crates/vxl-phys-terrain::HalfSpaceSet": {
    "fields": 2,
    "methods": 7
   },
   "crates/vxl-phys-terrain::MeshGrid": {
    "fields": 4,
+   "methods": 0
+  },
+  "crates/vxl-phys-terrain::SurfaceMesh": {
+   "fields": 2,
    "methods": 0
   },
   "crates/vxl-phys-terrain::TerrainSet": {
