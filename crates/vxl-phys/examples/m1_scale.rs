@@ -299,11 +299,20 @@ fn report_working_set(w: &World, ticks: u32, acc: &Acc) {
     // 达成吞吐 = 字节/tick ÷ 每 tick 秒数（相位时间是**全程累计** ⇒ 先除 ticks）。
     // GB/s = b·ticks / (us_total · 1000)（b 字节，us_total 累计微秒）。
     let tk = ticks as f64;
-    for (name, b, us_total) in [
-        ("宽相", bytes_broad, acc.tb_sum),
-        ("窄相", bytes_narrow, acc.tn_sum),
-        ("解算", bytes_solve, acc.ts_sum),
-    ] {
+    print_throughput(
+        tk,
+        [
+            ("宽相", bytes_broad, acc.tb_sum),
+            ("窄相", bytes_narrow, acc.tn_sum),
+            ("解算", bytes_solve, acc.ts_sum),
+        ],
+    );
+    print_narrow_probe(w, tk);
+}
+
+/// 三相位"触碰字节 ÷ 耗时"的达成吞吐（GB/s）。
+fn print_throughput(tk: f64, rows: [(&str, f64, f64); 3]) {
+    for (name, b, us_total) in rows {
         let us_per_tick = us_total / tk;
         println!(
             "  {name}：触碰 {:.2} MB/tick ｜ 耗时 {:.2} ms/tick ｜ **达成 {:.2} GB/s**",
@@ -312,6 +321,31 @@ fn report_working_set(w: &World, ticks: u32, acc: &Acc) {
             b * tk / (us_total.max(1.0) * 1000.0)
         );
     }
+}
+
+/// 窄相四段计数（P4 的读数入口；字段语义见 `vxl_phys_narrow::ProbeStats` 与
+/// `docs/EXPERIMENTS.md`「裁剪内部计数归属」两节。纯诊断，计数器不改行为；
+/// 全量字段（插值/provider 分派等）在 `arena_bench` 的探针里打印）。
+fn print_narrow_probe(w: &World, ticks: f64) {
+    let p = w.narrow.probe_stats();
+    let per = |v: u64| v as f64 / ticks;
+    let c = per(p.clip_calls).max(1.0);
+    println!(
+        "  窄相/tick：裁剪 {:.0} 次（内层 {:.1}/次、候选 {:.2}/次、峰值 {} 顶点）",
+        per(p.clip_calls),
+        per(p.clip_iters) / c,
+        per(p.cand_pts) / c,
+        p.clip_max,
+    );
+    println!(
+        "  SAT {:.0} 对（盒对快路径 {:.0}）· 多面体填充 {:.0} 次/{:.0} 顶点 · 外壳 {:.0} 次/{:.0} 顶点",
+        per(p.sat_pairs),
+        per(p.sat_pairs_box),
+        per(p.poly_fills),
+        per(p.poly_fill_verts),
+        per(p.hull_fills),
+        per(p.hull_fill_verts),
+    );
 }
 
 /// 出口门槛判定（§3：≥ 30 FPS）。
