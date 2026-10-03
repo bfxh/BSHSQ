@@ -68,15 +68,36 @@ jobs:
           exit $rc
       - name: 门槛哈希 + 确定性（ADR 0004）
         run: |
-          cargo run --release -q -p vxl-phys --example m0_gates 2>&1 | tee m0.log
-          cargo run --release -q -p vxl-phys --example determinism 2>&1 | tee determinism.log
+          # ⚠️ **不许把 cargo 的输出经管道交给 `tee`**：`bash -e`（Actions 默认外壳）下管道的退出码是
+          # **最后一条命令**（tee）的 ⇒ 门禁挂了这一步照样绿 ⇒ **Release 会在红树上建出来**。
+          # 逐条取 rc、先打诊断再退出（与本文件其余三个门禁步同款）。
+          set +e
+          rc=0
+          for ex in m0_gates determinism; do
+            cargo run --release -q -p vxl-phys --example "$ex" > "$ex.log" 2>&1
+            r=$?
+            echo "$ex=$r"
+            tail -40 "$ex.log"
+            [ "$r" -eq 0 ] || rc=$r
+          done
+          exit "$rc"
       - name: 金样三场景（保真门）
         working-directory: gold-sample
         run: |
+          # 同上：不用管道接 tee，逐场景取 rc；任一场景非 0 ⇒ 本步非 0。
+          set +e
+          rc=0
           for s in col45 pile5 tower25; do
-            echo "=== $s ===" | tee gold-$s.txt
-            cargo run --release -q -- "$s" 600 16 0.01 1 3.0 30 16 - 0 2>&1 | tee -a gold-$s.txt
+            {
+              echo "=== $s ==="
+              cargo run --release -q -- "$s" 600 16 0.01 1 3.0 30 16 - 0 2>&1
+            } > gold-$s.txt 2>&1
+            r=$?
+            echo "gold-$s=$r"
+            tail -20 gold-$s.txt
+            [ "$r" -eq 0 ] || rc=$r
           done
+          exit "$rc"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

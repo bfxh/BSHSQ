@@ -10,9 +10,11 @@
 set -u
 ROOT="${1:-.}"
 CI="$ROOT/.github/workflows/ci.yml"
+REL="$ROOT/.github/workflows/release.yml"
 FAIL=0
 
 [ -f "$CI" ] || { echo "❌ 找不到 $CI"; exit 1; }
+[ -f "$REL" ] || { echo "❌ 找不到 $REL"; exit 1; }
 
 need_text() { # 说明 + 字面量（-F 精确匹配）
   if ! grep -qF -- "$2" "$CI"; then
@@ -49,6 +51,16 @@ need_text "工作区测试缺 skip（会与专用重试步重复跑）"        "
 # ②c 重试步**必须钉 bash**：Windows 默认 pwsh 解析不了 `for … do` ⇒ 重试静默失效、
 #     该用例成覆盖盲区（2026-10-01 实测：PR #31/#33 的 MSVC 红其实是 ParserError，issue #30）
 need_text "重试步没钉 bash（pwsh 会解析错——issue #30）"      "shell: bash"
+# ②d 抖动**诊断**必须真能取到数（issue #30 第 1 条）：三次失败尝试的日志要落盘、要上传，
+#     且管道必须开 pipefail——否则 `cargo test | tee` 的退出码是 tee 的 0 ⇒ 重试会把
+#     **真失败**当成功吞掉（比"重试没跑"更隐蔽：它会让该用例永远绿）。
+need_text "抖动日志没落盘（issue #30 的栈就抓不到）"  "sorted_copies_attempt_"
+need_text "抖动日志没上传（issue #30 的栈传不出来）"  "name: gpu-flake-logs-"
+need_text "重试步没开 pipefail（管道会吞掉退出码）"    "set -o pipefail"
+# ②e artifact 名必须字符安全：矩阵 job 里 `matrix.label` 是 `MSVC / x86_64` 这种**带 `/`**
+#     的字符串 ⇒ upload-artifact 直接判失败，**把本来绿的 job 弄红**（2026-10-03 实测踩到）。
+need_text "抖动 artifact 名没用 job-index（matrix.label 含 / 会让上传失败）" \
+          'name: gpu-flake-logs-${{ strategy.job-index }}'
 
 # ③ 汇总门必须继续 needs 这些前置门（skipped 被 GitHub 视作通过 ⇒ 漏一个门就漏一片）
 for dep in static-text static-deps static-code matrix miri loom tsan asan \
@@ -102,6 +114,22 @@ fi
 for hook in .githooks/pre-commit .githooks/pre-push; do
   [ -f "$ROOT/$hook" ] || { echo "❌ 提交通道缺 $hook"; FAIL=1; }
 done
+
+# ⑦ **发版门禁不许被管道吞掉**（2026-10-03 发现）：`release.yml` 的门禁步曾写成
+#    `cargo run … | tee x.log`——`bash -e` 下管道退出码是**最后一条命令**（tee）的 ⇒
+#    m0_gates/determinism/金样 挂了这一步照样绿 ⇒ **Release 会在红树上建出来**。
+#    发版路径**从未跑过**（仓里没有 tag），所以这条只能靠形状锁钉，不能靠"跑一次看看"。
+if grep -nE '\| *tee' "$REL" >/dev/null 2>&1; then
+  echo "❌ release.yml 的门禁用管道接了 tee —— 管道退出码是 tee 的 0，" \
+       "会把门禁失败吞掉、在红树上建 Release（改用「逐条取 rc，先打诊断再退出」）："
+  grep -nE '\| *tee' "$REL"
+  FAIL=1
+fi
+# 正例也要在：发版门的每一条门禁都必须显式取 rc 并返回（不许只靠最后一行命令的隐式状态）。
+grep -qF -- 'exit "$rc"' "$REL" || {
+  echo "❌ release.yml 的门禁步没走「先打诊断再退出」（缺 exit \"\$rc\"）"
+  FAIL=1
+}
 
 if [ "$FAIL" -eq 0 ]; then
   echo "✅ CI 形状锁通过（四提交门 + 汇总门 needs 完整 / 关键命令在 / 安全与成本基线在 /" \
