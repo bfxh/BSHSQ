@@ -234,7 +234,11 @@ jobs:
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: gpu-flake-logs-${{ matrix.label }}
+          # ⚠️ **不能用 `matrix.label`**：矩阵 job 里它是 `MSVC / x86_64` 这种带 `/` 的字符串，
+          # upload-artifact 会以「名字含非法字符 /」直接失败 ⇒ **把本来绿的 job 判红**
+          # （2026-10-03 实测踩到：诊断步骤自己成了红的那一步）。
+          # `strategy.job-index` 是矩阵内唯一且字符安全的。
+          name: gpu-flake-logs-${{ strategy.job-index }}
           path: ${{ runner.temp }}/sorted_copies_attempt_*.log
           if-no-files-found: ignore
           retention-days: 7

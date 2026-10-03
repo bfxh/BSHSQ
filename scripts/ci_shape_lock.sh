@@ -57,6 +57,10 @@ need_text "重试步没钉 bash（pwsh 会解析错——issue #30）"      "she
 need_text "抖动日志没落盘（issue #30 的栈就抓不到）"  "sorted_copies_attempt_"
 need_text "抖动日志没上传（issue #30 的栈传不出来）"  "name: gpu-flake-logs-"
 need_text "重试步没开 pipefail（管道会吞掉退出码）"    "set -o pipefail"
+# ②e artifact 名必须字符安全：矩阵 job 里 `matrix.label` 是 `MSVC / x86_64` 这种**带 `/`**
+#     的字符串 ⇒ upload-artifact 直接判失败，**把本来绿的 job 弄红**（2026-10-03 实测踩到）。
+need_text "抖动 artifact 名没用 job-index（matrix.label 含 / 会让上传失败）" \
+          'name: gpu-flake-logs-${{ strategy.job-index }}'
 
 # ③ 汇总门必须继续 needs 这些前置门（skipped 被 GitHub 视作通过 ⇒ 漏一个门就漏一片）
 for dep in static-text static-deps static-code matrix miri loom tsan asan \
