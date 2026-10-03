@@ -194,6 +194,12 @@ jobs:
       # 已知 CI 抖动（issue #30）：MSVC 行的 `sorted_copies_boundary` 偶发**启动期**
       # 0xc0000005（STATUS_ACCESS_VIOLATION，历史"重跑即绿"）。把这两个用例从工作区跑里
       # 分出来、**重试 ≤3 次**：不掩盖任何断言失败（三次都挂 = 红），只吞掉运行器瞬态。
+      #
+      # **诊断取数（issue #30 第 1 条）**：此前每次失败尝试的输出**全被丢掉** ⇒ 连挂时只剩
+      # "exit 0xc0000005" 一行，栈与 wgpu 启动日志都拿不到（这正是该 issue 卡住的原因）。
+      # 现在：每次尝试落一个日志文件、失败即打印尾部、由下一步整包上传。
+      # ⚠️ `RUST_BACKTRACE` 对 STATUS_ACCESS_VIOLATION **通常无效**（SEH 异常不走 Rust panic
+      # 路径）⇒ 真正有用的是 `RUST_LOG` 的 wgpu 启动日志与"第几次尝试挂"的序列。
       - name: "Test: sorted_copies_boundary（重试 ≤3，issue #30）"
         # ⚠️ **必须钉 bash**：Windows 运行器默认 pwsh 会把 `for i in 1 2 3; do` 报
         # `ParserError: Missing opening '(' after keyword 'for'` ⇒ 重试从未执行、
@@ -203,15 +209,35 @@ jobs:
           RUSTFLAGS: ${{ matrix.linker }}
           # 启动期 0xc0000005 在 Rust 运行时可打出 fault 栈（issue #30 的根因抓取用）。
           RUST_BACKTRACE: "1"
+          # **wgpu 启动路径日志**（issue #30 第 1 条）：适配器枚举 / 设备请求是"启动期崩溃"
+          # 的头号怀疑对象；没有这行日志就只能看到退出码。只开 info 档，别把 CI 日志冲爆。
+          RUST_LOG: "wgpu_core=info,wgpu_hal=info,naga=warn"
         run: |
+          # ⚠️ **必须开 pipefail**：`bash -e`（Actions 的默认外壳）下管道的退出码是**最后一个
+          # 命令**（这里是 `tee`）的 ⇒ `cargo test | tee` 恒为 0 ⇒ 重试会把真失败当成功吞掉。
+          set -o pipefail
+          LOGS="${RUNNER_TEMP:-/tmp}"
+          rm -f "$LOGS"/sorted_copies_attempt_*.log
           for i in 1 2 3; do
-            if cargo test --release -p vxl-phys-gpu --test sorted_copies_boundary; then
+            if cargo test --release -p vxl-phys-gpu --test sorted_copies_boundary \
+                2>&1 | tee "$LOGS/sorted_copies_attempt_$i.log"; then
+              rm -f "$LOGS/sorted_copies_attempt_$i.log"   # 成功的尝试不留日志（省上传）
               exit 0
             fi
             echo "::warning::sorted_copies_boundary 第 $i 次失败——issue #30 的已知抖动"
+            echo "---- 第 $i 次尝试日志尾部（全文随 artifact 上传）----"
+            tail -n 40 "$LOGS/sorted_copies_attempt_$i.log" || true
           done
           echo "sorted_copies_boundary 重试 3 次仍失败：不再当抖动，按真失败处理（issue #30）"
           exit 1
+      # 失败尝试的诊断包（issue #30）：**只在真有日志时**上传（成功路径上一个文件都不剩）。
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: gpu-flake-logs-${{ matrix.label }}
+          path: ${{ runner.temp }}/sorted_copies_attempt_*.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   # ==================== 门①：miri（子集 = vxl-phys-core 单测；UB/别名/泄漏） ====================
   miri:

@@ -49,6 +49,12 @@ need_text "工作区测试缺 skip（会与专用重试步重复跑）"        "
 # ②c 重试步**必须钉 bash**：Windows 默认 pwsh 解析不了 `for … do` ⇒ 重试静默失效、
 #     该用例成覆盖盲区（2026-10-01 实测：PR #31/#33 的 MSVC 红其实是 ParserError，issue #30）
 need_text "重试步没钉 bash（pwsh 会解析错——issue #30）"      "shell: bash"
+# ②d 抖动**诊断**必须真能取到数（issue #30 第 1 条）：三次失败尝试的日志要落盘、要上传，
+#     且管道必须开 pipefail——否则 `cargo test | tee` 的退出码是 tee 的 0 ⇒ 重试会把
+#     **真失败**当成功吞掉（比"重试没跑"更隐蔽：它会让该用例永远绿）。
+need_text "抖动日志没落盘（issue #30 的栈就抓不到）"  "sorted_copies_attempt_"
+need_text "抖动日志没上传（issue #30 的栈传不出来）"  "name: gpu-flake-logs-"
+need_text "重试步没开 pipefail（管道会吞掉退出码）"    "set -o pipefail"
 
 # ③ 汇总门必须继续 needs 这些前置门（skipped 被 GitHub 视作通过 ⇒ 漏一个门就漏一片）
 for dep in static-text static-deps static-code matrix miri loom tsan asan \
