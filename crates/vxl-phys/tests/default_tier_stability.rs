@@ -28,7 +28,7 @@ struct Readings {
     manifolds: usize,
 }
 
-/// 自包含堆叠场景（与 `diag_min` 同族但**不依赖 example**）：`layers` 层 × `side`²，
+/// 自包含堆叠场景（**不依赖任何 example/临时工具**）：`layers` 层 × `side`²，
 /// 盒半长 0.25、间距 0.52（留 2 cm 缝）、盒地板。返回末态读数。
 fn run_stack(cfg: PhysConfig, layers: usize, side: usize, ticks: usize) -> Readings {
     let mut w = World::new(cfg);
