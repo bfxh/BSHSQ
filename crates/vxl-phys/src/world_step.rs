@@ -2,6 +2,7 @@
 use super::*;
 
 mod aero;
+pub(crate) mod conversion;
 pub(crate) mod coupling;
 pub(crate) mod fluid_stepper;
 mod medium;
@@ -29,6 +30,9 @@ impl World {
             self.substep(dt, k == 0, reuse);
         }
         self.domain_pass();
+        // **转换窗口（V2）**：tick 末、各域轮次之后（契约卡的时间戳），下一 tick 宽相之前。
+        // 默认关 ⇒ 首行短路（零代际）；开档时本拍提取的影子在**本拍末**才提交切换。
+        self.conversion_pass();
         self.tick += 1;
     }
 

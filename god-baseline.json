@@ -106,9 +106,9 @@
    "max_type_members": 19
   },
   "crates/vxl-phys-core/src/config.rs": {
-   "file_lines": 309,
+   "file_lines": 326,
    "max_fn_lines": 42,
-   "max_type_members": 31
+   "max_type_members": 32
   },
   "crates/vxl-phys-core/src/grid.rs": {
    "file_lines": 112,
@@ -395,6 +395,11 @@
    "max_fn_lines": 8,
    "max_type_members": 3
   },
+  "crates/vxl-phys-gpu/src/mapped.rs": {
+   "file_lines": 26,
+   "max_fn_lines": 6,
+   "max_type_members": 0
+  },
   "crates/vxl-phys-gpu/src/narrow.rs": {
    "file_lines": 580,
    "max_fn_lines": 79,
@@ -466,7 +471,7 @@
    "max_type_members": 6
   },
   "crates/vxl-phys-gpu/src/probe.rs": {
-   "file_lines": 540,
+   "file_lines": 539,
    "max_fn_lines": 91,
    "max_type_members": 16
   },
@@ -991,8 +996,8 @@
    "max_type_members": 0
   },
   "crates/vxl-phys-terrain/src/voxel/surface.rs": {
-   "file_lines": 419,
-   "max_fn_lines": 86,
+   "file_lines": 417,
+   "max_fn_lines": 82,
    "max_type_members": 6
   },
   "crates/vxl-phys-terrain/src/voxel/voxel_contacts.rs": {
@@ -1166,7 +1171,7 @@
    "max_type_members": 5
   },
   "crates/vxl-phys/src/lib.rs": {
-   "file_lines": 52,
+   "file_lines": 53,
    "max_fn_lines": 0,
    "max_type_members": 0
   },
@@ -1176,7 +1181,7 @@
    "max_type_members": 0
   },
   "crates/vxl-phys/src/providers.rs": {
-   "file_lines": 169,
+   "file_lines": 173,
    "max_fn_lines": 18,
    "max_type_members": 10
   },
@@ -1186,12 +1191,12 @@
    "max_type_members": 0
   },
   "crates/vxl-phys/src/types.rs": {
-   "file_lines": 11,
+   "file_lines": 95,
    "max_fn_lines": 0,
-   "max_type_members": 0
+   "max_type_members": 13
   },
   "crates/vxl-phys/src/world_body.rs": {
-   "file_lines": 339,
+   "file_lines": 350,
    "max_fn_lines": 49,
    "max_type_members": 24
   },
@@ -1221,7 +1226,7 @@
    "max_type_members": 10
   },
   "crates/vxl-phys/src/world_step.rs": {
-   "file_lines": 349,
+   "file_lines": 353,
    "max_fn_lines": 99,
    "max_type_members": 6
   },
@@ -1229,6 +1234,11 @@
    "file_lines": 65,
    "max_fn_lines": 49,
    "max_type_members": 1
+  },
+  "crates/vxl-phys/src/world_step/conversion.rs": {
+   "file_lines": 490,
+   "max_fn_lines": 55,
+   "max_type_members": 8
   },
   "crates/vxl-phys/src/world_step/coupling.rs": {
    "file_lines": 464,
@@ -1300,8 +1310,13 @@
    "max_fn_lines": 60,
    "max_type_members": 0
   },
+  "crates/vxl-phys/tests/conversion_window.rs": {
+   "file_lines": 214,
+   "max_fn_lines": 67,
+   "max_type_members": 0
+  },
   "crates/vxl-phys/tests/coupling_rounds.rs": {
-   "file_lines": 92,
+   "file_lines": 93,
    "max_fn_lines": 34,
    "max_type_members": 0
   },
@@ -1605,6 +1620,10 @@
    "fields": 0,
    "methods": 3
   },
+  "crates/vxl-phys-core::ConversionConfig": {
+   "fields": 3,
+   "methods": 0
+  },
   "crates/vxl-phys-core::FluidStepper": {
    "fields": 0,
    "methods": 4
@@ -1658,7 +1677,7 @@
    "methods": 9
   },
   "crates/vxl-phys-core::PhysConfig": {
-   "fields": 31,
+   "fields": 32,
    "methods": 1
   },
   "crates/vxl-phys-core::PlaneField": {
@@ -2341,6 +2360,10 @@
    "fields": 8,
    "methods": 0
   },
+  "crates/vxl-phys::ConversionReport": {
+   "fields": 13,
+   "methods": 0
+  },
   "crates/vxl-phys::Diag": {
    "fields": 5,
    "methods": 1
@@ -2390,8 +2413,8 @@
    "methods": 0
   },
   "crates/vxl-phys::Providers": {
-   "fields": 1,
-   "methods": 12
+   "fields": 2,
+   "methods": 16
   },
   "crates/vxl-phys::Reaction": {
    "fields": 0,
@@ -2403,6 +2426,10 @@
   },
   "crates/vxl-phys::Readings": {
    "fields": 4,
+   "methods": 0
+  },
+  "crates/vxl-phys::ReconSummary": {
+   "fields": 6,
    "methods": 0
   },
   "crates/vxl-phys::Run": {
@@ -2432,6 +2459,10 @@
   "crates/vxl-phys::StressEval": {
    "fields": 3,
    "methods": 1
+  },
+  "crates/vxl-phys::VoxelConversionExt": {
+   "fields": 0,
+   "methods": 8
   },
   "crates/vxl-phys::World": {
    "fields": 23,

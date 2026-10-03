@@ -170,10 +170,25 @@
 | 片 | 内容 | 判据 | 代际/回退 |
 |---|---|---|---|
 | **V1 ✅** | **离线提取**：`voxel/surface.rs`（surface nets）+ `examples/voxel_mesh_extract.rs` + I1–I4。**无运行时面**（不接线引擎相位）。落地注记：整体积提取（区域裁剪随 V2 窗口设计）；I1 带宽钉半格（首测 max\|sdf(v)\| = h/3）；I2 首测盒缺口 2.016 m³（PLAN 先验上界 8 内）、面积 40.177 | I1/I2/I3/I4 全绿（in-crate 5 + 门面 1） | 零代际（不接线）；单提交撤销 |
-| **V2** | **双重表示窗口**：`world_step/conversion.rs` + 开关 + `conversion_pass` 登记轮次表 + 影子对拍 + I5/I6 | I5/I6 + I0 | 默认关；关档逐位不变 |
+| **V2 ✅** | **双重表示窗口**：`world_step/conversion.rs` + `PhysConfig::conversion` 开关 + `conversion_pass` 登记轮次表 + 影子对拍 + I5/I6 + **I3 效应键**（`EffectKey`：转换与挖格互斥）| I5/I6 + I0 | 默认关；关档逐位不变 |
 | **V3** | **交接策略**：(i)/(ii) 两档 + I7；门面 `convert_region_to_mesh(...)`（挖掘→建网体一条龙，替代盒路径的可选档） | I7 | 默认 (ii)；关 ⇒ 走现行盒路径 |
 | **V4** | **预算与降级**：旋钮 + 凸包/盒两级 + I8；`apply_impact_destruction` 按预算接线（盒 → 网格，超预算回盒） | I8 | 旋钮 0 ⇒ 逐位 = V3 路径 |
 | V5+ | **后续（本计划不做，登记入口）**：跨块缝合/LOD（Transvoxel 表现成）；**动态体素体**（需要体素域带位姿——现状 provider 是静态标记体，`shape.rs:46-48`，差异登记）；GPU 档；warm 残量继承（等 C5） | — | — |
+
+**V2 落地注记（2026-10-03）**：
+
+- 判据在 `crates/vxl-phys/tests/conversion_window.rs`（I0/I5/I6 + I3 两向冲突）与
+  `world_step/conversion.rs` 的 in-crate 测试（**阈值锚** + **金丝雀**：错位 0.5 m 的影子必红）。
+- **与 §3.2 ④ 的一处如实偏差**（代码事实优先，不静默改）：§3.2 写"影子升为**正式动态体**"，
+  但本仓现状的体素域是**静态标记体**（`Shape::Provider(id)`，无位姿/无速度——§5 的 V5+ 行自己
+  登记了这个差异）。把它切成动态体 = 凭空造一个会下落的刚体（地形会掉走），与
+  `world_body.rs:154-155`「引擎不凭空造动量」反向 ⇒ V2 按**静态 → 静态**提交（目标 = 静态
+  `Mesh` provider）。交接档 (i)「不继承」在这里是恒等（`Δp = ΔL = 0` 逐位）；动态体素体（V5+）
+  与 (ii) 继承（V3）落地时把提交段换成 `add_trimesh` + `spawn_trimesh_body`（薄壳质量口径已就位）。
+- I5 首测锚（先量后写）：源/影子**同批**探针 1 个、点数 1/1、最大穿透 0.36621/0.36621、
+  法向和夹角余弦 1.00000 ⇒ 阈值钉 1 点 / 2 cm / 0.99（余量 ≈100×）。
+- 本地 `local_gate.py` 24/25（唯一红 `gate-probe` 系 `scripts/gates_common.py::list_rs` 不剪枝
+  `target/` 子目录所致——纯 target 产物命中，非本片引入；`gate_all.sh` 全绿）。
 
 ## 6. 外部对标与护栏（先算账，别照抄；证据分级）
 

@@ -28,6 +28,7 @@ const ROUNDS: &[&str] = &[
     "medium_pass",         // 介质 2a：流体作介质（子步 A/B；Force）
     "splat_medium_pass",   // 介质①：喷溅场作介质（子步 B；Force）
     "aero_pass",           // 面元气动（子步 C；Force + Torque）
+    "conversion_pass",     // 体素↔多边形转换窗口（tick 末各域轮次之后；Position 表示切换，事件级）
 ];
 
 /// **引擎内部豁免**：同为 `*_pass` 形状但不是跨域作用（轮次驱动器本身 / 窄相档 / CCD /
