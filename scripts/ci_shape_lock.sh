@@ -10,9 +10,11 @@
 set -u
 ROOT="${1:-.}"
 CI="$ROOT/.github/workflows/ci.yml"
+REL="$ROOT/.github/workflows/release.yml"
 FAIL=0
 
 [ -f "$CI" ] || { echo "❌ 找不到 $CI"; exit 1; }
+[ -f "$REL" ] || { echo "❌ 找不到 $REL"; exit 1; }
 
 need_text() { # 说明 + 字面量（-F 精确匹配）
   if ! grep -qF -- "$2" "$CI"; then
@@ -108,6 +110,22 @@ fi
 for hook in .githooks/pre-commit .githooks/pre-push; do
   [ -f "$ROOT/$hook" ] || { echo "❌ 提交通道缺 $hook"; FAIL=1; }
 done
+
+# ⑦ **发版门禁不许被管道吞掉**（2026-10-03 发现）：`release.yml` 的门禁步曾写成
+#    `cargo run … | tee x.log`——`bash -e` 下管道退出码是**最后一条命令**（tee）的 ⇒
+#    m0_gates/determinism/金样 挂了这一步照样绿 ⇒ **Release 会在红树上建出来**。
+#    发版路径**从未跑过**（仓里没有 tag），所以这条只能靠形状锁钉，不能靠"跑一次看看"。
+if grep -nE '\| *tee' "$REL" >/dev/null 2>&1; then
+  echo "❌ release.yml 的门禁用管道接了 tee —— 管道退出码是 tee 的 0，" \
+       "会把门禁失败吞掉、在红树上建 Release（改用「逐条取 rc，先打诊断再退出」）："
+  grep -nE '\| *tee' "$REL"
+  FAIL=1
+fi
+# 正例也要在：发版门的每一条门禁都必须显式取 rc 并返回（不许只靠最后一行命令的隐式状态）。
+grep -qF -- 'exit "$rc"' "$REL" || {
+  echo "❌ release.yml 的门禁步没走「先打诊断再退出」（缺 exit \"\$rc\"）"
+  FAIL=1
+}
 
 if [ "$FAIL" -eq 0 ]; then
   echo "✅ CI 形状锁通过（四提交门 + 汇总门 needs 完整 / 关键命令在 / 安全与成本基线在 /" \
