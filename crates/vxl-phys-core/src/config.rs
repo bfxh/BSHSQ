@@ -40,6 +40,20 @@ impl FrictionModel {
     }
 }
 
+/// **体素↔多边形转换窗口**（`docs/PLAN-CONVERSION.md` §3.2，V2 片）。**默认全关 ⇒ 零代际**：
+/// 关档下门面拒收转换请求（`Err`，fail-loud）、`conversion_pass` 首行短路，既不提取网格也不生成体
+/// ⇒ 既有判据/金样/冻结哈希一字不动（I0）。旋钮形态照 §3.4（0 = 不限），降级档属 V4、本片不做。
+/// 三个字段的 `Default`（false / 0 / 0）就是"全关"，故直接 derive（不用手写 impl）。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ConversionConfig {
+    /// 总开关。`false`（默认）⇒ 请求路径直接 `Err`，不是静默跳过。
+    pub enabled: bool,
+    /// 单次转换允许的网格**顶点**上限（0 = 不限）。超限 ⇒ 拒绝切换并如实登记（降级到凸包/盒属 V4）。
+    pub max_vertices: usize,
+    /// 每 tick 允许的转换**事件**上限（0 = 不限）。超限的请求在排队处 fail-loud。
+    pub max_events: usize,
+}
+
 /// 主配置。`Default` = 规格书默认档（**2 子步 × 3 迭代 × 内层 1 = 6 扫掠/帧**、skin 0.02；
 /// 2026-09-15 按实测标定；⚠️ 2026-09-27 更正：原写"迭代 12×内层 2、子步 1"，与 `default()` 的 3/1/2 全不符）。
 #[derive(Clone, Debug, PartialEq)]
@@ -185,6 +199,8 @@ pub struct PhysConfig {
     pub threads: usize,
     /// 重力（通过力场注册表注入，见 vxl-phys-field）。
     pub gravity: Vec3,
+    /// 体素↔多边形转换窗口（V2；默认关 ⇒ 零代际）。见 [`ConversionConfig`]。
+    pub conversion: ConversionConfig,
 }
 
 impl Default for PhysConfig {
@@ -223,6 +239,7 @@ impl Default for PhysConfig {
             strict_determinism: true,
             threads: 1,
             gravity: Vec3::new(0.0, -9.81, 0.0),
+            conversion: ConversionConfig::default(),
         }
     }
 }

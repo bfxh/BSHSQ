@@ -5,6 +5,10 @@ use super::*;
 #[derive(Default)]
 pub struct Providers {
     pub(crate) entries: Vec<ProviderEntry>,
+    /// **转换窗口簿记**（效应键账 + 上一 tick 结果；定义见 `types.rs`，语义与入口见
+    /// `world_step/conversion.rs`）。收在这里而不是 `World`：`world_struct.rs` 的成员位
+    /// 顶在 god 门棘轮（23 成员、只准减）。
+    pub(crate) conversion: crate::types::ConversionBook,
 }
 
 impl Providers {

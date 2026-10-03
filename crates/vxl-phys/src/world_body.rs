@@ -38,6 +38,11 @@ impl World {
         density: f32,
         vel: Vec3,
     ) -> usize {
+        // **I3 效应键**：本 tick 该域已被 `Conversion` 占用 ⇒ 拒绝提取（域原地不动），
+        // 不静默"提了 0 个格"。反向顺序的冲突（先请求转换、后挖格）在这里显式挡住。
+        if self.claim_extraction_effect(id).is_err() {
+            return 0;
+        }
         let Some(vol) = self.providers.voxel_mut(id) else {
             return 0;
         };
@@ -57,6 +62,9 @@ impl World {
     /// **球域挖洞**（任意形状切割第一步；爆炸/弹坑形态）：提取球内格 → 碎块 + 移除。
     /// 返回碎块数。确定性：格心判据 + 固定贪心扫描序（见 `extract_sphere`）。
     pub fn carve_sphere(&mut self, id: u32, center: Vec3, radius: f32, density: f32) -> usize {
+        if self.claim_extraction_effect(id).is_err() {
+            return 0;
+        }
         let Some(vol) = self.providers.voxel_mut(id) else {
             return 0;
         };
@@ -83,6 +91,9 @@ impl World {
         seeds: &[Vec3],
         density: f32,
     ) -> usize {
+        if self.claim_extraction_effect(id).is_err() {
+            return 0;
+        }
         let Some(vol) = self.providers.voxel_mut(id) else {
             return 0;
         };
