@@ -1507,7 +1507,8 @@ core **零依赖** ⇒ 几何本体也不可能进 core。
 
 ##### 8.4.36 ✅ T1b-3 落地：**三角网 × 高度场**（缺口 #6 关闭）⇒ 判据 ① 四条腿全通
 
-**落地**：`mesh_pair.rs` 增 `mesh_heightfield`（与 `hull_heightfield` **同构**：逐顶点
+**落地**：`mesh_pair.rs` 增 `mesh_heightfield`（与外壳的地形腿 `support.rs::hull_pair` 的
+L1 分支**同构**〔2026-10-05 更正：原写 `hull_heightfield`，那是死代码，已删〕：逐顶点
 `hf.sample(x, z)` ⇒ `depth = h − v.y`，接触点落在地形面 `(x, h, z)`）；`heightfield_pair` 里把
 三角网从"`return true`（不受理）"拆成**独立臂**——**法线与 sign 由那段形状无关的"最深样本地形法线"
 处理** ⇒ 本片只负责填 `self.cand`。

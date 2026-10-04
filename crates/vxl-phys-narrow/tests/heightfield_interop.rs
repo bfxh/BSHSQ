@@ -147,12 +147,15 @@ fn provider_sphere_contacts_match_narrow_path_bitwise() {
     assert_eq!(bits3(narrow_n), bits3(out[0].normal), "法线须逐位一致");
 }
 
-/// **点查询 × 高度场**：provider 面 vs 窄相「**单顶点外壳**」的逐顶点路由
-/// （`hull_heightfield` 对 1 个顶点就是一次点查询）。
+/// **点查询 × 高度场**：provider 面 vs 窄相「**单顶点外壳**」的逐顶点路由。
 ///
-/// 判据：点 / 深度 / **法线**逐位一致。`feature` 口径**有意不同**——provider 点查询没有
-/// 顶点身份 ⇒ 0（与 `contacts_point_voxel` 同），窄相逐顶点给的是顶点序号 + 1
-/// ⇒ 这里不比特征（其余三项仍逐位比，见 `assert_eq!` 的三条）。
+/// 外壳 × 高度场的 live 路径是 **`support.rs::hull_pair` 的 L1 分支**（`process_pair_shaped`
+/// 里 hull 分支排在 `heightfield_pair` 之前；2026-10-05 更正——原注写的是另一份
+/// `hf.rs::hull_heightfield`，那是**死代码**，已删）⇒ 对 1 个顶点就是一次点查询，
+/// 且它的 `feature = 顶点序号`（从 0 起）与 provider 点查询的 0 **一致** ⇒ 四项全比。
+/// ⚠️ 若哪天改回"顶点序号 + 1"，本测试会在特征那一行红——那正是要提醒的信号。
+///
+/// 判据：点 / 深度 / 法线 / 特征逐位一致。
 #[test]
 fn provider_point_contacts_match_narrow_single_vertex_hull() {
     let hf = ramp();
@@ -186,6 +189,10 @@ fn provider_point_contacts_match_narrow_single_vertex_hull() {
         "深度须逐位一致"
     );
     assert_eq!(bits3(narrow_n), bits3(out[0].normal), "法线须逐位一致");
+    assert_eq!(
+        narrow_pts[0].2, out[0].feature,
+        "特征须一致（live 路径从 0 起）"
+    );
 }
 
 #[test]

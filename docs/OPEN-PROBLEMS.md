@@ -1793,7 +1793,9 @@ y 分布：min -4201.078 | p05 -3.222 | p50 -1.762 | p95 -3.448 | max 3.980
   **⑳ ✅ 皮肤带偏置已修（网格路径，2026-09-21）——"正 depth = 穿透"口径归位**
 
   **依据（先定"哪种口径才对"，再动手）**：同档的**高度场路径**用的是真穿透量：
-  `vxl-phys-narrow/src/lib.rs` 的 `poly_heightfield` / `hull_heightfield` 写的是
+  `vxl-phys-narrow/src/hf.rs` 的 `poly_heightfield`、以及外壳的地形腿
+  （`support.rs::hull_pair` 的 L1 分支；2026-10-05 更正：此处原写 `hull_heightfield`，
+  那是**死代码**，已删——见 `PLAN-0.2.md` L1 的更正注）写的是
   `let depth = h − v.y;`（正 = 顶点已低于地面）+ 带内判据 `depth > −skin`（speculative margin）；
   而**球→网格**那一路本来就是 `depth = radius − sd`（贴住时恒为 0，⑱ 已用 clearance 验证）。
   ⇒ 只有**点/盒→网格**这一路写成 `depth = skin − sd`（= 穿透量 + skin），偏离 `interop.rs`

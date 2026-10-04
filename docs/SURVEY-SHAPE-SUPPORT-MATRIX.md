@@ -51,6 +51,17 @@
 （现状 = 不产接触；落地后翻成"停住"）——这就是本仓"有形状、无接触"缺口的标准处理法
 （先例：`tests/provider_shape_coverage.rs`，胶囊/圆柱/圆锥那条）。
 
+> **⚠️ 2026-10-05 补登一条「组合」缺口（不是形状缺口，所以不在上面那三条里）**：
+> **高度场 × 提供者 = 静默无接触**（实测：`Shape::HeightField(0)` × `Shape::Provider(0)` 走完整
+> `collide` ⇒ **流形数 0**）。机理：`process_pair_shaped` 里 `provider_pair` **排在**
+> `heightfield_pair` 之前，而 `provider_shape_contacts` 对 `Shape::HeightField` 落到
+> `_ => false` ⇒ 那一对直接结束。
+> **影响 = 零**：两种体都是**静态 Marker**（`world_build.rs` 用 `push_static` 建）⇒ 求解器
+> 本来也不会从"静态×静态"产出约束；`Provider × Provider` 同理（那条有显式注释）。
+> **要不要关**：要关就照 `hull_provider_contacts` 的样子拿高度场网格节点对提供者做逐点采样
+> （需要把 `heightfields` 传进 provider 分支）——但收益为零，故**只登记不动手**。
+> 登记理由是"**别让下一个人以为这是漏写**"（本仓"静默 `_` 兜底"清单见 §1 表 #10/#13 的备注）。
+
 ## 2. 判据（**先判据后实现**）
 
 - **Z-门（零换代）**：默认档**不注册三角网** ⇒ 既有全部判据 + 三条冻结哈希
@@ -152,7 +163,8 @@ fmt 又把两条模式拆回 4 行 ⇒ 白做）。⇒ **"给枚举加一条臂"
 
 **落地**：`mesh_pair.rs` 增加 `mesh_pair`（逐顶点**解析**最近点；受理 **盒 / 球 / 胶囊 / 圆柱**，
 其余如实不受理）+ `point_shape`（点 × 上述四族的最近点/外法线/深度，`Vec3`/`Mat3` 手写，无新依赖）
-+ `mesh_heightfield`（与 `hull_heightfield` **同构**：逐顶点 `hf.sample` ⇒ `depth = h − v.y`）；
++ `mesh_heightfield`（与外壳的地形腿 `support.rs::hull_pair` 的 L1 分支**同构**：逐顶点
+`hf.sample` ⇒ `depth = h − v.y`；2026-10-05 更正：原写 `hull_heightfield`，那是死代码，已删）；
 `pair_shaped.rs::pair_non_heightfield` 加**早分支**、高度场分派里把三角网拆出为独立臂。
 法线从求解器定义反推：`n_o` = 把顶点推出去的方向 ⇒ **三角网在 a 侧取 `−n_o`、在 b 侧取 `+n_o`**
 （高度场腿的 sign 由 `heightfield_pair` 那段**形状无关**地处理）。

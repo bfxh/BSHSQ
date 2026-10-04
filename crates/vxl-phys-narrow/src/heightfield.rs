@@ -177,9 +177,10 @@ impl vxl_phys_core::interop::CollisionProvider for HeightField {
         true
     }
 
-    /// 点查询（探针 = `p`）：`depth = h − p.y`，与窄相 `poly_heightfield` /
-    /// `hull_heightfield` 的**逐顶点采样同一条式子**；`feature = 0`（点没有顶点身份，
-    /// 与 `contacts_point_voxel` 同口径）。场外（`sample` = `None`）= 无接触，仍返回 true。
+    /// 点查询（探针 = `p`）：`depth = h − p.y`，与窄相 `poly_heightfield` 及外壳的地形腿
+    /// （`support.rs::hull_pair` 的 L1 分支）的**逐顶点采样同一条式子**；`feature = 0`
+    /// （点没有顶点身份，与 `contacts_point_voxel` 同口径）。场外（`sample` = `None`）=
+    /// 无接触，仍返回 true。
     fn contacts_point(&self, p: Vec3, skin: f32, out: &mut Vec<InteropContact>) -> bool {
         let Some((h, n)) = self.sample(p.x, p.z) else {
             return true;

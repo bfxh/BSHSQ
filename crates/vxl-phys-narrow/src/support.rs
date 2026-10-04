@@ -160,8 +160,8 @@ impl DefaultNarrowPhase {
     /// - 流形点 = 外壳点云中落在对方支撑面 `plane ± skin` 带内的顶点，
     ///   逐点深度 `plane − n̂·v`（n̂ = 对方 → 外壳）；取最深 4 点。
     /// - `feature = 顶点序号 + 1`（点云序稳定 ⇒ 跨帧可续接）。
-    /// - 外壳 × 高度场：**已支持**——走 `hull_heightfield`（逐顶点采样，与 `poly_heightfield`
-    ///   同款），不再走本函数。
+    /// - 外壳 × 高度场：**就在本函数**（下方 L1 分支，逐顶点采样）；`pair_shaped.rs` 的 hull
+    ///   分支排在 `heightfield_pair` 之前 ⇒ 那个组合永远先到这里（2026-10-05 更正：原写反了）。
     #[allow(clippy::too_many_arguments)] // 与 process_pair 同形（两侧位姿 + 形状 + 出参 + 体表）
     pub(crate) fn hull_pair(
         &mut self,
@@ -191,40 +191,9 @@ impl DefaultNarrowPhase {
 
         // —— 对方是高度场（L1）：顶点采样，与盒/圆柱版同构 ——
         if let Shape::HeightField(hf_id) = *other_shape {
-            let Some(hf) = heightfields.get(hf_id as usize) else {
-                return;
-            };
-            self.ws.cand.clear();
-            let n_pts = self.ws.hull_pts[side].len();
-            for idx in 0..n_pts {
-                let v = self.ws.hull_pts[side][idx];
-                if let Some((h, _)) = hf.sample(v.x, v.z) {
-                    let depth = h - v.y;
-                    if depth > -self.skin {
-                        self.ws.cand.push(ContactPoint {
-                            point: Vec3::new(v.x, h, v.z),
-                            depth,
-                            feature: idx as u32,
-                        });
-                    }
-                }
+            if let Some(hf) = heightfields.get(hf_id as usize) {
+                self.hull_pair_heightfield(a, b, a_is_hull, hf, out);
             }
-            if self.ws.cand.is_empty() || !self.select_contacts(self.min_point_sep) {
-                return;
-            }
-            let deepest = self.ws.cand[0];
-            let n_t = hf
-                .sample(deepest.point.x, deepest.point.z)
-                .map(|(_, n)| n)
-                .unwrap_or(Vec3::Y);
-            // 法线约定 a→b：外壳在 a（地形在 b）⇒ −n_t；否则 +n_t
-            let normal = if a_is_hull { -n_t } else { n_t };
-            out.push(Manifold {
-                a,
-                b,
-                normal,
-                points: ContactPoints::from_slice(&self.ws.cand),
-            });
             return;
         }
 
@@ -269,38 +238,61 @@ impl DefaultNarrowPhase {
         let n = if a_is_hull { n_p } else { -n_p }; // 对方 → 外壳
         let other: &dyn gjk::Support = if a_is_hull { &ub } else { &ua };
         let plane = n.dot(other.support(n));
-        let mut cand: Vec<(f32, usize, Vec3)> = Vec::new();
-        let n_pts = self.ws.hull_pts[side].len();
-        for i in 0..n_pts {
-            let w = self.ws.hull_pts[side][i];
-            let d = plane - n.dot(w);
-            if d > -self.skin {
-                cand.push((d, i, w));
-            }
-        }
-        if cand.is_empty() {
+        let pts = hull_points_in_band(&self.ws.hull_pts[side], plane, n, self.skin);
+        if pts.is_empty() {
             return;
         }
-        // 最深 4 点（深度降序；并列按顶点序 ⇒ 确定性）
-        cand.sort_by(|x, y| {
-            y.0.partial_cmp(&x.0)
-                .unwrap_or(core::cmp::Ordering::Equal)
-                .then(x.1.cmp(&y.1))
-        });
-        cand.truncate(4);
-        let pts: Vec<ContactPoint> = cand
-            .iter()
-            .map(|&(d, i, w)| ContactPoint {
-                point: w,
-                depth: d,
-                feature: (i as u32) + 1,
-            })
-            .collect();
         out.push(Manifold {
             a,
             b,
             normal: -n_p, // 流形约定：a → b
             points: ContactPoints::from_slice(&pts),
+        });
+    }
+
+    /// **外壳 × 高度场（L1 腿）**：外壳世界点逐顶点 `hf.sample` ⇒ 候选（`depth = h − v.y`、
+    /// 接触点落在地形面、`feature = 顶点序号` 从 0 起），`select_contacts` 截 ≤4；
+    /// 法线取**最深样本处**的地形法线，按 a/b 侧定号（外壳在 a ⇒ `−n_t`）。
+    /// 从 `hull_pair` 原样拆出（2026-10-05，纯搬移）：那段把它撑到 140 行（本 crate 最长函数）。
+    fn hull_pair_heightfield(
+        &mut self,
+        a: u32,
+        b: u32,
+        a_is_hull: bool,
+        hf: &HeightField,
+        out: &mut Vec<Manifold>,
+    ) {
+        let side = usize::from(!a_is_hull);
+        self.ws.cand.clear();
+        let n_pts = self.ws.hull_pts[side].len();
+        for idx in 0..n_pts {
+            let v = self.ws.hull_pts[side][idx];
+            if let Some((h, _)) = hf.sample(v.x, v.z) {
+                let depth = h - v.y;
+                if depth > -self.skin {
+                    self.ws.cand.push(ContactPoint {
+                        point: Vec3::new(v.x, h, v.z),
+                        depth,
+                        feature: idx as u32,
+                    });
+                }
+            }
+        }
+        if self.ws.cand.is_empty() || !self.select_contacts(self.min_point_sep) {
+            return;
+        }
+        let deepest = self.ws.cand[0];
+        let n_t = hf
+            .sample(deepest.point.x, deepest.point.z)
+            .map(|(_, n)| n)
+            .unwrap_or(Vec3::Y);
+        // 法线约定 a→b：外壳在 a（地形在 b）⇒ −n_t；否则 +n_t
+        let normal = if a_is_hull { -n_t } else { n_t };
+        out.push(Manifold {
+            a,
+            b,
+            normal,
+            points: ContactPoints::from_slice(&self.ws.cand),
         });
     }
 
@@ -388,4 +380,34 @@ impl DefaultNarrowPhase {
         self.ws.poly_index.insert(key, idx);
         Some(idx)
     }
+}
+
+/// **外壳点云 → 「落在对方支撑面 `plane ± skin` 带内」的流形点**：逐顶点深度
+/// `d = plane − n̂·w`，取**最深 4 点**（深度降序；并列按顶点序 ⇒ 确定性），
+/// `feature = 顶点序号 + 1`。从 `hull_pair` 的 GJK/EPA 腿**原样拆出**（2026-10-05，纯搬移）。
+fn hull_points_in_band(pts: &[Vec3], plane: f32, n: Vec3, skin: f32) -> Vec<ContactPoint> {
+    let mut cand: Vec<(f32, usize, Vec3)> = Vec::new();
+    for (i, &w) in pts.iter().enumerate() {
+        let d = plane - n.dot(w);
+        if d > -skin {
+            cand.push((d, i, w));
+        }
+    }
+    if cand.is_empty() {
+        return Vec::new();
+    }
+    // 最深 4 点（深度降序；并列按顶点序 ⇒ 确定性）
+    cand.sort_by(|x, y| {
+        y.0.partial_cmp(&x.0)
+            .unwrap_or(core::cmp::Ordering::Equal)
+            .then(x.1.cmp(&y.1))
+    });
+    cand.truncate(4);
+    cand.iter()
+        .map(|&(d, i, w)| ContactPoint {
+            point: w,
+            depth: d,
+            feature: (i as u32) + 1,
+        })
+        .collect()
 }

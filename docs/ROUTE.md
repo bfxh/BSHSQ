@@ -217,9 +217,11 @@
       （`depth = −sdf(p)` 内点为正、`feature = 0`、返回值 = 是否支持）。这样"默认不覆写"
       在两套接口里含义相同，**不会出现隐式解**。`HeightField` 随即覆写两者：
       `contacts_sphere` 委托 `sphere_heightfield`、`contacts_point` 与 `poly_heightfield`
-      / `hull_heightfield` 的逐顶点采样**同一条式子**（零公式复制）；
+      及外壳的地形腿（`support.rs::hull_pair` 的 L1 分支）的逐顶点采样**同一条式子**；
       集成测试 `heightfield_interop.rs` 再加两条**逐位等价**判据——球（vs `Sphere` 体走完整路由）
-      与点（vs **单顶点外壳**走 `hull_heightfield`；`feature` 有意不同故只比点/深度/法线）。
+      与点（vs **单顶点外壳**走那条 L1 分支；四项全比——live 路径的 `feature` 从 0 起，
+      与 provider 点查询的 0 相同。⚠️ 2026-10-05 更正：本行原写"走 `hull_heightfield`、
+      `feature` 有意不同"——`hull_heightfield` 是**死代码**（已删），实际走的是 `hull_pair`）。
       ⇒ 域 trait 与窄相接口**同口径**了，「注册表按域派发」这一步现在只是机械搬运。
       ⚠️ 体素侧 `VoxelVolume` 当时的域 trait 只有 `bounds / closest_point`（球/点查询与
       盒的专用解都只在门面那条路上）——**已由下一刀补齐**，见下条。
