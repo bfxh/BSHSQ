@@ -44,4 +44,12 @@ pub trait BroadPhase {
     fn cand_split(&self) -> (usize, usize, usize, usize) {
         (0, 0, 0, 0)
     }
+
+    /// 诊断：被过滤的候选按**体域**计数 `(静态, 睡眠, 清醒)`；默认 `(0,0,0)`。
+    ///
+    /// 用途（issue #4「候选过滤的访存局部性」）：过滤要为每条候选读按**全局体号**索引的 `aabbs[j]`；
+    /// 谁是候选决定"能否给位置不变的体建只读紧凑副本"。**仅 `CAND_KIND_DIAG` 开时非零**（默认零开销）。
+    fn cand_kind(&self) -> (usize, usize, usize) {
+        (0, 0, 0)
+    }
 }

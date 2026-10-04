@@ -11,6 +11,15 @@ use super::*;
 /// 验收接入过一版，树峰 7.34 → **3.10ms**（叶含 8 体 ⇒ 多数移动落在叶盒内、
 /// 免 refit），但查询均 7.47 → **14.68ms**、峰 22.64 → **33.50ms**——
 /// 叶粒度让候选数 8×（实测 候选均 **208 万/tick**，真实接触对仅 ≈2.25/体），
+/// **候选体域构成诊断开关**（编译期；默认 `false` ⇒ **零开销**，与 solver 侧 `SLEEP_DIAG_DEEP` 同款先例）。
+///
+/// 用途（issue #4「宽相候选过滤的访存局部性」）：过滤要为每条候选读 `aabbs[j]`——按**全局体号**索引的
+/// 4.8MB 冷数组。若候选里**绝大多数是静态/睡眠体**（位置根本不变），就该给它们建一份只读紧凑副本
+/// （甚至单独一段索引）⇒ 这才是"紧凑 AABB"杠杆的正确形状；若不然，那条杠杆也该否掉。
+/// **为什么必须关档**：分类要额外读 `body_type[j]` / `awake[j]` 两个冷数组（与 `aabbs[j]` 同款随机访问）
+/// ⇒ 常态开着会真花掉被测量的那份时间（8B 量级 20 万候选 × ~20 ns ≈ 4 ms/tick）。
+pub const CAND_KIND_DIAG: bool = false;
+
 /// 查询是**候选受限**而非遍历受限 ⇒ 净负收益，**回退**（详见 docs/M1-PLAN.md）。
 pub struct BvhBroadPhase {
     pub(crate) tree: DynamicBvh,
@@ -40,6 +49,8 @@ pub struct BvhBroadPhase {
     /// 诊断：上一帧**候选来源拆分** `(复用体, 新遍历体, 复用候选, 新遍历候选)`。
     /// 语义与用途见 `trait_phase.rs` 的 `cand_split` 注（纯计数，不进哈希）。
     pub last_cand_split: (usize, usize, usize, usize),
+    /// 诊断（仅 `CAND_KIND_DIAG` 开时填）：被过滤的候选按**体域**计数 `(静态, 睡眠, 清醒)`。
+    pub last_cand_kind: (usize, usize, usize),
 }
 
 impl BvhBroadPhase {
@@ -59,6 +70,7 @@ impl BvhBroadPhase {
             last_breakdown_us: (0, 0, 0, 0),
             last_cand_total: 0,
             last_cand_split: (0, 0, 0, 0),
+            last_cand_kind: (0, 0, 0),
         }
     }
 
@@ -263,7 +275,7 @@ impl BvhBroadPhase {
     }
 
     /// 2b) 精确过滤 + 并行收集（dyn-dyn 双侧发射由最终排序去重收敛；dyn-static 由动体侧发起）。
-    fn collect_pairs(&mut self, threads: usize, dyns: &[u32]) {
+    fn collect_pairs(&mut self, bodies: &BodySet, threads: usize, dyns: &[u32]) {
         let n_chunks = Self::query_chunks(threads, dyns.len());
         let chunk_len = dyns.len().div_ceil(n_chunks);
         let mut outs: Vec<Vec<(u32, u32)>> = vec![Vec::new(); n_chunks];
@@ -302,6 +314,34 @@ impl BvhBroadPhase {
         for mut co in outs {
             self.pairs.append(&mut co);
         }
+        // **候选的体域构成**（仅诊断档，见 `CAND_KIND_DIAG`）：静态 / 睡眠 / 清醒各占多少。
+        // 决定"给位置不变的体建只读紧凑 AABB 副本"这条杠杆能否成立。
+        self.last_cand_kind = (0, 0, 0);
+        if CAND_KIND_DIAG {
+            self.last_cand_kind = self.cand_kind_counts(bodies, dyns);
+        }
+    }
+
+    /// `CAND_KIND_DIAG` 的分类遍历。**抽成独立函数**：内联在 `collect_pairs` 里会把它顶过
+    /// `cyc-gate` 的 soft 阈值（2026-10-04 CI 实测抓到的 —— 本地漏跑 `local_gate` 是我的疏漏）。
+    fn cand_kind_counts(&self, bodies: &BodySet, dyns: &[u32]) -> (usize, usize, usize) {
+        let (mut st, mut sl, mut aw) = (0usize, 0usize, 0usize);
+        for &i in dyns {
+            let iu = i as usize;
+            let off = self.cand_off[iu] as usize;
+            let len = self.cand_len[iu] as usize;
+            for &j in &self.cand_arena[off..off + len] {
+                let ju = j as usize;
+                if !bodies.is_dynamic(ju) {
+                    st += 1;
+                } else if bodies.awake[ju] {
+                    aw += 1;
+                } else {
+                    sl += 1;
+                }
+            }
+        }
+        (st, sl, aw)
     }
 
     /// arena 压实（少见：仅当垃圾占比高时；重建各体偏移）。
@@ -392,7 +432,7 @@ impl BroadPhase for BvhBroadPhase {
         self.cand_len.resize(n, 0);
         // 分块并行重查（只读树；每块本地 arena + 条目表），随后串行合并。
         self.refresh_candidates(bodies, threads, &dyns);
-        self.collect_pairs(threads, &dyns);
+        self.collect_pairs(bodies, threads, &dyns);
         self.compact_arena(&dyns);
         let d_query = vxl_phys_core::probe::us(t_query);
         let t_sort = vxl_phys_core::probe::start();
@@ -426,5 +466,9 @@ impl BroadPhase for BvhBroadPhase {
 
     fn cand_split(&self) -> (usize, usize, usize, usize) {
         self.last_cand_split
+    }
+
+    fn cand_kind(&self) -> (usize, usize, usize) {
+        self.last_cand_kind
     }
 }
