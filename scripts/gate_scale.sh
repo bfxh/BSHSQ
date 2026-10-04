@@ -28,10 +28,10 @@
 #   全期均 35.32 ms/tick ｜ 最差 410.53 ms ｜ 活跃相均 196.08 ms/tick（活跃 103/600 tick）
 #   峰值：流形 321132 ｜ warm 槽 400000 ｜ 接触点 1284528 ｜ 候选 1040623
 #
-# **窄相验收量（只报不判，2026-10-04 加）**：`SPEC.md` §12.2 的 M1 判据里有「窄相 ≤25 ms（8B
-# 沉降峰值）」，但它此前**没有任何标准读数出口**——只有 `m1_scale` 的逐 tick 行，窗口与统计量
-# 每次靠人手拼。这里在**沉降期窗口**（前 `活跃 tick 数` 个 tick；场景是"雨落+沉降"、活跃期是从
-# tick 1 起的连续前缀，`flips=0` 保证其后不再唤醒）上给 **均 / p95 / max** 三个统计量。
+# **分相位验收量（只报不判，2026-10-04 加）**：M1 判据里的「宽相 ≤15 ms（P2）／窄相 ≤25 ms（P4）／
+# 解算（P3 瞬态）」此前**都没有标准读数出口**——只有 `m1_scale` 的逐 tick 行，窗口与统计量每次靠
+# 人手拼。这里在**沉降期窗口**（前 `活跃 tick 数` 个 tick；场景是"雨落+沉降"、活跃期是从 tick 1
+# 起的连续前缀，`flips=0` 保证其后不再唤醒）上给 **宽相 / 窄相 / 解算** 三行，各带 均 / p95 / max。
 # ⚠️ **不判**：`SPEC.md` §5 写死「性能门只在参考硬件（§3 = i5-13490F）上判定」，本脚本跑的
 # 机器未必是参考硬件 ⇒ 报数供参考机器复核，**别拿本机的绝对值判通过/不通过**。
 
@@ -141,21 +141,27 @@ case "$verdict_time" in
     *)    echo "  ✅ 计时在门内" ;;
 esac
 
-# —— 窄相验收量（P4 的被测量；**只报不判**，理由见脚本头）——
-# 窗口 = 沉降期（前 `active` 个 tick 的逐 tick「窄相」列）；统计量给三个，因为"峰"这个词在
-# 单点 max 上不可复现（同码多跑会飘）——p95 才是可判的那个，max 一并印出来供对照。
-narrow=$(grep '^tick' "$log" | awk -F'|' 'NF>=8 {print $3}' \
-    | grep -oE '[0-9]+\.?[0-9]*' | head -n "${active:-0}" | sort -g)
-if [ -n "$narrow" ]; then
-    n_n=$(printf '%s\n' "$narrow" | wc -l | tr -d ' ')
-    n_avg=$(printf '%s\n' "$narrow" | awk '{t+=$1} END{printf "%.2f", t/NR}')
-    n_p95=$(printf '%s\n' "$narrow" | awk '{v[NR]=$1} END{i=int(NR*0.95); if(i<1)i=1; print v[i]}')
-    n_max=$(printf '%s\n' "$narrow" | tail -1)
-    echo "—— 窄相（只报不判；判据在参考硬件上判）"
-    printf '  %-12s 均 %s ｜ p95 %s ｜ max %s（窗口 = 沉降期 %s tick）\n' 窄相 "$n_avg" "$n_p95" "$n_max" "$n_n"
-else
-    echo "⚠️ 解析不到逐 tick「窄相」列（输出格式变了？）——窄相验收量未报" >&2
-fi
+# —— **分相位**验收量（P2 宽相峰 / P3 解算 / P4 窄相的被测量；**只报不判**，理由见脚本头）——
+# 窗口 = 沉降期（前 `active` 个 tick 的逐 tick 列）；统计量给三个，因为"峰"在**单点 max** 上不可
+# 复现（同码多跑会飘）——p95 才是可判的那个，max 一并印出来供对照。
+# ⚠️ 宽相列（`$2`）里还含 AABB/树/查询三个分项 ⇒ 用 `(AABB` 前的那个数（宽相合计）当锚，别整段抓。
+phase_report() { # phase_report <名字> <字段号> <抽取模式>
+    local vals
+    vals=$(grep '^tick' "$log" | awk -F'|' 'NF>=8 {print $'"$2"'}' \
+        | grep -oE "$3" | grep -oE '[0-9]+\.?[0-9]*' | head -n "${active:-0}" | sort -g)
+    if [ -z "$vals" ]; then
+        echo "  ⚠️ 解析不到「$1」列（输出格式变了？）" >&2
+        return
+    fi
+    printf '  %-12s 均 %s ｜ p95 %s ｜ max %s\n' "$1" \
+        "$(printf '%s\n' "$vals" | awk '{t+=$1} END{printf "%.2f", t/NR}')" \
+        "$(printf '%s\n' "$vals" | awk '{v[NR]=$1} END{i=int(NR*0.95); if(i<1)i=1; print v[i]}')" \
+        "$(printf '%s\n' "$vals" | tail -1)"
+}
+echo "—— 分相位（只报不判；窗口 = 沉降期前 ${active:-0} tick）"
+phase_report 宽相 2 '[0-9.]+ \(AABB'
+phase_report 窄相 3 '[0-9.]+'
+phase_report 解算 4 '[0-9.]+'
 
 if [ "$fail" -eq 0 ]; then
     echo "✅ 规模档门全绿（确定性量逐项一致；计时$([ "$verdict_time" = WARN ] && echo '有黄项' || echo '在门内')）"
