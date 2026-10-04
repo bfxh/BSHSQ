@@ -1,6 +1,6 @@
 //! # vxl-phys-marine
 //!
-//! 船只（§1 vxl-phys-marine）：浮力采样/波浪耦合 —— M2+ 落地。
+//! 船只（§1 vxl-phys-marine）：浮力采样/波浪耦合 —— ⚠️ **参数骨架**：只有 `MarineConfig`，**无消费方**（2026-10-05 更正：原写 "M2+ 落地"，与实情不符）。
 
 #![forbid(unsafe_code)]
 
