@@ -78,6 +78,8 @@ struct Acc {
     /// 宽相候选来源拆分 `(复用体, 新遍历体, 复用候选, 新遍历候选)` 的**全程累计**
     /// （每 tick 相加；单帧快照会失真，见上面 `mfp_max` 那条同款注）。
     split_sum: (usize, usize, usize, usize),
+    /// 候选**体域构成** `(静态, 睡眠, 清醒)` 的全程累计（仅 `CAND_KIND_DIAG` 开时非零）。
+    kind_sum: (usize, usize, usize),
     active_ticks: u32,
     active_ms: f64,
     // **抖动审计（SPEC §3：休眠体被重复唤醒 < 1 次/秒/体）**——逐体「睡→醒」翻转计数。
@@ -102,6 +104,7 @@ impl Acc {
             pts_max: 0,
             cands_max: 0,
             split_sum: (0, 0, 0, 0),
+            kind_sum: (0, 0, 0),
             active_ticks: 0,
             active_ms: 0.0,
             dyn_ids: (0..w.bodies.len())
@@ -139,6 +142,10 @@ fn run_ticks(w: &mut World, ticks: u32, acc: &mut Acc) {
         acc.split_sum.1 += cs.1;
         acc.split_sum.2 += cs.2;
         acc.split_sum.3 += cs.3;
+        let ck = w.broad.cand_kind();
+        acc.kind_sum.0 += ck.0;
+        acc.kind_sum.1 += ck.1;
+        acc.kind_sum.2 += ck.2;
         let hh = w.health();
         if hh.awake_bodies > 0 {
             acc.active_ticks += 1;
@@ -331,6 +338,13 @@ fn print_cand_split(acc: &Acc, ticks: f64) {
         per(cs.1),
         per(cs.2),
         per(cs.3),
+    );
+    // 体域构成（诊断档；`CAND_KIND_DIAG=false` 时恒 0）：决定"紧凑 AABB 副本"能否成立。
+    println!(
+        "  宽相候选体域（诊断档）：静态 {:.1} · 睡眠 {:.1} · 清醒 {:.1}",
+        per(acc.kind_sum.0),
+        per(acc.kind_sum.1),
+        per(acc.kind_sum.2),
     );
 }
 

@@ -46,9 +46,9 @@
    "max_type_members": 31
   },
   "crates/vxl-phys-broad/src/bvh_phase.rs": {
-   "file_lines": 431,
+   "file_lines": 475,
    "max_fn_lines": 76,
-   "max_type_members": 14
+   "max_type_members": 15
   },
   "crates/vxl-phys-broad/src/grid_phase.rs": {
    "file_lines": 186,
@@ -66,9 +66,9 @@
    "max_type_members": 0
   },
   "crates/vxl-phys-broad/src/trait_phase.rs": {
-   "file_lines": 48,
+   "file_lines": 56,
    "max_fn_lines": 11,
-   "max_type_members": 7
+   "max_type_members": 8
   },
   "crates/vxl-phys-broad/src/wide.rs": {
    "file_lines": 326,
@@ -1086,9 +1086,9 @@
    "max_type_members": 7
   },
   "crates/vxl-phys/examples/m1_scale.rs": {
-   "file_lines": 408,
+   "file_lines": 422,
    "max_fn_lines": 76,
-   "max_type_members": 16
+   "max_type_members": 17
   },
   "crates/vxl-phys/examples/m3_impact.rs": {
    "file_lines": 134,
@@ -1541,15 +1541,15 @@
   },
   "crates/vxl-phys-broad::BroadPhase": {
    "fields": 0,
-   "methods": 7
+   "methods": 8
   },
   "crates/vxl-phys-broad::Bvh8": {
    "fields": 5,
    "methods": 31
   },
   "crates/vxl-phys-broad::BvhBroadPhase": {
-   "fields": 14,
-   "methods": 11
+   "fields": 15,
+   "methods": 12
   },
   "crates/vxl-phys-broad::BvhNode": {
    "fields": 0,
@@ -2328,7 +2328,7 @@
    "methods": 0
   },
   "crates/vxl-phys::Acc": {
-   "fields": 16,
+   "fields": 17,
    "methods": 1
   },
   "crates/vxl-phys::Args": {
