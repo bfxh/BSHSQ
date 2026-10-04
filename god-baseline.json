@@ -656,8 +656,8 @@
    "max_type_members": 10
   },
   "crates/vxl-phys-narrow/src/phase.rs": {
-   "file_lines": 175,
-   "max_fn_lines": 18,
+   "file_lines": 180,
+   "max_fn_lines": 16,
    "max_type_members": 14
   },
   "crates/vxl-phys-narrow/src/polytope.rs": {
@@ -2105,11 +2105,7 @@
   },
   "crates/vxl-phys-narrow::ProbeCounters": {
    "fields": 14,
-   "methods": 0
-  },
-  "crates/vxl-phys-narrow::ProbeStats": {
-   "fields": 14,
-   "methods": 0
+   "methods": 1
   },
   "crates/vxl-phys-narrow::SphereSupport": {
    "fields": 2,

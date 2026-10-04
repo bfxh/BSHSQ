@@ -390,7 +390,7 @@ fn print_throughput(tk: f64, rows: [(&str, f64, f64); 3]) {
     }
 }
 
-/// 窄相四段计数（P4 的读数入口；字段语义见 `vxl_phys_narrow::ProbeStats` 与
+/// 窄相四段计数（P4 的读数入口；字段语义见 `vxl_phys_narrow::ProbeCounters` 与
 /// `docs/EXPERIMENTS.md`「裁剪内部计数归属」两节。纯诊断，计数器不改行为；
 /// 全量字段（插值/provider 分派等）在 `arena_bench` 的探针里打印）。
 fn print_narrow_probe(w: &World, ticks: f64) {
