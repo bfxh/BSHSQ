@@ -114,8 +114,138 @@ fn torque_stats(s: f32, n: usize, settle: usize, win: usize) -> (Vec3, f32, f32,
     (mean, a_mean, p95, ns)
 }
 
+/// **大方盆**（2026-10-04 加）：体素 0.5、`8×4×8`（跨 4 m），只掏中间 **1.0 m×1.0 m** 的竖井
+/// （底 1 m 厚、壁 1 m 高）⇒ 水块能到 1 m 量级 ⇒ **铸装空腔只占水的百分之几**。
+///
+/// 为什么需要它：小盆（0.5 m，水 0.4 m 立方）里挖一个"体 + h"的空腔占了 **27%** 的水 ⇒ 空腔
+/// 塌陷的余波把读数全淹了（|v|max 1–10 m/s、480–900 tick 都衰减不掉；见台账 P7 第三刀）。
+fn tank_big(w: &mut World) -> u32 {
+    let min = Vec3::new(-2.0, 0.0, -2.0);
+    let mut vol = vxl_phys_terrain::voxel::VoxelVolume::new(min, 0.5, 8, 4, 8);
+    vol.fill_box(min, Vec3::new(2.0, 2.0, 2.0));
+    for iy in 2..4 {
+        for ix in 3..5 {
+            for iz in 3..5 {
+                vol.set(ix, iy, iz, false); // 掏空中央 1.0×1.0 m、壁高 1 m 的竖井
+            }
+        }
+    }
+    w.add_voxel(vol)
+}
+
+/// 大方盆一档：`dims` 个粒子 @ 间距 `s`（h = 2s、`substeps` 随 1/h 保 CFL）；静态盒按**浮力
+/// 平衡位**就位（水面由无体预跑实测）。返回 `(τ 窗口均值, |τ| 均, |τ| p95, 采样数, |v|max, |v|均)`。
+fn torque_stats_big(
+    s: f32,
+    dims: [usize; 3],
+    settle: usize,
+    win: usize,
+) -> (Vec3, f32, f32, usize, f32, f32) {
+    let h = 2.0 * s;
+    let cfg = || vxl_phys_fluid::FluidConfig {
+        smoothing_radius: h,
+        substeps: (4.0 * 0.1 / h).round().max(1.0) as u32,
+        ..vxl_phys_fluid::FluidConfig::default()
+    };
+    let origin = Vec3::new(-0.5, 1.0, -0.5);
+    // ① 无体预跑：测自由水面（中央柱内的最高粒子）
+    let surface = {
+        let mut w = World::new(PhysConfig::default());
+        let v = tank_big(&mut w);
+        let fid = w.add_fluid_with_boundary_coupling(
+            vxl_phys_fluid::FluidSystem::new(cfg(), origin, dims, s),
+            &[v],
+        );
+        for _ in 0..300 {
+            w.step();
+        }
+        let mut hi = 0.0f32;
+        for p in w.fluids()[fid].0.positions() {
+            if p.x.abs() < 0.1 && p.z.abs() < 0.1 {
+                hi = hi.max(p.y);
+            }
+        }
+        hi
+    };
+    // ② 按浮力平衡位就位（吃水 = ρ_body/ρ_water × 2·half），并**铸装挖空**（体 AABB + h）
+    let half = 0.06f32;
+    let y0 = surface - 0.3 * 2.0 * half + half;
+    let mut w = World::new(PhysConfig::default());
+    let v = tank_big(&mut w);
+    let mut sys = vxl_phys_fluid::FluidSystem::new(cfg(), origin, dims, s);
+    vxl_phys_fluid::carve_sphere(&mut sys, Vec3::new(0.0, y0, 0.0), half + h);
+    let fid = w.add_fluid_with_boundary_coupling(sys, &[v]);
+    let body = w.add_static(
+        Shape::Box {
+            half: Vec3::splat(half),
+        },
+        Vec3::new(0.0, y0, 0.0),
+        Quat::IDENTITY,
+    );
+    for _ in 0..settle {
+        w.step();
+    }
+    let vs = w.fluids()[fid].0.velocities();
+    let vmax = vs.iter().fold(0.0f32, |m, v| m.max(v.length()));
+    let vmean = vs.iter().map(|v| v.length()).sum::<f32>() / vs.len().max(1) as f32;
+    let mut sum = Vec3::ZERO;
+    let mut mags: Vec<f32> = Vec::new();
+    for _ in 0..win {
+        w.step();
+        if let Some(r) = w.fluids()[fid]
+            .0
+            .boundary_reactions()
+            .iter()
+            .find(|r| r.0 == body)
+        {
+            sum += r.2;
+            mags.push(r.2.length());
+        }
+    }
+    let ns = mags.len();
+    if ns == 0 {
+        return (Vec3::ZERO, 0.0, 0.0, 0, vmax, vmean);
+    }
+    let mean = sum * (1.0 / ns as f32);
+    mags.sort_by(f32::total_cmp);
+    let a_mean = mags.iter().sum::<f32>() / ns as f32;
+    let p95 = mags[(ns * 95 / 100).min(ns - 1)];
+    (mean, a_mean, p95, ns, vmax, vmean)
+}
+
+/// **大方盆复测**：空腔只占水的 ~2% ⇒ 若小盆那两档的"不静止"确实是空腔余波，这里应当**静止**。
 #[test]
-#[ignore = "仪表（只打印）：2b 反作用力矩的窗口统计 + 分辨率扫描"]
+#[ignore = "仪表（只打印）：大方盆（空腔 ~2% 水体积）下的反作用力矩稳态读数"]
+fn reaction_torque_big_tank() {
+    // 窗口取 **1920 tick**：水在弱阻尼（XSPH ε=0.1）下晃很久，"τ 的窗口均值"（DC 分量）才
+    // 是把晃荡平均掉的那个量；短窗口的 |τ| 只是晃动幅度。
+    let (settle, win) = (480usize, 1920usize);
+    let fb = 1000.0f32 * 0.3 * 0.12f32.powi(3) * 9.81;
+    println!("方盆复测：体素 4 m 跨、竖井 1.0×1.0 m；水 20×16×20 @0.05（6400 粒，深 0.75 m）");
+    println!("  参照浮力 F_b = {fb:.3} N ⇒ 等效力臂 = |τ|/F_b；空腔 r=0.16 ⇒ 约 2.3% 水体积");
+    let (mean, a_mean, p95, ns, vmax, vmean) = torque_stats_big(0.05, [20, 16, 20], settle, win);
+    println!(
+        "  τ 窗口均值 ({:+.5},{:+.5},{:+.5}) N·m ｜ **|均值| {:.6}（DC，等效力臂 {:.3} mm）**｜ |τ| 均 {:.6} ｜ |τ| p95 {:.6}（晃荡幅度）(n={ns})",
+        mean.x,
+        mean.y,
+        mean.z,
+        mean.length(),
+        mean.length() / fb * 1000.0,
+        a_mean,
+        p95
+    );
+    println!(
+        "  窗口起点：流体 |v|max {vmax:.5} ｜ |v|均 {vmean:.5} ⇒ {}",
+        if vmax < 0.01 {
+            "已静止（读数有效）"
+        } else {
+            "**尚未静止 ⇒ 读数含余波，勿当稳态**"
+        }
+    );
+}
+
+#[test]
+#[ignore = "仪表（只打印）：2b 反作用力矩的窗口统计 + 分辨率扫描（小盆，对照用）"]
 fn reaction_torque_stats_and_resolution_sweep() {
     let (settle, win) = (480usize, 480usize);
     // 物理刻度：盒半长 0.06、密度 300 ⇒ 排水体积 = 0.3·(0.12)³；F_b = ρ0·V·g。
