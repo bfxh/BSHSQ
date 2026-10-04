@@ -966,9 +966,14 @@
    "max_type_members": 0
   },
   "crates/vxl-phys-solver/src/solver_impl.rs": {
-   "file_lines": 824,
+   "file_lines": 661,
    "max_fn_lines": 87,
-   "max_type_members": 15
+   "max_type_members": 12
+  },
+  "crates/vxl-phys-solver/src/solver_impl/sleep.rs": {
+   "file_lines": 186,
+   "max_fn_lines": 63,
+   "max_type_members": 3
   },
   "crates/vxl-phys-solver/src/stats.rs": {
    "file_lines": 132,
