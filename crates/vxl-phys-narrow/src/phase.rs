@@ -56,7 +56,7 @@ pub(crate) struct PairWorkspace {
 }
 
 /// 诊断计数器（零开销，仅整数自增）；从 `DefaultNarrowPhase` 收出，见 `PairWorkspace` 头注。
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct ProbeCounters {
     /// 诊断计数器（**零开销**，仅整数自增）：裁剪调用数 / 内层顶点迭代总数 /
     /// 交点插值总数 / 进 `select_contacts` 前的候选点数。用途：用"每次调用的
@@ -102,25 +102,6 @@ pub struct ProbeCounters {
     pub prov_samples: u64,
 }
 
-/// 窄相剖析读数（`probe_stats` 的返回；字段语义见 `ProbeCounters`）。
-#[derive(Clone, Copy, Debug, Default)]
-pub struct ProbeStats {
-    pub clip_calls: u64,
-    pub clip_iters: u64,
-    pub clip_xings: u64,
-    pub cand_pts: u64,
-    pub clip_max: u64,
-    pub sat_pairs: u64,
-    pub sat_pairs_box: u64,
-    pub poly_fills: u64,
-    pub poly_fill_verts: u64,
-    pub hull_fills: u64,
-    pub hull_fill_verts: u64,
-    pub prov_pairs: u64,
-    pub prov_bulk: u64,
-    pub prov_samples: u64,
-}
-
 #[derive(Clone)]
 pub struct DefaultNarrowPhase {
     /// 凸体外壳仓库（多边形域；点云注册后由 shape 引用）。
@@ -153,22 +134,46 @@ pub struct DefaultNarrowPhase {
 
 impl DefaultNarrowPhase {
     /// 诊断读数（字段语义与判读见 `ProbeCounters`）。
-    pub fn probe_stats(&self) -> ProbeStats {
-        ProbeStats {
-            clip_calls: self.probe.clip_calls,
-            clip_iters: self.probe.clip_iters,
-            clip_xings: self.probe.clip_xings,
-            cand_pts: self.probe.cand_pts,
-            clip_max: self.probe.clip_max,
-            sat_pairs: self.probe.sat_pairs,
-            sat_pairs_box: self.probe.sat_pairs_box,
-            poly_fills: self.probe.poly_fills,
-            poly_fill_verts: self.probe.poly_fill_verts,
-            hull_fills: self.probe.hull_fills,
-            hull_fill_verts: self.probe.hull_fill_verts,
-            prov_pairs: self.probe.prov_pairs,
-            prov_bulk: self.probe.prov_bulk,
-            prov_samples: self.probe.prov_samples,
-        }
+    pub fn probe_stats(&self) -> ProbeCounters {
+        self.probe
+    }
+}
+
+/// 并行分块的输出槽预分配（T3 结构项②的第一片）：8B 实测对/流形 ≈ 15:1；旧实现每块
+/// 从空 Vec 逐次增长（~8 次重分配 + memcpy）、最终拼接再搬一遍 ⇒ 按下界预留即免掉这段。
+///
+/// **为什么槽位是元组**：`collide` 的并行档每块 `clone` 一份独立计数器（见
+/// `ProbeCounters::merge`）——不回流则并行档的诊断读数恒为 0。槽位顺路把它带回宿主。
+///
+/// 放在**模块级**（不是 `DefaultNarrowPhase` 的方法）：类型账对它的方法数已登记为债务
+/// （只准减），加方法会顶红。
+pub(crate) fn chunk_outs(n_chunks: usize, out_hint: usize) -> Vec<(Vec<Manifold>, ProbeCounters)> {
+    let cap = out_hint / n_chunks + 8;
+    (0..n_chunks)
+        .map(|_| (Vec::with_capacity(cap), ProbeCounters::default()))
+        .collect()
+}
+
+impl ProbeCounters {
+    /// **并行分块回流**：`collide` 的并行档每块 `clone` 一份独立计数器（见 `entry.rs`）——
+    /// 不回流的话，**并行档读出来恒为全 0**（2026-10-04 实测：8B 场景 8 线程读 0、
+    /// 同一份码单线程读 238 442 次裁剪/步）。⇒ 每块跑完必须把它的计数加回宿主。
+    ///
+    /// `clip_max` 是**峰值**（取 max），其余是**累计量**（相加）——两者语义不同，别一把加。
+    pub(crate) fn merge(&mut self, o: &Self) {
+        self.clip_calls += o.clip_calls;
+        self.clip_iters += o.clip_iters;
+        self.clip_xings += o.clip_xings;
+        self.cand_pts += o.cand_pts;
+        self.sat_pairs += o.sat_pairs;
+        self.sat_pairs_box += o.sat_pairs_box;
+        self.poly_fills += o.poly_fills;
+        self.poly_fill_verts += o.poly_fill_verts;
+        self.hull_fills += o.hull_fills;
+        self.hull_fill_verts += o.hull_fill_verts;
+        self.prov_pairs += o.prov_pairs;
+        self.prov_bulk += o.prov_bulk;
+        self.prov_samples += o.prov_samples;
+        self.clip_max = self.clip_max.max(o.clip_max);
     }
 }

@@ -49,11 +49,8 @@ impl NarrowPhase for DefaultNarrowPhase {
         let this = &*self;
         let n_chunks = threads.min(pairs.len().div_ceil(NARROW_MIN_PARALLEL));
         let chunk = pairs.len().div_ceil(n_chunks);
-        // 输出缓冲预分配（T3 结构项②的第一片）：8B 实测对/流形 ≈ 15:1；旧实现每块从空 Vec 逐次增长（~8 次重分配 + memcpy）且最终拼接再搬一遍 ⇒ 按下界预留即免掉这段。
         let out_hint = self.ws.out_hint.max(16);
-        let mut outs: Vec<Vec<Manifold>> = (0..n_chunks)
-            .map(|_| Vec::with_capacity(out_hint / n_chunks + 8))
-            .collect();
+        let mut outs = crate::phase::chunk_outs(n_chunks, out_hint);
         out.reserve(out_hint);
         vxl_phys_core::schedule::for_each_chunk_mut(
             &mut outs,
@@ -65,16 +62,19 @@ impl NarrowPhase for DefaultNarrowPhase {
                     let oi = start_slot + k;
                     let range = oi * chunk..((oi + 1) * chunk).min(pairs.len());
                     let mut np = this.clone();
+                    np.probe = ProbeCounters::default();
                     for &(a, b) in &pairs[range] {
-                        np.process_pair(a, b, bodies, heightfields, providers, co);
+                        np.process_pair(a, b, bodies, heightfields, providers, &mut co.0);
                     }
+                    co.1 = np.probe;
                 }
             },
         );
         let mut produced = 0usize;
-        for mut co in outs {
+        for (mut co, pr) in outs {
             produced += co.len();
             out.append(&mut co);
+            self.probe.merge(&pr);
         }
         // 下一帧的容量提示（纯性能提示，不参与任何判定 ⇒ 确定性无关）。
         self.ws.out_hint = produced;
