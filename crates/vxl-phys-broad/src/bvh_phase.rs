@@ -58,6 +58,14 @@ pub struct BvhBroadPhase {
     /// （`last_cand_split.1`）就能判断：大头在**逃逸次数**（该动缓存盒判据）还是在**逃逸后的簿记**
     /// （arena append / `cand_off`/`cand_len`/`cache_fat` 写）。**纯计时，不进哈希。**
     pub last_query_split_us: (u64, u64),
+    /// 诊断：重查次数按**来源**拆分（跨子步累加，harness 每 tick 调 `reset_query_split()` 清零）：
+    /// `(翻转帧全清导致的重查, 非翻转帧的重查)`。
+    ///
+    /// 为什么要拆（2026-10-04 审计）：`detect_sleep_flip` 在**任一睡眠翻转帧**会把**整个**
+    /// `cache_fat` 置 `Aabb::EMPTY`（`:138-142`）⇒ 那一 tick 的"重查"≈**全体清醒体**，是**物理驱动、
+    /// 与 K 无关的尖峰**；而 K 真正影响的是非翻转帧那部分（代理盒变化 + 真逃出自缓存盒）。
+    /// 混在一起读 K 会得到"非单调"的假象（实测踩到）。
+    pub last_escape_split: (usize, usize),
 }
 
 impl BvhBroadPhase {
@@ -79,6 +87,7 @@ impl BvhBroadPhase {
             last_cand_split: (0, 0, 0, 0),
             last_cand_kind: (0, 0, 0),
             last_query_split_us: (0, 0),
+            last_escape_split: (0, 0),
         }
     }
 
@@ -124,7 +133,7 @@ impl BvhBroadPhase {
     ///      完备性再证：两体 fat 盒均冻结且不相交时，精确盒（⊆ fat）不可能
     ///      新相交——故「翻转帧」是唯一漏洞，翻转帧全体重查即封闭。
     ///      确定性：只读 awake 位（纯状态），与线程数无关。
-    fn detect_sleep_flip(&mut self, bodies: &BodySet) {
+    fn detect_sleep_flip(&mut self, bodies: &BodySet) -> bool {
         let n = bodies.len();
         self.prev_awake.resize(n, true);
         let mut flip = false;
@@ -140,6 +149,7 @@ impl BvhBroadPhase {
                 *f = Aabb::EMPTY;
             }
         }
+        flip
     }
 
     /// 0) AABB 计算：纯函数按下标写槽位（§6 并行契约）。分块并行且
@@ -218,7 +228,13 @@ impl BvhBroadPhase {
 
     /// 2a) 候选重查：仅对逃出缓存 fat 盒的体重走树（只读树；每块本地 arena + 条目表），
     ///     随后串行合并。条目 = (体, 本地偏移, 长度, fat 盒)。
-    fn refresh_candidates(&mut self, bodies: &BodySet, threads: usize, dyns: &[u32]) {
+    fn refresh_candidates(
+        &mut self,
+        bodies: &BodySet,
+        threads: usize,
+        dyns: &[u32],
+        flip_frame: bool,
+    ) {
         let n_chunks = Self::query_chunks(threads, dyns.len());
         let chunk_len = dyns.len().div_ceil(n_chunks);
         // 条目 = (体, 本地偏移, 长度, fat 盒) + 本块的**候选来源计数** `(复用体, 复用候选)`。
@@ -280,6 +296,12 @@ impl BvhBroadPhase {
         self.last_cand_total = cand_total;
         // 拆分：复用侧的候选数取"上拍表长"（本拍未重查 ⇒ 表的长度未变）。
         self.last_cand_split = (reused_bodies, fresh_bodies, reused_cands, cand_total);
+        // 重查按**来源**拆（见 `last_escape_split` 注）：翻转帧那部分是物理尖峰、与 K 无关。
+        if flip_frame {
+            self.last_escape_split.0 += fresh_bodies;
+        } else {
+            self.last_escape_split.1 += fresh_bodies;
+        }
     }
 
     /// 2b) 精确过滤 + 并行收集（dyn-dyn 双侧发射由最终排序去重收敛；dyn-static 由动体侧发起）。
@@ -398,7 +420,7 @@ impl BroadPhase for BvhBroadPhase {
         );
         let threads = jobs.threads();
         // 0.5) 睡眠状态翻转检测（理由与完备性再证见私有方法的文档）：翻转帧全缓存失效。
-        self.detect_sleep_flip(bodies);
+        let flip_frame = self.detect_sleep_flip(bodies);
         // 全量 AABB 分支与「是否重建树」**解耦**（T2）：AABB 本就增量维护——
         // 仅首次（叶子未建）/ 体数变化（新体）需要全量重算（否则静态体 /
         // 睡眠体会带着零 AABB 进树）；纯「树链化超限」的重建 tick 复用现有
@@ -440,7 +462,7 @@ impl BroadPhase for BvhBroadPhase {
         self.cand_len.resize(n, 0);
         // 分块并行重查（只读树；每块本地 arena + 条目表），随后串行合并。
         let t_refresh = vxl_phys_core::probe::start();
-        self.refresh_candidates(bodies, threads, &dyns);
+        self.refresh_candidates(bodies, threads, &dyns, flip_frame);
         let d_refresh = vxl_phys_core::probe::us(t_refresh);
         let t_filter = vxl_phys_core::probe::start();
         self.collect_pairs(bodies, threads, &dyns);
@@ -494,5 +516,10 @@ impl BroadPhase for BvhBroadPhase {
 
     fn reset_query_split(&mut self) {
         self.last_query_split_us = (0, 0);
+        self.last_escape_split = (0, 0);
+    }
+
+    fn escape_split(&self) -> (usize, usize) {
+        self.last_escape_split
     }
 }

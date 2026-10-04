@@ -83,6 +83,9 @@ struct Acc {
     /// 宽相**查询两段**（逃逸重查 / 精确过滤）的全程累计 µs（每 tick 累加）。
     refresh_us_sum: f64,
     filter_us_sum: f64,
+    /// 重查次数按**来源**拆分的全程累计 `(翻转帧全清, 非翻转帧)` —— 只有后者与 K 有关。
+    esc_flip_sum: usize,
+    esc_steady_sum: usize,
     active_ticks: u32,
     active_ms: f64,
     // **抖动审计（SPEC §3：休眠体被重复唤醒 < 1 次/秒/体）**——逐体「睡→醒」翻转计数。
@@ -110,6 +113,8 @@ impl Acc {
             kind_sum: (0, 0, 0),
             refresh_us_sum: 0.0,
             filter_us_sum: 0.0,
+            esc_flip_sum: 0,
+            esc_steady_sum: 0,
             active_ticks: 0,
             active_ms: 0.0,
             dyn_ids: (0..w.bodies.len())
@@ -155,6 +160,9 @@ fn run_ticks(w: &mut World, ticks: u32, acc: &mut Acc) {
         let qs = w.broad.query_split_us();
         acc.refresh_us_sum += qs.0 as f64;
         acc.filter_us_sum += qs.1 as f64;
+        let es = w.broad.escape_split();
+        acc.esc_flip_sum += es.0;
+        acc.esc_steady_sum += es.1;
         let hh = w.health();
         if hh.awake_bodies > 0 {
             acc.active_ticks += 1;
@@ -360,6 +368,12 @@ fn print_cand_split(acc: &Acc, ticks: f64) {
         "  宽相查询两段/tick：逃逸重查 {:.3} ms · 精确过滤 {:.3} ms（二者应≈上面「宽相」耗时）",
         acc.refresh_us_sum / ticks / 1000.0,
         acc.filter_us_sum / ticks / 1000.0,
+    );
+    // **重查来源拆分**：翻转帧（物理尖峰，与 K 无关）vs 非翻转帧（K 真正影响的部分）。
+    println!(
+        "  宽相重查来源/tick：翻转帧全清 {:.1} · 非翻转帧 {:.1}",
+        per(acc.esc_flip_sum),
+        per(acc.esc_steady_sum),
     );
 }
 
