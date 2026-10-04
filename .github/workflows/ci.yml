@@ -107,6 +107,12 @@ jobs:
         run: bash scripts/discipline_scan.sh .
       - name: 词汇禁令扫描（裁决 61）
         run: bash scripts/vocab_scan.sh .
+      # CI 形状锁（承重 job / 关键命令 / 汇总 needs / 权限与成本基线被删即红）。**它此前
+      # 只由本地 gate_all.sh 跑**——而它自己的头注写着「也在 CI 的静态层跑」⇒ 一处
+      # 「门只在本地跑 = 门是装饰」的实缺口（2026-10-04 核对发现）。这里补上调用；
+      # 同步在 ci_shape_lock.sh 里钉一条「本脚本必须在 CI 里被调用」防回退。
+      - name: CI 形状锁（门禁只许加强，不许悄悄退役）
+        run: bash scripts/ci_shape_lock.sh .
       # 上帝对象门（文件/函数/类型尺寸；棘轮只准减，基线 god-baseline.json）。
       # 脚本零依赖、可移植（scripts/god_gate.py + god.gate.json）⇒ CI 里直接 python3 跑；
       # 先跑门自己的金丝雀（判据坏了门就是摆设）。
@@ -247,6 +253,25 @@ jobs:
           path: ${{ runner.temp }}/sorted_copies_attempt_*.log
           if-no-files-found: ignore
           retention-days: 7
+
+  # ==================== 门⑤：debug 档全测（debug_assert 只在 debug 档编译进来） ====================
+  # **为什么有它**（OPEN-PROBLEMS P8 的「教训常驻」）：上面 matrix 的测试一律 `--release`，
+  # 而 `debug_assert!` 在 release **被编译掉** ⇒ 引擎不变量在 CI 里从来没被检查过
+  # （P8 那个 SAT 断言契约写反就是这么静默过去的）。本 job 用 **debug 档**把这一类断言接进 CI。
+  # **口径**：`--exclude vxl-phys-gpu` —— 那些用例走 wgpu，CI 运行器无 GPU（headless），
+  # 适配器回退路径与 release 不同、且不属本 job 的目标（issue #30 另案）。本机 MSVC debug 档
+  # 同一命令全绿（退出码 0）。
+  test-debug:
+    name: 测试 (debug 档 · debug_assert)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: Test (debug 档；debug_assert 生效)
+        run: cargo test --workspace --exclude vxl-phys-gpu
 
   # ==================== 门①：miri（子集 = vxl-phys-core 单测；UB/别名/泄漏） ====================
   miri:
@@ -522,6 +547,7 @@ jobs:
       - static-deps
       - static-code
       - matrix
+      - test-debug
       - miri
       - loom
       - tsan
