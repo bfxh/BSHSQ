@@ -201,6 +201,16 @@
      深度/法线/缝超 skin 无接触。
    - **余（M2 后续）**：高度场迁到 provider 通道（包一层、不改数学，逐位不变）；
      凸体 vs provider 的专用查询；provider 对偶解；键图 + 双 ABI。
+     - **2026-10-04 第一刀（已落地，逐位不变）**：`impl CollisionProvider for HeightField` 补上
+       **`contacts_box`**——**委托窄相同一份数学**（`poly_heightfield`，零公式复制），并新增集成测试
+       `crates/vxl-phys-narrow/tests/heightfield_interop.rs` 证明 provider 面与窄相**实际路由**
+       （`DefaultNarrowPhase::collide` 产出的流形）**逐位相同**（点/深度/特征/法线）。四哈希与
+       `m0_gates` 复跑不变（新方法不在生产路径上，**派发尚未切换**）。
+     - ⚠️ **迁移的真正卡点（本刀查明的接口缺口）**：per-domain 的 `CollisionProvider` **只有
+       `bounds / closest_point / contacts_box`** —— **没有**「球 / 点」查询（那些在窄相侧的
+       `ProviderColliders` 上，由门面的 provider 注册表实现）。所以"**高度场整体迁过去**"不只是
+       "包一层"：要么给域 trait 补 `contacts_sphere` / `contacts_point`，要么让注册表能按域派发。
+       ⇒ 下一步二选一，**先定接口再搬**（否则搬一半会得到两套形状面）。
 4. **每加一域的顺序铁律**：先写档位表行与金样（含容差）→ 再写求解器 →
    最后接耦合矩阵格子。**不许先写实现后补验收**。
 
