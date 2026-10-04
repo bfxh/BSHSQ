@@ -1,5 +1,6 @@
 //! providers：从 lib.rs 按域拆出（纯搬移，语义未改）。
 use super::*;
+use vxl_phys_core::interop::CollisionProvider;
 
 /// 外部碰撞提供者集合（门面持有；实现 `interop::ProviderColliders` 供窄相查询）。
 #[derive(Default)]
@@ -43,7 +44,6 @@ impl Providers {
 
     /// provider(id) 的世界包围盒（宽相 AABB 供给；与 `CollisionProvider::bounds` 同义）。
     pub fn bounds(&self, id: u32) -> Option<Aabb> {
-        use vxl_phys_core::interop::CollisionProvider;
         match self.entries.get(id as usize)? {
             ProviderEntry::Voxel(v) => Some(v.bounds()),
             ProviderEntry::Splat(f) => {
@@ -90,7 +90,6 @@ impl Providers {
 
 impl vxl_phys_core::interop::ProviderColliders for Providers {
     fn bounds(&self, id: u32) -> Option<Aabb> {
-        use vxl_phys_core::interop::CollisionProvider;
         match self.entries.get(id as usize)? {
             ProviderEntry::Voxel(v) => Some(v.bounds()),
             ProviderEntry::Splat(f) => f.bounds(id),
@@ -108,9 +107,7 @@ impl vxl_phys_core::interop::ProviderColliders for Providers {
         out: &mut Vec<vxl_phys_core::interop::InteropContact>,
     ) -> bool {
         match self.entries.get(id as usize) {
-            Some(ProviderEntry::Voxel(v)) => {
-                vxl_phys_terrain::voxel::contacts_box_voxel(v, half, pos, rot, skin, out)
-            }
+            Some(ProviderEntry::Voxel(v)) => v.contacts_box(half, pos, rot, skin, out),
             Some(ProviderEntry::Splat(f)) => f.contacts_box(id, half, pos, rot, skin, out),
             Some(ProviderEntry::Mesh(m)) => m.contacts_box(id, half, pos, rot, skin, out),
             None => false,
@@ -125,9 +122,7 @@ impl vxl_phys_core::interop::ProviderColliders for Providers {
         out: &mut Vec<vxl_phys_core::interop::InteropContact>,
     ) -> bool {
         match self.entries.get(id as usize) {
-            Some(ProviderEntry::Voxel(v)) => {
-                vxl_phys_terrain::voxel::contacts_point_voxel(v, p, skin, out)
-            }
+            Some(ProviderEntry::Voxel(v)) => v.contacts_point(p, skin, out),
             Some(ProviderEntry::Splat(f)) => f.contacts_point(id, p, skin, out),
             Some(ProviderEntry::Mesh(m)) => m.contacts_point(id, p, skin, out),
             None => false,
@@ -137,6 +132,11 @@ impl vxl_phys_core::interop::ProviderColliders for Providers {
     /// 流体边界口径：体素走内点鲁棒变体（截断 SDF 在薄壁内部被格间内面
     /// 主导 ⇒ 中心差分法线可指向固体深处，投影穿壁隧逃——见切片1实测）；
     /// 其余提供者（解析面/半空间无内点歧义）沿用 `contacts_point`。
+    ///
+    /// ⚠️ 这一条**仍是门面直派**、没有并进域 `CollisionProvider`：它是**流体专属的第二张面**
+    /// （刚体通道要的是"外点梯度"口径，流体投影要的是"内点最近真表面"口径），
+    /// 域 trait 上目前没有对应方法 ⇒ 要么先给四域各定一份边界口径，要么让流体自己
+    /// 按域问。别为了"看起来统一"把它塞进 `contacts_point`——那是两套语义。
     fn contacts_point_boundary(
         &self,
         id: u32,
@@ -161,9 +161,7 @@ impl vxl_phys_core::interop::ProviderColliders for Providers {
         out: &mut Vec<vxl_phys_core::interop::InteropContact>,
     ) -> bool {
         match self.entries.get(id as usize) {
-            Some(ProviderEntry::Voxel(v)) => {
-                vxl_phys_terrain::voxel::contacts_sphere_voxel(v, center, radius, skin, out)
-            }
+            Some(ProviderEntry::Voxel(v)) => v.contacts_sphere(center, radius, skin, out),
             Some(ProviderEntry::Splat(f)) => f.contacts_sphere(id, center, radius, skin, out),
             Some(ProviderEntry::Mesh(m)) => m.contacts_sphere(id, center, radius, skin, out),
             None => false,
