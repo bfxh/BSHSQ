@@ -63,10 +63,18 @@ need_text "抖动 artifact 名没用 job-index（matrix.label 含 / 会让上传
           'name: gpu-flake-logs-${{ strategy.job-index }}'
 
 # ③ 汇总门必须继续 needs 这些前置门（skipped 被 GitHub 视作通过 ⇒ 漏一个门就漏一片）
-for dep in static-text static-deps static-code matrix miri loom tsan asan \
+for dep in static-text static-deps static-code matrix test-debug miri loom tsan asan \
            determinism determinism-arm64 hash-compare; do
   need_text "汇总门的 needs 少了：$dep" "      - $dep"
 done
+
+# ③b debug 档测试 job 必须在：`debug_assert!` 只在 debug 档编译进来，而其余测试一律
+#     `--release` ⇒ 少了它，这类引擎不变量在 CI 里**永不执行**（OPEN-PROBLEMS P8 的教训）。
+need_text "debug 档测试 job 不在 CI 里（debug_assert 会静默）" \
+          "cargo test --workspace --exclude vxl-phys-gpu"
+# ③c **本形状锁自己必须被 CI 调用**：否则「防 CI 被悄悄削弱」这把锁只在本地 gate_all.sh 里跑，
+#    在 CI 上删掉 miri/loom/TSan/ASan 或汇总 needs 没人拦（2026-10-04 核对发现，实缺口）。
+need_text "形状锁自身不在 CI 里（门只在本地跑 = 装饰）" "bash scripts/ci_shape_lock.sh ."
 
 # ④ 安全与成本基线（zizmor 审计过的三条 + 成本控制四条）
 need_text "workflow 级最小权限没了"       "permissions:"
