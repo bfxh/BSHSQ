@@ -21,15 +21,15 @@ cyc / nest / args / clone。
   两者范围不同、不是重复入口。分支曾把一份与 gate_all 功能重合的自用 local_gate 撤成
   指路牌，那是另一回事，不冲突。
 
-stdout 编码：中文 Windows 下重定向会用 cp936，打不出 ✅ 直接 UnicodeEncodeError
-（deps_lock / god --selftest 因此在 gate_all 里假红过一次）⇒ 下面显式 reconfigure。
+stdout 编码：中文 Windows 下重定向会用 cp936，打不出 ✅ 直接 UnicodeEncodeError（deps_lock /
+god --selftest 因此在 gate_all 里假红过一次）⇒ 本进程 reconfigure + 给子进程注入 PYTHONUTF8。
 """
 import os
 import sys
 import subprocess
 
-# 中文 Windows 下 stdout 默认 cp936，打 ✅ 会 UnicodeEncodeError（重定向时必现）。
-sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # 中文 Windows：stdout 默认 cp936，打 ✅ 会崩
+os.environ["PYTHONUTF8"] = "1"   # 子门脚本继承（曾 25/25 假红；gate_probe 读子进程输出也靠它）
 
 STEPS = [
     ("dag-gate",     ["scripts/dag_gate.py"]),
