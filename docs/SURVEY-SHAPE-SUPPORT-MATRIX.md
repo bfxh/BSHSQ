@@ -51,6 +51,17 @@
 （现状 = 不产接触；落地后翻成"停住"）——这就是本仓"有形状、无接触"缺口的标准处理法
 （先例：`tests/provider_shape_coverage.rs`，胶囊/圆柱/圆锥那条）。
 
+> **⚠️ 2026-10-05 补登一条「组合」缺口（不是形状缺口，所以不在上面那三条里）**：
+> **高度场 × 提供者 = 静默无接触**（实测：`Shape::HeightField(0)` × `Shape::Provider(0)` 走完整
+> `collide` ⇒ **流形数 0**）。机理：`process_pair_shaped` 里 `provider_pair` **排在**
+> `heightfield_pair` 之前，而 `provider_shape_contacts` 对 `Shape::HeightField` 落到
+> `_ => false` ⇒ 那一对直接结束。
+> **影响 = 零**：两种体都是**静态 Marker**（`world_build.rs` 用 `push_static` 建）⇒ 求解器
+> 本来也不会从"静态×静态"产出约束；`Provider × Provider` 同理（那条有显式注释）。
+> **要不要关**：要关就照 `hull_provider_contacts` 的样子拿高度场网格节点对提供者做逐点采样
+> （需要把 `heightfields` 传进 provider 分支）——但收益为零，故**只登记不动手**。
+> 登记理由是"**别让下一个人以为这是漏写**"（本仓"静默 `_` 兜底"清单见 §1 表 #10/#13 的备注）。
+
 ## 2. 判据（**先判据后实现**）
 
 - **Z-门（零换代）**：默认档**不注册三角网** ⇒ 既有全部判据 + 三条冻结哈希
