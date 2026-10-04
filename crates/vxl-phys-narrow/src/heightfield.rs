@@ -98,41 +98,6 @@ impl HeightField {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn flat_sample_normal_is_up() {
-        let hf = HeightField::flat(-10.0, -10.0, 21, 21, 1.0, 0.0);
-        let (h, n) = hf.sample(3.3, -2.7).unwrap();
-        assert!(h.abs() < 1e-6);
-        assert!(n.y > 0.999);
-    }
-
-    #[test]
-    fn ramp_gradient_normal() {
-        let mut hf = HeightField::flat(0.0, 0.0, 11, 11, 1.0, 0.0);
-        for iz in 0..11 {
-            for ix in 0..11 {
-                hf.set_height(ix, iz, ix as f32);
-            }
-        }
-        let (h, n) = hf.sample(5.5, 5.0).unwrap();
-        assert!((h - 5.5).abs() < 1e-5);
-        // 斜率 dh/dx = 1 → 法线 = normalize(-1, 1, 0)。
-        let inv = core::f32::consts::FRAC_1_SQRT_2;
-        assert!((n.x + inv).abs() < 1e-4);
-        assert!((n.y - inv).abs() < 1e-4);
-    }
-
-    #[test]
-    fn outside_is_none() {
-        let hf = HeightField::flat(0.0, 0.0, 5, 5, 1.0, 0.0);
-        assert!(hf.sample(100.0, 0.0).is_none());
-    }
-}
-
 // ——————————————————————————————————————————————————————————————
 // 互操作层（见 `docs/ROUTE.md` §2.1/§5 与 `vxl_phys_core::interop`）：
 // 高度场作为**第一个 CollisionProvider 实现**（不改行为——本 impl 不接既有管线，
@@ -210,5 +175,42 @@ fn push_hf_contacts(cand: &[ContactPoint], hf: &HeightField, out: &mut Vec<Inter
             depth: p.depth,
             feature: p.feature,
         });
+    }
+}
+
+// **测试放在文件末尾**：clippy 的 `items_after_test_module`（CI 里 `-D warnings`）不允许
+// 测试模块之后再出现 item。
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn flat_sample_normal_is_up() {
+        let hf = HeightField::flat(-10.0, -10.0, 21, 21, 1.0, 0.0);
+        let (h, n) = hf.sample(3.3, -2.7).unwrap();
+        assert!(h.abs() < 1e-6);
+        assert!(n.y > 0.999);
+    }
+
+    #[test]
+    fn ramp_gradient_normal() {
+        let mut hf = HeightField::flat(0.0, 0.0, 11, 11, 1.0, 0.0);
+        for iz in 0..11 {
+            for ix in 0..11 {
+                hf.set_height(ix, iz, ix as f32);
+            }
+        }
+        let (h, n) = hf.sample(5.5, 5.0).unwrap();
+        assert!((h - 5.5).abs() < 1e-5);
+        // 斜率 dh/dx = 1 → 法线 = normalize(-1, 1, 0)。
+        let inv = core::f32::consts::FRAC_1_SQRT_2;
+        assert!((n.x + inv).abs() < 1e-4);
+        assert!((n.y - inv).abs() < 1e-4);
+    }
+
+    #[test]
+    fn outside_is_none() {
+        let hf = HeightField::flat(0.0, 0.0, 5, 5, 1.0, 0.0);
+        assert!(hf.sample(100.0, 0.0).is_none());
     }
 }
