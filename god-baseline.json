@@ -46,7 +46,7 @@
    "max_type_members": 31
   },
   "crates/vxl-phys-broad/src/bvh_phase.rs": {
-   "file_lines": 469,
+   "file_lines": 475,
    "max_fn_lines": 76,
    "max_type_members": 15
   },
@@ -1549,7 +1549,7 @@
   },
   "crates/vxl-phys-broad::BvhBroadPhase": {
    "fields": 15,
-   "methods": 11
+   "methods": 12
   },
   "crates/vxl-phys-broad::BvhNode": {
    "fields": 0,

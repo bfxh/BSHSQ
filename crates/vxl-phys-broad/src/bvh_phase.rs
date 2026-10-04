@@ -318,24 +318,30 @@ impl BvhBroadPhase {
         // 决定"给位置不变的体建只读紧凑 AABB 副本"这条杠杆能否成立。
         self.last_cand_kind = (0, 0, 0);
         if CAND_KIND_DIAG {
-            let (mut st, mut sl, mut aw) = (0usize, 0usize, 0usize);
-            for &i in dyns {
-                let iu = i as usize;
-                let off = self.cand_off[iu] as usize;
-                let len = self.cand_len[iu] as usize;
-                for &j in &self.cand_arena[off..off + len] {
-                    let ju = j as usize;
-                    if !bodies.is_dynamic(ju) {
-                        st += 1;
-                    } else if bodies.awake[ju] {
-                        aw += 1;
-                    } else {
-                        sl += 1;
-                    }
+            self.last_cand_kind = self.cand_kind_counts(bodies, dyns);
+        }
+    }
+
+    /// `CAND_KIND_DIAG` 的分类遍历。**抽成独立函数**：内联在 `collect_pairs` 里会把它顶过
+    /// `cyc-gate` 的 soft 阈值（2026-10-04 CI 实测抓到的 —— 本地漏跑 `local_gate` 是我的疏漏）。
+    fn cand_kind_counts(&self, bodies: &BodySet, dyns: &[u32]) -> (usize, usize, usize) {
+        let (mut st, mut sl, mut aw) = (0usize, 0usize, 0usize);
+        for &i in dyns {
+            let iu = i as usize;
+            let off = self.cand_off[iu] as usize;
+            let len = self.cand_len[iu] as usize;
+            for &j in &self.cand_arena[off..off + len] {
+                let ju = j as usize;
+                if !bodies.is_dynamic(ju) {
+                    st += 1;
+                } else if bodies.awake[ju] {
+                    aw += 1;
+                } else {
+                    sl += 1;
                 }
             }
-            self.last_cand_kind = (st, sl, aw);
         }
+        (st, sl, aw)
     }
 
     /// arena 压实（少见：仅当垃圾占比高时；重建各体偏移）。
