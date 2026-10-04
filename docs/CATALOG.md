@@ -57,14 +57,19 @@
 
 ### 域层（domain plugins；一域一 crate，只向下依赖）
 
+> ⚠️ **2026-10-05 状态列复核**（「规模/测数」列是更早的快照，别当现状读）：
+> 本轮改了三行**与代码不符**的状态 —— `vxl-phys-destruction` / `vxl-phys-soft` / `vxl-phys-aero`；
+> 同时把 `wheeled` / `marine` / `mech` 三个 crate 的**头注**从 "M2 落地" 更正为"参数骨架、无消费方"
+> （CATALOG 这三行本来就是 🦴，是 crate 头注写错了）。
+
 | crate | 域 | 现有关键件 | 依赖 | 状态 | 热路径 |
 |---|---|---|---|---|---|
 | `vxl-phys-terrain` | 体素/地形 | `TerrainSet`（高度场账本）+ **`voxel::VoxelVolume`**（占据位图 + 局域 SDF + `CollisionProvider`）+ 贪心提取/球域切割 + **`mesh::TriMesh`**（任意三角网薄壳提供者 + 均匀网格加速）+ **`contacts_point_voxel_solid`**（流体边界终版口径：占据门 + 开放面推进） | core, narrow, broad | ✅（M3 第一块） | 🌤 每 tick（体素/网格查询在外层调用时进 🔥） |
-| `vxl-phys-destruction` | 断裂/碎块形状 | 骨架（Voronoi 预断裂待做） | — | 🦴 | ❄️ |
-| `vxl-phys-soft` | 软体/布（XPBD） | 参数骨架（compliance 档位） | — | 🦴 | 🔥（实现后） |
+| `vxl-phys-destruction` | 断裂/碎块形状 | **策略件已在**（264 行）：`DestructionConfig`/`FragmentBudget`/`FractureDepth` + `impact_tiers`；机制侧（Voronoi 预断裂、`extract_boxes`/`spawn_box_debris`/`apply_impact_destruction`）在窄相与门面 ⚠️ **但本 crate 目前无消费方**（不在任何 `Cargo.toml` 的依赖里）⇒ 待决：**接线或合并** | — | ⚠️ **未接线**（2026-10-05 复核；原写 🦴"骨架"） | ❄️ |
+| `vxl-phys-soft` | 软体/布（XPBD） | 布/绳 XPBD（距离/结构/弯曲 + 薄壳质量 + 接触/反作用）、点-点/点-边自碰撞、自摩擦库仑锥、撕裂、塑性、气动（含升力）、粒子↔刚体耦合；判据 = crate 内 18 个测试 | core, aero | ✅（2026-10-05 复核；原写 🦴"参数骨架"） | 🔥 |
 | `vxl-phys-fluid` | 液体（SPH/PBF/FLIP） | **WCSPH 求解器**：poly6 密度（含自身项）/ spiky 对称压力梯度 / Tait γ=7 / Monaghan 人工黏度 + XSPH / 镜像鬼影边界密度；确定性均匀网格 27 邻域；SoA + 半隐式欧拉 4 子步（`FluidSystem`）；**`MediumField` 实现**（2a 采样侧，2026-09-22）：`sample`＝27 邻域 poly6 插值出 密度/流速/占用率（**只读、不改流场**）；`deposit` 显式留空待 2b（Akinci） | core | ✅（0.3 切片 1，CPU 档） | 🔥 每 tick（4 子步 × 27 邻域） |
 | `vxl-phys-wheeled` | 车辆（射线悬挂/轮胎） | 参数骨架 | — | 🦴 | 🌤 |
-| `vxl-phys-aero` | 风/气动（面元） | 参数骨架 | — | 🦴 | 🌤 |
+| `vxl-phys-aero` | 风/气动（面元） | **T4 落地**（2026-09-28/29）：`face_force_tri` + `face_force_with_lift`（Bridson 线化阻力 + 线性升力）；消费方 = 门面 `aero_pass` 与 `vxl-phys-soft::cloth_aero` | core | ✅（2026-10-05 复核；原写 🦴"参数骨架"） | 🌤 |
 | `vxl-phys-marine` | 海洋/浮力 | 参数骨架 | — | 🦴 | 🌤 |
 | `vxl-phys-mech` | 机械/关节族 | 参数骨架 | — | 🦴 | 🔥（关节求解） |
 | `vxl-phys-gpu` | GPU 档（§8 / M4，**显式档**） | **wgpu 计算管线**：常驻 `Packet`（网格重建 → 密度 → EOS → 力 → 积分，含壁面镜像鬼影 + 投影、卡上反作用聚合、刚体积分腿）+ `NarrowTier`（窄相固定槽 + 主机回填）+ 宽相/BVH-bbox 探针；**13 个 WGSL**（12 在 `src/`、1 在 `examples/`） | wgpu（唯一外部运行期依赖之一） | ✅（口径 B；默认路径一行不走 ⇒ 三哈希/金样不受影响） | 🌤 每 tick（卡上相位） |

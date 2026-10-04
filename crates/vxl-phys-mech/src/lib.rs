@@ -1,7 +1,7 @@
 //! # vxl-phys-mech
 //!
-//! 机械（§1 vxl-phys-mech）：齿轮/皮带/活塞/马达约束组 —— M2+ 落地。
-//! 全部实现为求解器关节约束组（§2.5 关节族扩展），不引入新求解器。
+//! 机械（§1 vxl-phys-mech）：齿轮/皮带/活塞/马达约束组 —— ⚠️ **参数骨架**：只有 `MechJoint`/`JointParams`，**无消费方**（2026-10-05 更正：原写 "M2+ 落地"）。
+//! 关节族本体在 `vxl-phys-solver`（`JointKind` 5 种）；**本 crate 与它尚未接线**（计划口径见 §2.5）。
 
 #![forbid(unsafe_code)]
 
