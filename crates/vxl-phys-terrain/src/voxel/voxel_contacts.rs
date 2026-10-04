@@ -87,6 +87,40 @@ pub(crate) fn box_aabb_half(half: Vec3, rot: Quat) -> Vec3 {
     )
 }
 
+/// SDF 的**有限差分法线**（步长 = 半格、次序固定 ⇒ 确定）。
+///
+/// **单一来源**：此前这段梯度在 `voxel_provider::closest_point`、
+/// `contacts_sphere_voxel`、`contacts_point_voxel` 里**各抄了一份**（三份同式）；
+/// 收成一处后改判据只需改这里，也把 `CollisionProvider` 与 `ProviderColliders`
+/// 两条路的法线锁成同一份数学。退化梯度（内部深格）退回 `Vec3::Y`。
+pub(crate) fn sdf_gradient_normal(v: &VoxelVolume, p: Vec3) -> Vec3 {
+    let e = v.step * 0.5;
+    let gx = v.sdf(p + Vec3::new(e, 0.0, 0.0)) - v.sdf(p - Vec3::new(e, 0.0, 0.0));
+    let gy = v.sdf(p + Vec3::new(0.0, e, 0.0)) - v.sdf(p - Vec3::new(0.0, e, 0.0));
+    let gz = v.sdf(p + Vec3::new(0.0, 0.0, e)) - v.sdf(p - Vec3::new(0.0, 0.0, e));
+    let g = Vec3::new(gx, gy, gz);
+    if g.length_squared() > 1e-12 {
+        g.normalize()
+    } else {
+        Vec3::Y
+    }
+}
+
+/// 表面最近点（SDF + 有限差分法线）；远离表面（> 1.5 格）返回 `None`
+/// （与高度场「范围外 `None`」同语义）。从 `voxel_provider` 原样搬出，供域 trait 委托。
+pub(crate) fn closest_point_voxel(v: &VoxelVolume, p: Vec3) -> Option<SurfaceHit> {
+    let d = v.sdf(p);
+    if d > v.step * 1.5 {
+        return None;
+    }
+    let n = sdf_gradient_normal(v, p);
+    Some(SurfaceHit {
+        point: p - n * d,
+        normal: n,
+        signed_dist: d,
+    })
+}
+
 /// 盒形包络的体素专用接触（**按盒的面聚合**，标准「参考面」做法）。
 ///
 /// 采样 = 6 个面的面中心 + 4 角（每面 5 点，共 30 点）。**主导面** = skin 带内
@@ -131,36 +165,21 @@ pub fn contacts_box_voxel(
             dirs[0].z, dirs[1].z, dirs[2].z, dirs[3].z, dirs[4].z, dirs[5].z,
         ],
     ];
-    // 每面：(skin 带内采样数, 最深 signed_dist)
+    // 每面的 **skin 带内采样数**（逐面采样：面中心 + 4 角）。
+    // ⚠️ 「主导面」的挑选**已移到窄相**（依据从"深度"换成"闭合速度"，见下方注释）
+    // ⇒ 这里不再算「最深 signed_dist」与 `best`：2026-10-05 收掉的死代码
+    // （旧 `best` 算完立刻 `let _ = best;` 丢掉，只留下"全不在带内就早退"这一个作用）。
     let mut count = [0usize; 6];
-    let mut deepest = [f32::INFINITY; 6];
-    // 逐面采样（面中心 + 4 角）
-    for k in 0..6 {
-        let samples = face_samples(h, &d3, k);
-        for s in &samples {
+    for (k, c) in count.iter_mut().enumerate() {
+        for s in face_samples(h, &d3, k) {
             let p = pos + m.mul_vec3(Vec3::new(s.0, s.1, s.2));
-            let d = sd(p);
-            if d < skin {
-                count[k] += 1;
-                deepest[k] = deepest[k].min(d);
+            if sd(p) < skin {
+                *c += 1;
             }
         }
     }
-    // 主导面：skin 带内采样数最多 → 并列取最深
-    let mut best = usize::MAX;
-    for k in 0..6 {
-        if count[k] == 0 {
-            continue;
-        }
-        if best == usize::MAX
-            || count[k] > count[best]
-            || (count[k] == count[best] && deepest[k] < deepest[best])
-        {
-            best = k;
-        }
-    }
-    if best == usize::MAX {
-        return false;
+    if count.iter().all(|&c| c == 0) {
+        return false; // 6 张面全不在接触带内 ⇒ 无接触
     }
     // **逐面发射**（2026-09-15 修复）：此前只发「主导面」（按带内采样数、并列取
     // 最深选一张），墙角下会按深度选中**地板面**而把**墙面整张丢掉**——体的水平
@@ -169,7 +188,6 @@ pub fn contacts_box_voxel(
     // 2 子步档下更明显）。现在 6 张面各自「带内即发」（法线按面、特征 = 面号×16 +
     // 采样号），主导面选择从 provider 内移到窄相，依据从"深度"换成"闭合速度"
     // （见 narrow 的 CLOSING_MIN 逻辑）——两处合起来才修好"墙角丢面"。
-    let _ = best;
     let mut any = false;
     for k in 0..6usize {
         if count[k] == 0 {
@@ -209,16 +227,7 @@ pub fn contacts_sphere_voxel(
     if depth < -skin {
         return false;
     }
-    let e = v.step * 0.5;
-    let gx = v.sdf(center + Vec3::new(e, 0.0, 0.0)) - v.sdf(center - Vec3::new(e, 0.0, 0.0));
-    let gy = v.sdf(center + Vec3::new(0.0, e, 0.0)) - v.sdf(center - Vec3::new(0.0, e, 0.0));
-    let gz = v.sdf(center + Vec3::new(0.0, 0.0, e)) - v.sdf(center - Vec3::new(0.0, 0.0, e));
-    let g = Vec3::new(gx, gy, gz);
-    let n = if g.length_squared() > 1e-12 {
-        g.normalize()
-    } else {
-        Vec3::Y
-    };
+    let n = sdf_gradient_normal(v, center);
     out.push(vxl_phys_core::interop::InteropContact {
         point: center - n * ((radius + d) * 0.5),
         normal: n,
@@ -248,16 +257,7 @@ pub fn contacts_point_voxel(
     if depth < -skin {
         return true; // 支持查询，但该点不在接触带内（无接触）
     }
-    let e = v.step * 0.5;
-    let gx = v.sdf(p + Vec3::new(e, 0.0, 0.0)) - v.sdf(p - Vec3::new(e, 0.0, 0.0));
-    let gy = v.sdf(p + Vec3::new(0.0, e, 0.0)) - v.sdf(p - Vec3::new(0.0, e, 0.0));
-    let gz = v.sdf(p + Vec3::new(0.0, 0.0, e)) - v.sdf(p - Vec3::new(0.0, 0.0, e));
-    let g = Vec3::new(gx, gy, gz);
-    let n = if g.length_squared() > 1e-12 {
-        g.normalize()
-    } else {
-        Vec3::Y
-    };
+    let n = sdf_gradient_normal(v, p);
     out.push(vxl_phys_core::interop::InteropContact {
         point: p - n * d,
         normal: n,
@@ -302,14 +302,38 @@ pub fn contacts_point_voxel_solid(
     if !v.in_range(cx, cy, cz) || !v.get(cx as u32, cy as u32, cz as u32) {
         return contacts_point_voxel(v, p, skin, out);
     }
+    // 推回侧：一律优先流体可达面（open），外壳面仅作邻域内无 open 时的
+    // 兜底（见函数文档——「原路推回」特判在外壳附近会与 sdf 误报叠加成
+    // 外推棘轮，已删除）；两者皆无退回截断 SDF 梯度路径（次优但有限）。
+    let faces = nearest_surface_faces(v, p, (cx, cy, cz));
+    let (face_n, dist) = if faces[0].1.is_finite() {
+        (faces[0].0, faces[0].1.sqrt())
+    } else if faces[1].1.is_finite() {
+        (faces[1].0, faces[1].1.sqrt())
+    } else {
+        return contacts_point_voxel(v, p, skin, out);
+    };
+    let depth = skin + dist; // 内点：sdf = −dist ⇒ depth = skin − (−dist)
+    out.push(vxl_phys_core::interop::InteropContact {
+        point: p + face_n * dist,
+        normal: face_n,
+        depth,
+        feature: 0,
+    });
+    true
+}
+
+/// 内点邻域（`c` 的 ±1 格）里**两轨最近真表面面片**，元素 = `(外向法线, 距离²)`：
+/// `[0]` = 流体可达面（邻格在网格内且**空**）、`[1]` = 网格外壳面（邻格出界）；
+/// 无候选 = `f32::INFINITY`。
+///
+/// 扫描序 `(dz,dy,dx)` × 面序（−x,+x,−y,+y,−z,+z）固定 + **严格 `<`** 取最近 ⇒ 确定。
+/// 从 `contacts_point_voxel_solid` 里**原样拆出**（2026-10-05）：那段扫描把它撑到
+/// 82 行；拆出后调用方只留「选哪一轨」的判定（82 → 32 行），逐位不变。
+fn nearest_surface_faces(v: &VoxelVolume, p: Vec3, c: (i32, i32, i32)) -> [(Vec3, f32); 2] {
+    let (cx, cy, cz) = c;
     let step = v.step;
-    // 两轨最近真表面面片：open = 邻格在网格内且空（流体可达面）；
-    // shell = 邻格出界（网格外壳面）。扫描序 (dz,dy,dx) × 面序 (轴,±)
-    // 固定 + 严格 `<` 取最近 ⇒ 确定。
-    let mut open_d2 = f32::INFINITY;
-    let mut open_n = Vec3::Y;
-    let mut shell_d2 = f32::INFINITY;
-    let mut shell_n = Vec3::Y;
+    let mut acc = [(Vec3::Y, f32::INFINITY); 2];
     for dz in -1..=1 {
         for dy in -1..=1 {
             for dx in -1..=1 {
@@ -340,35 +364,14 @@ pub fn contacts_point_voxel_solid(
                         continue; // 内面（贴着占据格）：截断 SDF 的噪声源，跳过
                     }
                     let d2 = da * da + dr1 * dr1 + dr2 * dr2;
-                    if v.in_range(nx, ny, nz) {
-                        if d2 < open_d2 {
-                            open_d2 = d2;
-                            open_n = dir;
-                        }
-                    } else if d2 < shell_d2 {
-                        shell_d2 = d2;
-                        shell_n = dir;
+                    // 邻格在网格内（且空）= 流体可达面；出界 = 外壳面。
+                    let slot = usize::from(!v.in_range(nx, ny, nz));
+                    if d2 < acc[slot].1 {
+                        acc[slot] = (dir, d2);
                     }
                 }
             }
         }
     }
-    // 推回侧：一律优先流体可达面（open），外壳面仅作邻域内无 open 时的
-    // 兜底（见函数文档——「原路推回」特判在外壳附近会与 sdf 误报叠加成
-    // 外推棘轮，已删除）；两者皆无退回截断 SDF 梯度路径（次优但有限）。
-    let (face_n, dist) = if open_d2.is_finite() {
-        (open_n, open_d2.sqrt())
-    } else if shell_d2.is_finite() {
-        (shell_n, shell_d2.sqrt())
-    } else {
-        return contacts_point_voxel(v, p, skin, out);
-    };
-    let depth = skin + dist; // 内点：sdf = −dist ⇒ depth = skin − (−dist)
-    out.push(vxl_phys_core::interop::InteropContact {
-        point: p + face_n * dist,
-        normal: face_n,
-        depth,
-        feature: 0,
-    });
-    true
+    acc
 }

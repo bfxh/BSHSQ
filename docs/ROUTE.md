@@ -221,12 +221,28 @@
       集成测试 `heightfield_interop.rs` 再加两条**逐位等价**判据——球（vs `Sphere` 体走完整路由）
       与点（vs **单顶点外壳**走 `hull_heightfield`；`feature` 有意不同故只比点/深度/法线）。
       ⇒ 域 trait 与窄相接口**同口径**了，「注册表按域派发」这一步现在只是机械搬运。
-      ⚠️ 体素侧 `VoxelVolume` 尚未覆写这两个方法（它现在只走门面那条路，行为不变）；
-      下一刀连同门面派发一起搬，并顺手收掉 `closest_point` / `contacts_sphere_voxel` /
-      `contacts_point_voxel` 里**三份重复**的 SDF 有限差分梯度。
+      ⚠️ 体素侧 `VoxelVolume` 当时的域 trait 只有 `bounds / closest_point`（球/点查询与
+      盒的专用解都只在门面那条路上）——**已由下一刀补齐**，见下条。
       god 门棘轮处理：`interop.rs` / `heightfield.rs` 的 `#[cfg(test)] mod tests`
       **原样外迁**到 `tests/`（`interop_default_contacts.rs` / `heightfield_prims.rs`，
       改走公开 API）⇒ 两个 src 文件行数**净减**，基线一字未动。
+    - **2026-10-05 第三刀（已落地，逐位不变）——体素侧补齐域 trait + 收掉两处历史遗骸**：
+      `impl CollisionProvider for VoxelVolume` 补 **`contacts_box` / `contacts_sphere` /
+      `contacts_point`**，各**委托 `voxel_contacts` 的同一份数学**（零公式复制）。
+      ⚠️ 不覆写 `contacts_box` 会退回 trait 的「8 角点采样」默认实现，与体素专用
+      「6 面 × 5 采样」**不是一回事**——这正是"两套形状面"的具体形态。新集成测试
+      `crates/vxl-phys/tests/voxel_provider_domain_equivalence.rs` 钉住
+      **域 trait ≡ 门面注册表**（盒/球/点 × 命中/落空/预期接触；点·深度·法线·特征与
+      返回值逐位比）。顺手清掉两处遗骸：
+      ① SDF 有限差分梯度原在 `closest_point` / `contacts_sphere_voxel` /
+      `contacts_point_voxel` 里**各抄一份** ⇒ 收成 `sdf_gradient_normal` 一处；
+      ② `contacts_box_voxel` 的「主导面 `best` / `deepest`」是**死代码**（算完
+      `let _ = best;` 直接丢掉——主导面选择早已移到窄相按**闭合速度**挑，见该函数注释）
+      ⇒ 只留「6 张面全不在带内 ⇒ 早退」，该函数 **99 → 83 行**。
+      行为逐位不变：`determinism` / `m0_gates` 哈希与 `m1_islands` 串行/并行末态哈希一致。
+      **余**：门面 `Providers` 仍**自己**派发体素（域 trait 虽已同口径，但还没被它调用）
+      ——下一刀把它改成按域 trait 转发，并顺带定 `contacts_point_boundary`（流体边界口径）
+      在域 trait 上的归属。
 4. **每加一域的顺序铁律**：先写档位表行与金样（含容差）→ 再写求解器 →
    最后接耦合矩阵格子。**不许先写实现后补验收**。
 
