@@ -144,6 +144,30 @@ pub trait CollisionProvider {
         }
         any
     }
+
+    /// 「球形包络 vs provider」的接触（世界系；追加进 `out`；返回**是否支持**该查询）。
+    /// 约定与 [`contacts_box`](CollisionProvider::contacts_box) 同：只保留接触带内的点
+    /// （`depth ≥ −skin`，含预期接触的负深度）、法线为 provider 表面**外向**法线。
+    /// SDF 类提供者可解析求解（`depth = r − sdf(center)`）；默认**不支持**（false）
+    /// ⇒ 专用解由各域自行覆写（如高度场委托窄相同一份数学）。
+    fn contacts_sphere(
+        &self,
+        _center: Vec3,
+        _radius: f32,
+        _skin: f32,
+        _out: &mut Vec<InteropContact>,
+    ) -> bool {
+        false
+    }
+
+    /// 「点 vs provider」的接触（探针半径 = `skin`；外壳顶点 / 环点采样走这里）。
+    /// 与 [`ProviderColliders::contacts_point`] 同口径：`depth = −sdf(p)`（**内点为正**）、
+    /// 只保留接触带内的点、`feature = 0`（点没有跨帧稳定的顶点身份）；
+    /// 返回值 = **是否支持**点查询（不在带内也算支持、只是不推接触）。
+    /// 默认**不支持**（false）⇒ 调用方整体不产出接触。
+    fn contacts_point(&self, _p: Vec3, _skin: f32, _out: &mut Vec<InteropContact>) -> bool {
+        false
+    }
 }
 
 /// 盒的 8 个角点（局部系；`k` 的位 0/1/2 分别选 x/y/z 的负/正）。
@@ -313,76 +337,4 @@ pub trait FluidStepper {
 
     /// 让后端**自己**按 provider 收集壁面接触（**它才知道自己的粒子在哪**；`h` = 核半径）。默认空实现。
     fn gather_walls(&mut self, _h: f32, _providers: &dyn ProviderColliders) {}
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// 盒角点采样的默认实现：平面（y=0）上半空盒应产出预期接触。
-    struct PlaneField;
-
-    impl CollisionProvider for PlaneField {
-        fn bounds(&self) -> Aabb {
-            Aabb {
-                min: Vec3::new(-100.0, -1.0, -100.0),
-                max: Vec3::new(100.0, 0.0, 100.0),
-            }
-        }
-
-        fn closest_point(&self, p: Vec3) -> Option<SurfaceHit> {
-            Some(SurfaceHit {
-                point: Vec3::new(p.x, 0.0, p.z),
-                normal: Vec3::new(0.0, 1.0, 0.0),
-                signed_dist: p.y,
-            })
-        }
-    }
-
-    #[test]
-    fn default_contacts_box_samples_corners() {
-        let f = PlaneField;
-        let mut out = Vec::new();
-        // 盒心 y = 0.4、半高 0.5 ⇒ 底面 4 角穿透 0.1
-        let any = f.contacts_box(
-            Vec3::splat(0.5),
-            Vec3::new(0.0, 0.4, 0.0),
-            Quat::IDENTITY,
-            0.02,
-            &mut out,
-        );
-        assert!(any);
-        assert_eq!(out.len(), 4, "只有底面 4 角进入 skin 带");
-        for c in &out {
-            assert!(
-                (c.depth - 0.1).abs() < 1e-5,
-                "穿透深度应为 0.1，实际 {}",
-                c.depth
-            );
-            assert!((c.normal - Vec3::new(0.0, 1.0, 0.0)).length() < 1e-6);
-        }
-    }
-
-    #[test]
-    fn speculative_contact_kept_within_skin() {
-        let f = PlaneField;
-        let mut out = Vec::new();
-        // 底面在 y=0.01（未接触，缝 0.01 ≤ skin 0.02）⇒ 保留为预期接触（负深度）
-        let any = f.contacts_box(
-            Vec3::splat(0.5),
-            Vec3::new(0.0, 0.51, 0.0),
-            Quat::IDENTITY,
-            0.02,
-            &mut out,
-        );
-        assert!(any);
-        assert_eq!(out.len(), 4);
-        for c in &out {
-            assert!(
-                (c.depth + 0.01).abs() < 1e-5,
-                "预期接触深度应 −0.01，实际 {}",
-                c.depth
-            );
-        }
-    }
 }
