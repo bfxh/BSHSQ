@@ -55,6 +55,20 @@ pub fn carve_sphere(fs: &mut FluidSystem, center: Vec3, r: f32) -> usize {
     carve_fluid(fs, |p| (p - center).length() < r)
 }
 
+/// [`carve_fluid`] 的另一种常用形态：挖掉以 `center` 为心、`half` 为半长的**轴对齐盒**内的粒子。
+///
+/// **尺寸怎么定（2026-10-04 实测，别凭直觉）**：挖空范围 ≈ **体 AABB + 核半径 h**，不是"越贴越好"。
+/// `float_quiet_probe` 同一格里比过两档：`half = 体半长 + h`（0.06+0.05 = 0.11 球）⇒ 体停在平衡位
+/// 附近；**收紧到 0.08**（只比体大半圈）⇒ 两个格被弹到速度上限并**穿透地板**（y≈−5000）
+/// ⇒ 残留的"核带内"粒子仍在与体相互作用，反而是收紧后的主扰动源。切不可把 `half` 取成体半长本身。
+pub fn carve_box(fs: &mut FluidSystem, center: Vec3, half: Vec3) -> usize {
+    carve_fluid(fs, |p| {
+        (p.x - center.x).abs() < half.x
+            && (p.y - center.y).abs() < half.y
+            && (p.z - center.z).abs() < half.z
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::carve_fluid;

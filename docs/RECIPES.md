@@ -551,6 +551,9 @@ cargo run --release -p vxl-phys --example fluid_buoyancy
 # ② **铸装挖空**——现在有现成 API：`vxl_phys_fluid::carve_sphere(&mut sys, center, r)`（或按谓词的
 #   `carve_fluid`）：在 `add_fluid*` **之前**把体占位内的粒子移除。实测（`float_quiet_probe`）：
 #   不挖空时体被弹到速度上限并穿透地板（y=−1319）；挖空后同一格停在平衡位。见 `OPEN-PROBLEMS` P7。
+#   ⚠️ **尺寸取「体 AABB + 核半径 h」，别收紧**（2026-10-04 同格两档实测：0.11 球 ≈ 0.06+0.05 ⇒
+#   停在平衡位；收紧到 0.08 ⇒ 反被弹到速度上限、穿透地板 y≈−5000）——残留的"核带内"粒子仍在
+#   与体相互作用，那才是主扰动源。另备 `carve_box(fs, center, half)` 供盒形紧贴体使用。
 cargo run --release -p vxl-phys --example fluid_buoyancy -- 180 2b
 # SPH **规模档**（成本探针）：n³ 晶格水块、打印 ms/tick 与等效 FPS。
 # 首测（2026-09-22，本机）：64k→135.7 / 125k→273.3 / 300k→**673.7 ms/tick**（SPEC §3 目标 30 万@30FPS
