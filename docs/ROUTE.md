@@ -126,7 +126,7 @@
 | 里程碑 | 内容 | 出口判定（三轴同时） |
 |---|---|---|
 | **M1 刚体核心（在研）** | 稳定/金样/性能收口；求解器成本结构（见 DESIGN/M1-PLAN） | 稳定判据 ✓ + 金样容差 + 性能档（§3 数字）或核口径裁决 |
-| **M2 互操作核心** | 四接口 trait 定案 + **外部碰撞提供者通道（`Shape::Provider` + `ProviderColliders`，ADR 0009）** + **贯通示例（刚体↔体素）✅ 已跑通**；余：高度场迁移（逐位不变）、球/凸体 provider 专用查询、provider 对偶、键图 + 双 ABI | 接口无域内特例 + 示例确定性测试 + 无档位劣化 |
+| **M2 互操作核心** | 四接口 trait 定案 + **外部碰撞提供者通道（`Shape::Provider` + `ProviderColliders`，ADR 0009）** + **贯通示例（刚体↔体素）✅ 已跑通**；余项**逐条定性**（2026-10-05 复核）：① **高度场迁到 provider 通道 = 待换代决策**（`OPEN-PROBLEMS.md` 待裁决 **#6**；前置对拍与逐位等价断言已就位）② 球/凸体 provider 专用查询 —— 球已解析、凸体走**逐顶点采样**（既定口径，无实测需求）③ provider 对偶 —— 提供者都是**静态 Marker** ⇒ 静态×静态零收益（已登记缺口）④ 「键图 + 双 ABI」 —— 键图 = `EffectKey` + 转换窗口**已落地**（`PLAN-COUPLING.md` §3.4）；双 ABI = `vxl-phys-ffi` 的 C ABI 骨架（版本化头已就位）+ GPU 档（范围见 `PLAN-gpu.md`） | 接口无域内特例 + 示例确定性测试 + 无档位劣化 |
 | **M3 破坏/地形（体素）** | Voronoi 预断裂 + 运行时切割 + **体素块→刚体（✅ 已落地：`extract_boxes` + `spawn_box_debris` + `apply_impact_destruction` 冲击破坏 + 演示 `m3_impact`）** | 坍塌金样（10 万碎片档）+ 沙堆模型 |
 | **M4 软体/布** | XPBD + 与刚体**共求解器** | 悬臂/旗飘金样 + 刚度档表（SPEC §4.6/4.7） |
 | **M5 液体** | WCSPH → PBF/FLIP 分层 + 刚体双向（Akinci） | 溃坝/浮箱金样 + 不可压误差档 + 30 万粒档 |
@@ -199,8 +199,10 @@
      体素解析解（`depth = r − sdf(center)`、法线取 SDF 梯度）——球落体素地面
      停驻并入睡（门面测试 `sphere_rests_on_voxel_provider`）；体素侧单测覆盖
      深度/法线/缝超 skin 无接触。
-   - **余（M2 后续）**：高度场迁到 provider 通道（包一层、不改数学，逐位不变）；
-     凸体 vs provider 的专用查询；provider 对偶解；键图 + 双 ABI。
+   - **余（M2 后续）**：高度场迁到 provider 通道（⚠️ 2026-10-05 更正："包一层、不改数学、
+     逐位不变"**只在接触集合由 `skin` 决定时成立** —— provider 分支还带**速度自适应接触带**
+     ⇒ 切换属**换代**：见 `OPEN-PROBLEMS.md` 待裁决 #6 与 `tests/hf_provider_dispatch_parity.rs`）；
+     凸体 vs provider 的专用查询（无实测需求）；provider 对偶解（静态×静态，零收益）；键图 + 双 ABI（键图已落地）。
      - **2026-10-04 第一刀（已落地，逐位不变）**：`impl CollisionProvider for HeightField` 补上
        **`contacts_box`**——**委托窄相同一份数学**（`poly_heightfield`，零公式复制），并新增集成测试
        `crates/vxl-phys-narrow/tests/heightfield_interop.rs` 证明 provider 面与窄相**实际路由**

@@ -9,8 +9,8 @@
 use super::*;
 
 impl DefaultNarrowPhase {
-    /// 把「体形状 vs 提供者」的候选接触压进 `buf`；返回 `false` = 该形状暂不受理。
-    /// 调用方（`pair_shaped.rs::provider_pair`）拿到 `buf` 后再做**主导面选择 + 取点**。
+    /// 把「体形状 vs 提供者」的候选接触压进 `buf`；返回 `false` = 该形状不受理（**显式列名**：
+    /// 复合体已在上游展开，高度场 × 提供者与提供者 × 提供者是已登记的缺口，见支持矩阵 §1 #10）。
     #[allow(clippy::too_many_arguments)] // 形状/位姿/提供者/出参 + 带符号朝向
     pub(crate) fn provider_shape_contacts(
         &mut self,
@@ -99,7 +99,7 @@ impl DefaultNarrowPhase {
             Shape::TriMesh { .. } => self.mesh_provider_contacts(
                 body_shape, body, bpos, brot, id, pr_is_a, band, providers, buf,
             ),
-            _ => false, // 其余形状（复合体/高度场…）vs 提供者：见支持矩阵表
+            Shape::Compound { .. } | Shape::HeightField(_) | Shape::Provider(_) => false,
         }
     }
 

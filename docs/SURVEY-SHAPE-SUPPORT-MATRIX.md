@@ -33,7 +33,7 @@
 | 7 | `props.rs::cross_section_area` | 穷尽 | 并入外壳臂（局部 AABB 外接盒近似；阻力估计够用） | ✅ |
 | 8 | `props.rs::body_half_extent` | 穷尽 | 并入 盒/外壳/复合体 臂（`max` 半长） | ✅ |
 | 9 | `props.rs::shape_volume` | `_` | 自动（走 `mass_props` ⇒ 薄壳体积 = `t·ΣA`）——**不是静默缺口** | — |
-| 10 | `narrow/src/provider.rs::provider_shape_contacts` | `_ => false` | **✅ 已受理（T1b-1 落地）**：`mesh_provider_contacts` 逐顶点点查询（与 `hull_provider_contacts` 同构） | 已显式化 |
+| 10 | `narrow/src/provider.rs::provider_shape_contacts` | 显式列名（原 `_ => false`） | **✅ 已受理（T1b-1 落地）**：`mesh_provider_contacts` 逐顶点点查询（与 `hull_provider_contacts` 同构）；✅ **2026-10-05 显式化**：`_` 换成 `Shape::Compound \| Shape::HeightField(_) \| Shape::Provider(_) => false`（净 0 行）⇒ **新增形状会在这里编译报错**，不再静默落进 `_`（旁证：`Compound` 上游已展开、高度场×提供者与提供者×提供者见本节末的组合缺口登记） | 已显式化 |
 | 11 | `narrow/src/support.rs::support_of` | `_ => None` | **显式列名**：三角网**非凸** ⇒ 不进 GJK/EPA（这是**语义决定**，不是"没写"） | 已显式化 |
 | 12 | `narrow/src/support.rs::poly_for` | `_ => None` | 保持：三角网不是**凸多面体**；调用方已按 `None` 分支处理（`pair_shaped` 各臂都查 `Some/None`） | — |
 | 13 | `narrow/src/pair_shaped.rs::pair_non_heightfield` | `_ => {}` | **✅ 已受理（T1b-2/4/5 + T2 续）**：三角网早分支 ⇒ `mesh_dispatch`（新入口）⇒ `mesh_pair`（**盒/球/胶囊/圆柱/锥** 解析采样）或 `mesh_mesh::mesh_vs_mesh`（**另一个三角网**，双面口径，2026-09-29）；**复合体免费经展开**（子对最前部）；只剩**外壳**不受理 | 已显式化 |
