@@ -547,7 +547,10 @@ cargo run --release -p vxl-phys --example fluid_buoyancy
 # 2a/2b 对照（吃水）+ 边界粒子数/粒子数 + 两档 ms/tick + 诚实判定表（重体标 ⚠️）。
 # 边界粒子 = **冻结流体粒子**（同数组/同核/同式），反作用（力 + 绕体原点的力矩）回流；
 # 默认关（`add_fluid`）⇒ 既有场景四哈希逐位不变。测试半边：`cargo test -p vxl-phys --test fluid_boundary`。
-# ⚠️ 开局**别把体直接放在已有水格上**（重合 ⇒ ρ 爆 ⇒ CFL 尖峰）；用"从水面上方落入"或铸装挖空。
+# ⚠️ 开局**别把体直接放在已有水格上**（重合 ⇒ ρ 爆 ⇒ CFL 尖峰）。两条正道：① "从水面上方落入"；
+# ② **铸装挖空**——现在有现成 API：`vxl_phys_fluid::carve_sphere(&mut sys, center, r)`（或按谓词的
+#   `carve_fluid`）：在 `add_fluid*` **之前**把体占位内的粒子移除。实测（`float_quiet_probe`）：
+#   不挖空时体被弹到速度上限并穿透地板（y=−1319）；挖空后同一格停在平衡位。见 `OPEN-PROBLEMS` P7。
 cargo run --release -p vxl-phys --example fluid_buoyancy -- 180 2b
 # SPH **规模档**（成本探针）：n³ 晶格水块、打印 ms/tick 与等效 FPS。
 # 首测（2026-09-22，本机）：64k→135.7 / 125k→273.3 / 300k→**673.7 ms/tick**（SPEC §3 目标 30 万@30FPS

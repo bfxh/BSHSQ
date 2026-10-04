@@ -29,8 +29,8 @@ pub use boundary::{lattice, BoundaryLattice, SurfaceLattice};
 
 use vxl_phys_core::interop::{InteropContact, MediumField, MediumSample, ProviderColliders};
 use vxl_phys_core::{Quat, Shape, Vec3};
-
 // ── 按域拆出的子模块（子目录 src/）
+mod carve;
 mod config;
 mod fluid_access;
 mod fluid_boundary;
@@ -41,7 +41,7 @@ mod fluid_step;
 mod grid;
 mod system;
 mod types;
-pub use self::{config::*, grid::*, system::*, types::*};
+pub use self::{carve::*, config::*, grid::*, system::*, types::*};
 // ↑ 子模块顶层条目再导出（impl-only 模块不入 glob，避免 unused）
 
 #[cfg(test)]
