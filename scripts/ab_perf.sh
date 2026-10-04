@@ -29,8 +29,13 @@
 
 set -u
 
+# 中文 Windows 控制台是 cp936：脚本末尾会打 `⚠️`/`✅`，不固定 UTF-8 会**在最后一步崩掉**
+# 把已经跑完的 A/B 读数一起带走（2026-10-04 实测踩到；`gate_all.sh` 里有同款注）。
+export PYTHONUTF8=1 PYTHONIOENCODING=utf-8
+
 if [ $# -lt 4 ]; then
     echo "用法：bash scripts/ab_perf.sh <旧ref> <N> <grep 模式> <命令…>" >&2
+    echo " ⚠️ grep 模式要**把数字框住**（脚本先取匹配子串、再从中取最后一个数），例：'平均 +[0-9.]+'" >&2
     exit 2
 fi
 
@@ -67,8 +72,14 @@ extract() { # extract <文件>
 }
 
 # 每臂先**各编一次**（预热 + 保证比的是编译产物，不是编译时间）。**两臂各用独立 target**。
-( cd "$wt"   && CARGO_TARGET_DIR="${ab_root}/a" "$@" >/dev/null 2>&1 )
-( cd "$root" && CARGO_TARGET_DIR="${ab_root}/b" "$@" >/dev/null 2>&1 )
+# ⚠️ 预热失败**必须当场说**（旧版丢进 /dev/null ⇒ 后面只看到一排 `?`，不知道是编译挂了还是模式没框对）。
+warm_fail() { # warm_fail <臂名> <日志>
+    echo "  ❌ ${1} 臂预热失败（编译或运行没跑通）——输出尾部：" >&2
+    tail -n 15 "$2" | sed 's/^/     /' >&2
+    exit 4
+}
+( cd "$wt"   && CARGO_TARGET_DIR="${ab_root}/a" "$@" ) >/tmp/ab_warmup_a.log 2>&1 || warm_fail A /tmp/ab_warmup_a.log
+( cd "$root" && CARGO_TARGET_DIR="${ab_root}/b" "$@" ) >/tmp/ab_warmup_b.log 2>&1 || warm_fail B /tmp/ab_warmup_b.log
 
 aset=""; bset=""
 for i in $(seq 1 "$rounds"); do
@@ -77,6 +88,9 @@ for i in $(seq 1 "$rounds"); do
     ( cd "$root" && CARGO_TARGET_DIR="${ab_root}/b" "$@" ) >/tmp/ab_b.log 2>&1
     b="$(extract /tmp/ab_b.log)"
     echo "  轮 ${i}：A=${a:-?}  B=${b:-?}"
+    # 抓不到数时**给出线索**（旧版只回 `?`，看不出是"模式没框住数字"还是"命令挂了"）。
+    [ -n "$a" ] || { echo "     ⚠️ A 臂抓不到数（模式 '${pattern}' 要把数字框住）——输出尾部："; tail -n 5 /tmp/ab_a.log | sed 's/^/       /'; }
+    [ -n "$b" ] || { echo "     ⚠️ B 臂抓不到数（模式 '${pattern}' 要把数字框住）——输出尾部："; tail -n 5 /tmp/ab_b.log | sed 's/^/       /'; }
     aset="${aset} ${a:-0}"
     bset="${bset} ${b:-0}"
 done
