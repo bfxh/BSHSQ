@@ -80,6 +80,9 @@ struct Acc {
     split_sum: (usize, usize, usize, usize),
     /// 候选**体域构成** `(静态, 睡眠, 清醒)` 的全程累计（仅 `CAND_KIND_DIAG` 开时非零）。
     kind_sum: (usize, usize, usize),
+    /// 宽相**查询两段**（逃逸重查 / 精确过滤）的全程累计 µs（每 tick 累加）。
+    refresh_us_sum: f64,
+    filter_us_sum: f64,
     active_ticks: u32,
     active_ms: f64,
     // **抖动审计（SPEC §3：休眠体被重复唤醒 < 1 次/秒/体）**——逐体「睡→醒」翻转计数。
@@ -105,6 +108,8 @@ impl Acc {
             cands_max: 0,
             split_sum: (0, 0, 0, 0),
             kind_sum: (0, 0, 0),
+            refresh_us_sum: 0.0,
+            filter_us_sum: 0.0,
             active_ticks: 0,
             active_ms: 0.0,
             dyn_ids: (0..w.bodies.len())
@@ -123,6 +128,7 @@ fn run_ticks(w: &mut World, ticks: u32, acc: &mut Acc) {
         // `PhaseTimings` 是**累计值**（见 docs/M1-PLAN.md 读数陷阱）⇒ 每 tick 清零，
         // 否则「窄相/求解」两列读到的是「自首帧起的累计」——按它调参会调错方向。
         w.reset_timings();
+        w.broad.reset_query_split(); // 同上：宽相两段拆分也按「每 tick 清」口径累计。
         let t0 = Instant::now();
         w.step();
         let ms = t0.elapsed().as_secs_f64() * 1000.0;
@@ -146,6 +152,9 @@ fn run_ticks(w: &mut World, ticks: u32, acc: &mut Acc) {
         acc.kind_sum.0 += ck.0;
         acc.kind_sum.1 += ck.1;
         acc.kind_sum.2 += ck.2;
+        let qs = w.broad.query_split_us();
+        acc.refresh_us_sum += qs.0 as f64;
+        acc.filter_us_sum += qs.1 as f64;
         let hh = w.health();
         if hh.awake_bodies > 0 {
             acc.active_ticks += 1;
@@ -345,6 +354,12 @@ fn print_cand_split(acc: &Acc, ticks: f64) {
         per(acc.kind_sum.0),
         per(acc.kind_sum.1),
         per(acc.kind_sum.2),
+    );
+    // **查询两段拆分**（issue #4 的判据入口）：配上"逃逸体/tick"即可算"每次逃逸 ≈ 多少 µs"。
+    println!(
+        "  宽相查询两段/tick：逃逸重查 {:.3} ms · 精确过滤 {:.3} ms（二者应≈上面「宽相」耗时）",
+        acc.refresh_us_sum / ticks / 1000.0,
+        acc.filter_us_sum / ticks / 1000.0,
     );
 }
 

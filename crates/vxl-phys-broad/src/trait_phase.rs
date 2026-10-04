@@ -52,4 +52,15 @@ pub trait BroadPhase {
     fn cand_kind(&self) -> (usize, usize, usize) {
         (0, 0, 0)
     }
+
+    /// 诊断：**查询相位的两段拆分** `(逃逸重查 µs, 精确过滤 µs)`；默认 `(0,0)`。
+    ///
+    /// 用途（issue #4）：`breakdown_us` 的"查询"把 refresh 与 filter 混在一起，算不出"每次逃逸花多少"。
+    /// 配上同场景的逃逸次数（`cand_split().1`）即可判断大头在**次数**还是**每次的成本**。
+    fn query_split_us(&self) -> (u64, u64) {
+        (0, 0)
+    }
+
+    /// 每 tick 清零上面的两段拆分（默认无操作；实现方按"每子步 +=、每 tick 清"口径维护）。
+    fn reset_query_split(&mut self) {}
 }

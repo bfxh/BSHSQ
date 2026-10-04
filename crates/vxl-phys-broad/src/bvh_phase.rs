@@ -51,6 +51,13 @@ pub struct BvhBroadPhase {
     pub last_cand_split: (usize, usize, usize, usize),
     /// 诊断（仅 `CAND_KIND_DIAG` 开时填）：被过滤的候选按**体域**计数 `(静态, 睡眠, 清醒)`。
     pub last_cand_kind: (usize, usize, usize),
+    /// 诊断：**查询相位的两段拆分** `(逃逸重查 µs, 精确过滤 µs)`（上一子步快照，与 `last_breakdown_us` 同口径）。
+    ///
+    /// 为什么要它（issue #4 的判据入口）：`last_breakdown_us.2`（"查询"）把 `refresh_candidates`
+    /// 与 `collect_pairs` **混在一起** ⇒ 算不出"**每次逃逸花多少**"。配上同场景的逃逸次数
+    /// （`last_cand_split.1`）就能判断：大头在**逃逸次数**（该动缓存盒判据）还是在**逃逸后的簿记**
+    /// （arena append / `cand_off`/`cand_len`/`cache_fat` 写）。**纯计时，不进哈希。**
+    pub last_query_split_us: (u64, u64),
 }
 
 impl BvhBroadPhase {
@@ -71,6 +78,7 @@ impl BvhBroadPhase {
             last_cand_total: 0,
             last_cand_split: (0, 0, 0, 0),
             last_cand_kind: (0, 0, 0),
+            last_query_split_us: (0, 0),
         }
     }
 
@@ -431,8 +439,16 @@ impl BroadPhase for BvhBroadPhase {
         self.cand_off.resize(n, 0);
         self.cand_len.resize(n, 0);
         // 分块并行重查（只读树；每块本地 arena + 条目表），随后串行合并。
+        let t_refresh = vxl_phys_core::probe::start();
         self.refresh_candidates(bodies, threads, &dyns);
+        let d_refresh = vxl_phys_core::probe::us(t_refresh);
+        let t_filter = vxl_phys_core::probe::start();
         self.collect_pairs(bodies, threads, &dyns);
+        let d_filter = vxl_phys_core::probe::us(t_filter);
+        // 两段拆分（见 `last_query_split_us` 注）：**跨子步累加**，由 harness 每 tick 调
+        // `reset_query_split()` 清零（与 `PhaseTimings` 同款"每子步 +=、每 tick 清"口径 ⇒ 可整 tick 对账）。
+        self.last_query_split_us.0 += d_refresh;
+        self.last_query_split_us.1 += d_filter;
         self.compact_arena(&dyns);
         let d_query = vxl_phys_core::probe::us(t_query);
         let t_sort = vxl_phys_core::probe::start();
@@ -470,5 +486,13 @@ impl BroadPhase for BvhBroadPhase {
 
     fn cand_kind(&self) -> (usize, usize, usize) {
         self.last_cand_kind
+    }
+
+    fn query_split_us(&self) -> (u64, u64) {
+        self.last_query_split_us
+    }
+
+    fn reset_query_split(&mut self) {
+        self.last_query_split_us = (0, 0);
     }
 }
