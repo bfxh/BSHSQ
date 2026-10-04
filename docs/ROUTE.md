@@ -206,11 +206,27 @@
        `crates/vxl-phys-narrow/tests/heightfield_interop.rs` 证明 provider 面与窄相**实际路由**
        （`DefaultNarrowPhase::collide` 产出的流形）**逐位相同**（点/深度/特征/法线）。四哈希与
        `m0_gates` 复跑不变（新方法不在生产路径上，**派发尚未切换**）。
-     - ⚠️ **迁移的真正卡点（本刀查明的接口缺口）**：per-domain 的 `CollisionProvider` **只有
-       `bounds / closest_point / contacts_box`** —— **没有**「球 / 点」查询（那些在窄相侧的
-       `ProviderColliders` 上，由门面的 provider 注册表实现）。所以"**高度场整体迁过去**"不只是
-       "包一层"：要么给域 trait 补 `contacts_sphere` / `contacts_point`，要么让注册表能按域派发。
-       ⇒ 下一步二选一，**先定接口再搬**（否则搬一半会得到两套形状面）。
+    - ⚠️ **迁移的真正卡点（本刀查明的接口缺口）**：per-domain 的 `CollisionProvider` **只有
+      `bounds / closest_point / contacts_box`** —— **没有**「球 / 点」查询（那些在窄相侧的
+      `ProviderColliders` 上，由门面的 provider 注册表实现）。所以"**高度场整体迁过去**"不只是
+      "包一层"：要么给域 trait 补 `contacts_sphere` / `contacts_point`，要么让注册表能按域派发。
+      ⇒ 下一步二选一，**先定接口再搬**（否则搬一半会得到两套形状面）。
+    - **2026-10-04 第二刀（已落地，逐位不变）——接口缺口按「补域 trait」定案（上面的 A 案）**：
+      `CollisionProvider` 补 **`contacts_sphere` / `contacts_point`**，两个默认实现都返回
+      `false`（**不支持**）——口径与窄相侧 `ProviderColliders` 的同名方法**一字对齐**
+      （`depth = −sdf(p)` 内点为正、`feature = 0`、返回值 = 是否支持）。这样"默认不覆写"
+      在两套接口里含义相同，**不会出现隐式解**。`HeightField` 随即覆写两者：
+      `contacts_sphere` 委托 `sphere_heightfield`、`contacts_point` 与 `poly_heightfield`
+      / `hull_heightfield` 的逐顶点采样**同一条式子**（零公式复制）；
+      集成测试 `heightfield_interop.rs` 再加两条**逐位等价**判据——球（vs `Sphere` 体走完整路由）
+      与点（vs **单顶点外壳**走 `hull_heightfield`；`feature` 有意不同故只比点/深度/法线）。
+      ⇒ 域 trait 与窄相接口**同口径**了，「注册表按域派发」这一步现在只是机械搬运。
+      ⚠️ 体素侧 `VoxelVolume` 尚未覆写这两个方法（它现在只走门面那条路，行为不变）；
+      下一刀连同门面派发一起搬，并顺手收掉 `closest_point` / `contacts_sphere_voxel` /
+      `contacts_point_voxel` 里**三份重复**的 SDF 有限差分梯度。
+      god 门棘轮处理：`interop.rs` / `heightfield.rs` 的 `#[cfg(test)] mod tests`
+      **原样外迁**到 `tests/`（`interop_default_contacts.rs` / `heightfield_prims.rs`，
+      改走公开 API）⇒ 两个 src 文件行数**净减**，基线一字未动。
 4. **每加一域的顺序铁律**：先写档位表行与金样（含容差）→ 再写求解器 →
    最后接耦合矩阵格子。**不许先写实现后补验收**。
 

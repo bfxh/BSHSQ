@@ -159,6 +159,42 @@ impl vxl_phys_core::interop::CollisionProvider for HeightField {
         push_hf_contacts(&np.ws.cand, self, out);
         true
     }
+
+    /// 「球形包络 vs 高度场」——**包一层**：委托窄相同一份数学（`sphere_heightfield`）。
+    /// 口径与 `contacts_box` 同：法线取**最深样本处**的地形法线（外向），特征沿用窄相（0）。
+    fn contacts_sphere(
+        &self,
+        center: Vec3,
+        radius: f32,
+        skin: f32,
+        out: &mut Vec<InteropContact>,
+    ) -> bool {
+        let mut np = DefaultNarrowPhase::new(skin);
+        if !np.sphere_heightfield(center, radius, self) {
+            return false;
+        }
+        push_hf_contacts(&np.ws.cand, self, out);
+        true
+    }
+
+    /// 点查询（探针 = `p`）：`depth = h − p.y`，与窄相 `poly_heightfield` /
+    /// `hull_heightfield` 的**逐顶点采样同一条式子**；`feature = 0`（点没有顶点身份，
+    /// 与 `contacts_point_voxel` 同口径）。场外（`sample` = `None`）= 无接触，仍返回 true。
+    fn contacts_point(&self, p: Vec3, skin: f32, out: &mut Vec<InteropContact>) -> bool {
+        let Some((h, n)) = self.sample(p.x, p.z) else {
+            return true;
+        };
+        let depth = h - p.y;
+        if depth > -skin {
+            out.push(InteropContact {
+                point: Vec3::new(p.x, h, p.z),
+                normal: n,
+                depth,
+                feature: 0,
+            });
+        }
+        true
+    }
 }
 
 /// 候选点 → provider 接触表：法线取**最深样本处**的地形法线（外向；窄相那条路同样只取这一个）。
@@ -175,42 +211,5 @@ fn push_hf_contacts(cand: &[ContactPoint], hf: &HeightField, out: &mut Vec<Inter
             depth: p.depth,
             feature: p.feature,
         });
-    }
-}
-
-// **测试放在文件末尾**：clippy 的 `items_after_test_module`（CI 里 `-D warnings`）不允许
-// 测试模块之后再出现 item。
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn flat_sample_normal_is_up() {
-        let hf = HeightField::flat(-10.0, -10.0, 21, 21, 1.0, 0.0);
-        let (h, n) = hf.sample(3.3, -2.7).unwrap();
-        assert!(h.abs() < 1e-6);
-        assert!(n.y > 0.999);
-    }
-
-    #[test]
-    fn ramp_gradient_normal() {
-        let mut hf = HeightField::flat(0.0, 0.0, 11, 11, 1.0, 0.0);
-        for iz in 0..11 {
-            for ix in 0..11 {
-                hf.set_height(ix, iz, ix as f32);
-            }
-        }
-        let (h, n) = hf.sample(5.5, 5.0).unwrap();
-        assert!((h - 5.5).abs() < 1e-5);
-        // 斜率 dh/dx = 1 → 法线 = normalize(-1, 1, 0)。
-        let inv = core::f32::consts::FRAC_1_SQRT_2;
-        assert!((n.x + inv).abs() < 1e-4);
-        assert!((n.y - inv).abs() < 1e-4);
-    }
-
-    #[test]
-    fn outside_is_none() {
-        let hf = HeightField::flat(0.0, 0.0, 5, 5, 1.0, 0.0);
-        assert!(hf.sample(100.0, 0.0).is_none());
     }
 }
