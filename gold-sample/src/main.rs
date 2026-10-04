@@ -524,6 +524,17 @@ fn main() {
         "== 末态 |Δpos|（参照体，n={}）：max {max_d:.4} | p95 {p95_d:.4} | mean {mean_d:.4} m",
         ds.len()
     );
+    // **位置列判据**（T5 口径；`M1-PLAN` §T5 收紧后的写法 = `max|Δpos| ≤ 0.1 m` 且 `≤ 1% 场景高`）。
+    // 为什么把阈值随读数一起打印：这条此前**只写在文档里** ⇒ 台账把"当年的实测值 0.0595 m"当成了
+    // 容差（2026-10-04 复核），于是"95 mm 超 59.5 mm"这个假缺口挂了一版。让阈值与读数同屏，
+    // 谁都不用再去猜"容差是哪个数"。场景高取名义层高 `layers × spacing`（塔 25×0.52 = 13.0 m
+    // ⇒ 1% = 0.13 m ⇒ 真正起约束的是 0.1 m 那一侧）。
+    let h_nom = s.layers as f32 * s.spacing;
+    let tol_d = 0.1f32.min(0.01 * h_nom);
+    println!(
+        "== 位置列判据（max|Δpos| ≤ {tol_d:.4} m = min(0.1, 1%×{h_nom:.2} m)）：max {max_d:.4} ⇒ {}",
+        if max_d <= tol_d { "✅ 过" } else { "⚠️ 超" }
+    );
     // 嗡振画像：超阈分解（线性/角速分别）+ 最活跃体明细（含层高）。
     // 计数复用 `over_threshold`（与 50 tick 随行打印**同源** ⇒ 两处不会漂开）。
     let (only_lin, only_ang, both, ntot) = over_threshold(&vw, &vids);
