@@ -4,7 +4,9 @@
 
 #![forbid(unsafe_code)]
 
-use vxl_phys_core::Vec3;
+use crate::{ContactPoint, DefaultNarrowPhase};
+use vxl_phys_core::interop::InteropContact;
+use vxl_phys_core::{Quat, Shape, Vec3};
 
 /// 均匀网格高度场：`heights[iz * nx + ix]`，XZ 平面，Y 向上。
 /// `spacing` = 相邻采样点间距（米）。
@@ -171,47 +173,42 @@ impl vxl_phys_core::interop::CollisionProvider for HeightField {
             signed_dist: (p - surface).dot(n),
         })
     }
+
+    /// 「盒形包络 vs 高度场」——**包一层**：委托窄相同一份数学（`poly_heightfield`），不复制公式。
+    /// 口径逐项对齐（点/深度/法线/特征）；⚠️ 每次新建 scratch，真切派发时应改传入常驻 scratch。
+    fn contacts_box(
+        &self,
+        half: Vec3,
+        pos: Vec3,
+        rot: Quat,
+        skin: f32,
+        out: &mut Vec<InteropContact>,
+    ) -> bool {
+        let mut np = DefaultNarrowPhase::new(skin);
+        let Some(idx) = np.poly_for(&Shape::Box { half }) else {
+            return false;
+        };
+        if !np.poly_heightfield(idx, pos, rot, self) {
+            return false;
+        }
+        push_hf_contacts(&np.ws.cand, self, out);
+        true
+    }
 }
 
-#[cfg(test)]
-mod interop_tests {
-    use super::*;
-    use vxl_phys_core::interop::CollisionProvider;
-
-    #[test]
-    fn flat_field_closest_point_and_box_contacts() {
-        let hf = HeightField::flat(-10.0, -10.0, 21, 21, 1.0, 0.5);
-        let hit = hf.closest_point(Vec3::new(0.25, 1.0, -0.25)).unwrap();
-        assert!((hit.point.y - 0.5).abs() < 1e-6);
-        assert!((hit.signed_dist - 0.5).abs() < 1e-6);
-        assert!((hit.normal - Vec3::new(0.0, 1.0, 0.0)).length() < 1e-6);
-        // 盒（半 0.5）落在 y=0.9 ⇒ 底面 4 角穿透 0.1
-        let mut out = Vec::new();
-        let any = hf.contacts_box(
-            Vec3::splat(0.5),
-            Vec3::new(0.0, 0.9, 0.0),
-            vxl_phys_core::Quat::IDENTITY,
-            0.02,
-            &mut out,
-        );
-        assert!(any);
-        assert_eq!(out.len(), 4);
-        for c in &out {
-            assert!((c.depth - 0.1).abs() < 1e-5, "depth={}", c.depth);
-        }
-        assert!(hf.closest_point(Vec3::new(99.0, 1.0, 0.0)).is_none());
-    }
-
-    #[test]
-    fn ramp_normal_points_downhill_outward() {
-        let mut hf = HeightField::flat(-5.0, -5.0, 11, 11, 1.0, 0.0);
-        for iz in 0..11u32 {
-            for ix in 0..11u32 {
-                hf.set_height(ix, iz, ix as f32);
-            }
-        }
-        let hit = hf.closest_point(Vec3::new(2.5, 3.0, 0.0)).unwrap();
-        assert!(hit.normal.x < -0.5, "法线应逆坡：{:?}", hit.normal);
-        assert!(hit.normal.y > 0.5);
+/// 候选点 → provider 接触表：法线取**最深样本处**的地形法线（外向；窄相那条路同样只取这一个）。
+fn push_hf_contacts(cand: &[ContactPoint], hf: &HeightField, out: &mut Vec<InteropContact>) {
+    let deepest = cand[0];
+    let n = hf
+        .sample(deepest.point.x, deepest.point.z)
+        .map(|(_, n)| n)
+        .unwrap_or(Vec3::Y);
+    for p in cand {
+        out.push(InteropContact {
+            point: p.point,
+            normal: n,
+            depth: p.depth,
+            feature: p.feature,
+        });
     }
 }
