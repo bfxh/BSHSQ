@@ -109,6 +109,14 @@ warm 槽表；固定数组接触点；窄相分块并行。
 | **L3** 喷溅均匀网格 | ✅ 关闭 | **45.8×**（2000 核 × 2000 点 × 10 轮：全扫 234.1 ms → 网格 5.1 ms）；`grid == brute` **逐位相等**（`to_bits()` 断言，求和序 = 注册序） |
 | **L4** 10 万体 @30 FPS | ❌ 未关闭（两条实验被证伪，如实记录） | 见下 |
 
+> **⚠️ 2026-10-05 死代码审计（L1 的支撑改了名）**：L1 行点名的 `hull_heightfield`（`hf.rs`）
+> **从来没有调用路径**——外壳 × 高度场在派发顺序上先落 `support.rs::hull_pair` 的 **L1 分支**
+> （`pair_shaped.rs` 里 hull 分支**排在** `heightfield_pair` 之前，那个组合一到就 `return`），
+> `hull_on_heightfield` / `hull_rests_on_heightfield` 走的也是这条（实测：把 `hull_heightfield`
+> 首行改成 `return false`，两个测试**仍全绿**）⇒ L1 的 ✅ **成立**，但支撑它的是 `hull_pair`
+> 那一份（`feature = 顶点序号`，从 0 起；死的那份是 +1）。⇒ 死代码已删除，`heightfield_pair`
+> 的 `Shape::ConvexHull` 臂标注为不可达；两侧注释与本条同步更正。
+
 ### L4 实验记录（压测 10001 动态盒、单岛、p50 基线 305 ms）
 
 - **实验 A（缓存旋转矩阵，64B 行）**：p50 305 → **366 ms**（−20%）；哈希最终回到基线（修 bug 后）。

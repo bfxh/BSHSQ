@@ -160,8 +160,8 @@ impl DefaultNarrowPhase {
     /// - 流形点 = 外壳点云中落在对方支撑面 `plane ± skin` 带内的顶点，
     ///   逐点深度 `plane − n̂·v`（n̂ = 对方 → 外壳）；取最深 4 点。
     /// - `feature = 顶点序号 + 1`（点云序稳定 ⇒ 跨帧可续接）。
-    /// - 外壳 × 高度场：**已支持**——走 `hull_heightfield`（逐顶点采样，与 `poly_heightfield`
-    ///   同款），不再走本函数。
+    /// - 外壳 × 高度场：**就在本函数**（下方 L1 分支，逐顶点采样）；`pair_shaped.rs` 的 hull
+    ///   分支排在 `heightfield_pair` 之前 ⇒ 那个组合永远先到这里（2026-10-05 更正：原写反了）。
     #[allow(clippy::too_many_arguments)] // 与 process_pair 同形（两侧位姿 + 形状 + 出参 + 体表）
     pub(crate) fn hull_pair(
         &mut self,

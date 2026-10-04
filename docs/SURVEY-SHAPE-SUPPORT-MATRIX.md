@@ -152,7 +152,8 @@ fmt 又把两条模式拆回 4 行 ⇒ 白做）。⇒ **"给枚举加一条臂"
 
 **落地**：`mesh_pair.rs` 增加 `mesh_pair`（逐顶点**解析**最近点；受理 **盒 / 球 / 胶囊 / 圆柱**，
 其余如实不受理）+ `point_shape`（点 × 上述四族的最近点/外法线/深度，`Vec3`/`Mat3` 手写，无新依赖）
-+ `mesh_heightfield`（与 `hull_heightfield` **同构**：逐顶点 `hf.sample` ⇒ `depth = h − v.y`）；
++ `mesh_heightfield`（与外壳的地形腿 `support.rs::hull_pair` 的 L1 分支**同构**：逐顶点
+`hf.sample` ⇒ `depth = h − v.y`；2026-10-05 更正：原写 `hull_heightfield`，那是死代码，已删）；
 `pair_shaped.rs::pair_non_heightfield` 加**早分支**、高度场分派里把三角网拆出为独立臂。
 法线从求解器定义反推：`n_o` = 把顶点推出去的方向 ⇒ **三角网在 a 侧取 `−n_o`、在 b 侧取 `+n_o`**
 （高度场腿的 sign 由 `heightfield_pair` 那段**形状无关**地处理）。

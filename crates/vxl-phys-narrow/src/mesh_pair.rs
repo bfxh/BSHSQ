@@ -169,7 +169,7 @@ impl DefaultNarrowPhase {
         });
     }
 
-    /// **三角网 × 高度场**：逐顶点采样（与 `hull_heightfield` **同构**，只换点源）。
+    /// **三角网 × 高度场**：逐顶点采样（与外壳的地形腿 `hull_pair` 的 L1 分支**同构**）。
     ///
     /// 逐个**顶点**取世界点 → `hf.sample(x, z)` ⇒ `depth = h − v.y`（正 = 顶点在地形之下 = 穿透），
     /// 接触点落在地形面上（`(x, h, z)`）；法线与 sign 由调用方 `heightfield_pair` 按 a/b 侧决定

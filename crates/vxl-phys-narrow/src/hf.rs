@@ -116,39 +116,13 @@ impl DefaultNarrowPhase {
         }
         self.select_contacts(self.min_point_sep)
     }
-
-    /// 外壳 × 高度场：**逐顶点采样**（与 `poly_heightfield` 同款，只是顶点来自外壳点云）。
-    /// 此前该组合**不受理**（`hull_pair` 的注："列裁剪对任意凸壳未实现"）。
-    /// 特征 = 顶点序号 + 1（点云序稳定 ⇒ 跨帧可续接）。点云较密时接触点靠 `select_contacts`
-    /// 截断到 ≤4。
-    pub(crate) fn hull_heightfield(
-        &mut self,
-        hull: u32,
-        pos: Vec3,
-        rot: Quat,
-        hf: &HeightField,
-    ) -> bool {
-        self.ws.cand.clear();
-        let r = Mat3::from_quat(rot);
-        let Some(h) = self.hulls.get(hull) else {
-            return false;
-        };
-        for (idx, &p) in h.points.iter().enumerate() {
-            let v = pos + r.mul_vec3(p);
-            if let Some((hgt, _)) = hf.sample(v.x, v.z) {
-                let depth = hgt - v.y;
-                if depth > -self.skin {
-                    self.ws.cand.push(ContactPoint {
-                        point: Vec3::new(v.x, hgt, v.z),
-                        depth,
-                        feature: idx as u32 + 1,
-                    });
-                }
-            }
-        }
-        if self.ws.cand.is_empty() {
-            return false;
-        }
-        self.select_contacts(self.min_point_sep)
-    }
 }
+
+// ⚠️ **本文件曾有一份 `hull_heightfield`，2026-10-05 删除（死代码）**：
+// 外壳 × 高度场在派发顺序上先落到 `support.rs::hull_pair`（`pair_shaped.rs` 里 hull 分支
+// **排在** `heightfield_pair` 之前），后者的 L1 分支处理该组合并 `return`
+// ⇒ `heightfield_pair` 的 `Shape::ConvexHull` 臂**永远不可达**。
+// 实测证据（当时做法）：把本函数首行改成 `return false` 后，`vxl-phys-narrow` 全部测试与
+// `vxl-phys --lib hull` 三个测试（含 `hull_on_heightfield` / `hull_rests_on_heightfield`）
+// **仍全绿** ⇒ 它没有任何调用路径。两份实现的差别只有 `feature`（这里 +1、live 那份从 0）
+// ⇒ 留着只会让人改错那一份（本仓"台账前提过期"的又一例）。
