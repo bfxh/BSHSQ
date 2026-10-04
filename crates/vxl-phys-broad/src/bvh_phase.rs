@@ -37,6 +37,9 @@ pub struct BvhBroadPhase {
     pub last_breakdown_us: (u64, u64, u64, u64),
     /// 诊断：上一帧候选总数（查询返回的候选条目数之和）——候选粒度/b 因子审计。
     pub last_cand_total: usize,
+    /// 诊断：上一帧**候选来源拆分** `(复用体, 新遍历体, 复用候选, 新遍历候选)`。
+    /// 语义与用途见 `trait_phase.rs` 的 `cand_split` 注（纯计数，不进哈希）。
+    pub last_cand_split: (usize, usize, usize, usize),
 }
 
 impl BvhBroadPhase {
@@ -55,6 +58,7 @@ impl BvhBroadPhase {
             prev_awake: Vec::new(),
             last_breakdown_us: (0, 0, 0, 0),
             last_cand_total: 0,
+            last_cand_split: (0, 0, 0, 0),
         }
     }
 
@@ -197,10 +201,11 @@ impl BvhBroadPhase {
     fn refresh_candidates(&mut self, bodies: &BodySet, threads: usize, dyns: &[u32]) {
         let n_chunks = Self::query_chunks(threads, dyns.len());
         let chunk_len = dyns.len().div_ceil(n_chunks);
-        // 条目 = (体, 本地偏移, 长度, fat 盒)。
-        type RefreshChunk = (Vec<u32>, Vec<(u32, u32, u32, Aabb)>);
-        let mut refresh: Vec<RefreshChunk> =
-            (0..n_chunks).map(|_| (Vec::new(), Vec::new())).collect();
+        // 条目 = (体, 本地偏移, 长度, fat 盒) + 本块的**候选来源计数** `(复用体, 复用候选)`。
+        type RefreshChunk = (Vec<u32>, Vec<(u32, u32, u32, Aabb)>, (usize, usize));
+        let mut refresh: Vec<RefreshChunk> = (0..n_chunks)
+            .map(|_| (Vec::new(), Vec::new(), (0usize, 0usize)))
+            .collect();
         {
             let this = &*self;
             let dyns_ref: &[u32] = dyns;
@@ -211,7 +216,7 @@ impl BvhBroadPhase {
                 2,
                 |start_slot, _len, slots| {
                     let mut tmp: Vec<u32> = Vec::new();
-                    for (k, (arena, entries)) in slots.iter_mut().enumerate() {
+                    for (k, (arena, entries, reused)) in slots.iter_mut().enumerate() {
                         let oi = start_slot + k;
                         let start = oi * chunk_len;
                         let end = ((oi + 1) * chunk_len).min(dyns_ref.len());
@@ -219,7 +224,10 @@ impl BvhBroadPhase {
                             let iu = i as usize;
                             let exact = this.aabbs[iu];
                             if this.cache_fat[iu].contains(&exact) {
-                                continue; // 未逃出缓存盒：候选复用。
+                                // 未逃出缓存盒：候选复用（上拍的候选表继续用）——只计数。
+                                reused.0 += 1;
+                                reused.1 += this.cand_len[iu] as usize;
+                                continue;
                             }
                             let m = this.fat_margin_for(bodies_ref.linvel[iu]);
                             let fat = exact.grown(m);
@@ -233,9 +241,14 @@ impl BvhBroadPhase {
             );
         }
         let mut cand_total = 0usize;
-        for (arena, entries) in refresh {
+        let mut fresh_bodies = 0usize;
+        let (mut reused_bodies, mut reused_cands) = (0usize, 0usize);
+        for (arena, entries, reused) in refresh {
             let arena_base = self.cand_arena.len() as u32;
             self.cand_arena.extend_from_slice(&arena);
+            fresh_bodies += entries.len();
+            reused_bodies += reused.0;
+            reused_cands += reused.1;
             for (i, off, len, fat) in entries {
                 let iu = i as usize;
                 self.cand_off[iu] = arena_base + off;
@@ -245,6 +258,8 @@ impl BvhBroadPhase {
             }
         }
         self.last_cand_total = cand_total;
+        // 拆分：复用侧的候选数取"上拍表长"（本拍未重查 ⇒ 表的长度未变）。
+        self.last_cand_split = (reused_bodies, fresh_bodies, reused_cands, cand_total);
     }
 
     /// 2b) 精确过滤 + 并行收集（dyn-dyn 双侧发射由最终排序去重收敛；dyn-static 由动体侧发起）。
@@ -407,5 +422,9 @@ impl BroadPhase for BvhBroadPhase {
 
     fn cand_total(&self) -> usize {
         self.last_cand_total
+    }
+
+    fn cand_split(&self) -> (usize, usize, usize, usize) {
+        self.last_cand_split
     }
 }

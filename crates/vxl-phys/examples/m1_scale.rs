@@ -75,6 +75,9 @@ struct Acc {
     warm_max: usize,
     pts_max: u64,
     cands_max: usize,
+    /// 宽相候选来源拆分 `(复用体, 新遍历体, 复用候选, 新遍历候选)` 的**全程累计**
+    /// （每 tick 相加；单帧快照会失真，见上面 `mfp_max` 那条同款注）。
+    split_sum: (usize, usize, usize, usize),
     active_ticks: u32,
     active_ms: f64,
     // **抖动审计（SPEC §3：休眠体被重复唤醒 < 1 次/秒/体）**——逐体「睡→醒」翻转计数。
@@ -98,6 +101,7 @@ impl Acc {
             warm_max: 0,
             pts_max: 0,
             cands_max: 0,
+            split_sum: (0, 0, 0, 0),
             active_ticks: 0,
             active_ms: 0.0,
             dyn_ids: (0..w.bodies.len())
@@ -130,6 +134,11 @@ fn run_ticks(w: &mut World, ticks: u32, acc: &mut Acc) {
         acc.warm_max = acc.warm_max.max(w.solver.island_diag.warm_count as usize);
         acc.pts_max = acc.pts_max.max(w.solver.island_diag.points as u64);
         acc.cands_max = acc.cands_max.max(w.broad.cand_total());
+        let cs = w.broad.cand_split();
+        acc.split_sum.0 += cs.0;
+        acc.split_sum.1 += cs.1;
+        acc.split_sum.2 += cs.2;
+        acc.split_sum.3 += cs.3;
         let hh = w.health();
         if hh.awake_bodies > 0 {
             acc.active_ticks += 1;
@@ -307,7 +316,22 @@ fn report_working_set(w: &World, ticks: u32, acc: &Acc) {
             ("解算", bytes_solve, acc.ts_sum),
         ],
     );
+    print_cand_split(acc, tk);
     print_narrow_probe(w, tk);
+}
+
+/// 宽相**候选来源拆分**（issue #4 的剩余项）：32ns/条的精确过滤落在哪一类候选上。
+/// 口径 = **全程累计 ÷ ticks**（与旁边三条达成吞吐同口径；不是末帧快照）。
+fn print_cand_split(acc: &Acc, ticks: f64) {
+    let cs = acc.split_sum;
+    let per = |v: usize| v as f64 / ticks;
+    println!(
+        "  宽相候选/tick（全程均）：复用体 {:.1} · 新遍历体 {:.1} · 复用候选 {:.1} · 新遍历候选 {:.1}",
+        per(cs.0),
+        per(cs.1),
+        per(cs.2),
+        per(cs.3),
+    );
 }
 
 /// 三相位"触碰字节 ÷ 耗时"的达成吞吐（GB/s）。

@@ -46,9 +46,9 @@
    "max_type_members": 31
   },
   "crates/vxl-phys-broad/src/bvh_phase.rs": {
-   "file_lines": 412,
+   "file_lines": 431,
    "max_fn_lines": 76,
-   "max_type_members": 13
+   "max_type_members": 14
   },
   "crates/vxl-phys-broad/src/grid_phase.rs": {
    "file_lines": 186,
@@ -66,9 +66,9 @@
    "max_type_members": 0
   },
   "crates/vxl-phys-broad/src/trait_phase.rs": {
-   "file_lines": 38,
+   "file_lines": 48,
    "max_fn_lines": 11,
-   "max_type_members": 6
+   "max_type_members": 7
   },
   "crates/vxl-phys-broad/src/wide.rs": {
    "file_lines": 326,
@@ -84,11 +84,6 @@
    "file_lines": 721,
    "max_fn_lines": 91,
    "max_type_members": 29
-  },
-  "crates/vxl-phys-broad/tests/diag_bvh.rs": {
-   "file_lines": 65,
-   "max_fn_lines": 56,
-   "max_type_members": 0
   },
   "crates/vxl-phys-broad/tests/diag_wide.rs": {
    "file_lines": 216,
@@ -1050,26 +1045,6 @@
    "max_fn_lines": 35,
    "max_type_members": 0
   },
-  "crates/vxl-phys/examples/diag_col.rs": {
-   "file_lines": 152,
-   "max_fn_lines": 100,
-   "max_type_members": 0
-  },
-  "crates/vxl-phys/examples/diag_eject.rs": {
-   "file_lines": 172,
-   "max_fn_lines": 97,
-   "max_type_members": 0
-  },
-  "crates/vxl-phys/examples/diag_min.rs": {
-   "file_lines": 239,
-   "max_fn_lines": 84,
-   "max_type_members": 5
-  },
-  "crates/vxl-phys/examples/diag_pile.rs": {
-   "file_lines": 89,
-   "max_fn_lines": 82,
-   "max_type_members": 0
-  },
   "crates/vxl-phys/examples/fluid_buoyancy.rs": {
    "file_lines": 303,
    "max_fn_lines": 70,
@@ -1111,9 +1086,9 @@
    "max_type_members": 7
   },
   "crates/vxl-phys/examples/m1_scale.rs": {
-   "file_lines": 350,
-   "max_fn_lines": 79,
-   "max_type_members": 15
+   "file_lines": 408,
+   "max_fn_lines": 76,
+   "max_type_members": 16
   },
   "crates/vxl-phys/examples/m3_impact.rs": {
    "file_lines": 134,
@@ -1236,7 +1211,7 @@
    "max_type_members": 1
   },
   "crates/vxl-phys/src/world_step/conversion.rs": {
-   "file_lines": 490,
+   "file_lines": 482,
    "max_fn_lines": 55,
    "max_type_members": 8
   },
@@ -1566,14 +1541,14 @@
   },
   "crates/vxl-phys-broad::BroadPhase": {
    "fields": 0,
-   "methods": 6
+   "methods": 7
   },
   "crates/vxl-phys-broad::Bvh8": {
    "fields": 5,
    "methods": 31
   },
   "crates/vxl-phys-broad::BvhBroadPhase": {
-   "fields": 13,
+   "fields": 14,
    "methods": 11
   },
   "crates/vxl-phys-broad::BvhNode": {
@@ -2353,7 +2328,7 @@
    "methods": 0
   },
   "crates/vxl-phys::Acc": {
-   "fields": 15,
+   "fields": 16,
    "methods": 1
   },
   "crates/vxl-phys::Args": {
@@ -2363,10 +2338,6 @@
   "crates/vxl-phys::ConversionReport": {
    "fields": 13,
    "methods": 0
-  },
-  "crates/vxl-phys::Diag": {
-   "fields": 5,
-   "methods": 1
   },
   "crates/vxl-phys::FluidBoundary": {
    "fields": 3,
@@ -2414,7 +2385,7 @@
   },
   "crates/vxl-phys::Providers": {
    "fields": 2,
-   "methods": 16
+   "methods": 15
   },
   "crates/vxl-phys::Reaction": {
    "fields": 0,
