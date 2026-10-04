@@ -283,7 +283,9 @@ fn float_spin_bias_isolation() {
     {
         let mut w = World::new(PhysConfig::default());
         let v = tank(&mut w);
-        let sys = water(2);
+        let mut sys = water(2);
+        // 铸装挖空：静态体也按 y=1.20 就位 ⇒ 同样要先移除其占位内的粒子（否则 ρ 爆）。
+        vxl_phys_fluid::carve_sphere(&mut sys, Vec3::new(0.0, 1.20, 0.0), 0.11);
         let fid = w.add_fluid_with_boundary_coupling(sys, &[v]);
         let half = Vec3::splat(0.06);
         let s = w.add_static(
@@ -332,7 +334,6 @@ fn float_spin_bias_isolation() {
         println!("  ③ 自由体 + 流体（基准）：累计偏航 {yaw:+.3} rad | |ω| 峰 {wpp:.3} rad/s");
     }
 }
-
 /// 跑 `settle` 步再取 `win` 步窗口，返回（累计偏航、|ω| 峰）。
 fn run_yaw(w: &mut World, body: usize, settle: usize, win: usize) -> (f32, f32) {
     for _ in 0..settle {
@@ -357,7 +358,6 @@ fn run_yaw(w: &mut World, body: usize, settle: usize, win: usize) -> (f32, f32) 
     }
     (unwrapped, wpeak)
 }
-
 /// **冲击 vs 稳态**（仪表，只打印）：三格隔离实验里体都是**从 1.5 m 落下**（冲击 ≈4.4 m/s）⇒
 /// 那个符号确定的偏航**可能只是"一次性冲击的不对称残差"**（角动量守恒 ⇒ 转了就留着），
 /// 而不是稳态偏置。本测试把同一格改成**轻放**（起点就在平衡位附近，几乎无冲击）：
@@ -437,8 +437,8 @@ fn steady_spin_with_valid_protocol() {
 fn run_protocol_block(cfg: PhysConfig, settle_ticks: usize, win_ticks: usize) {
     let _ = &cfg;
     println!(
-        "{:>16} {:>9} {:>10} {:>10} {:>6} {:>9} {:>12} {:>12}",
-        "格", "就位y", "起点|v|", "起点|ω|", "awake", "箱体y", "累计偏航", "τ_y 均值"
+        "{:>16} {:>9} {:>10} {:>10} {:>12} {:>12}",
+        "格", "就位y", "起点|v|", "起点|ω|", "累计偏航", "τ_y 均值"
     );
     // —— 干槽（无流体）：槽底顶面 y=1.0 ⇒ 体心平衡位 1.06 ——
     for (name, rot) in [("干槽 0°", Quat::IDENTITY), ("干槽 45°", quat_y_45())] {
@@ -474,7 +474,7 @@ fn run_protocol_block(cfg: PhysConfig, settle_ticks: usize, win_ticks: usize) {
         ("流体 球", Shape::Sphere { radius: 0.06 }, Quat::IDENTITY),
     ] {
         // ① 无体仿真：测自由水面（中心柱 x,z∈[−0.05,0.05] 内的最高粒子）
-        let (surface, fid) = {
+        let (surface, _fid) = {
             let mut w = World::new(cfg.clone());
             let v = tank(&mut w);
             let sys = water(2);
@@ -502,9 +502,9 @@ fn run_protocol_block(cfg: PhysConfig, settle_ticks: usize, win_ticks: usize) {
         let y0 = surface - draft + half_equiv;
         let mut w = World::new(cfg.clone());
         let v = tank(&mut w);
-        let sys = water(2);
+        let mut sys = water(2);
+        vxl_phys_fluid::carve_sphere(&mut sys, Vec3::new(0.0, y0, 0.0), 0.11); // 铸装挖空
         let _f2 = w.add_fluid_with_boundary_coupling(sys, &[v]);
-        let _ = fid;
         let b = w.add_dynamic(shape, Vec3::new(0.0, y0, 0.0), rot, 300.0);
         report(name, &mut w, b as usize, y0, settle_ticks, win_ticks, true);
     }
@@ -513,8 +513,8 @@ fn run_protocol_block(cfg: PhysConfig, settle_ticks: usize, win_ticks: usize) {
 fn quat_y_45() -> Quat {
     Quat::from_axis_angle(Vec3::Y, std::f32::consts::FRAC_PI_4)
 }
-
-/// 静置后**自检**再取窗口；未静止则报"无效"。
+/// 静置后**自检**再取窗口；未静止（或**被弹离就位高度**）则报"无效"。⚠️ 位置这一项是必须的：
+/// 被反作用弹到槽壁顶的体会"静止且已入睡"（|v|=|ω|=0）⇒ 只查速度会把它当有效读数（2026-10-04 实测）。
 fn report(
     name: &str,
     w: &mut World,
@@ -529,7 +529,7 @@ fn report(
     }
     let v0 = w.bodies.linvel[body].length();
     let w0 = w.bodies.angvel(body).length();
-    let valid = v0 < 0.01 && w0 < 0.01;
+    let valid = v0 < 0.01 && w0 < 0.01 && (w.bodies.position[body].y - y0).abs() < 0.03;
     let mut prev = yaw_of(w.bodies.rot(body));
     let mut unwrapped = 0.0f32;
     let mut ty = 0.0f64;
