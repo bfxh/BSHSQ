@@ -1190,6 +1190,11 @@
    "max_fn_lines": 76,
    "max_type_members": 21
   },
+  "crates/vxl-phys/examples/m1_sparse.rs": {
+   "file_lines": 92,
+   "max_fn_lines": 62,
+   "max_type_members": 0
+  },
   "crates/vxl-phys/examples/m3_impact.rs": {
    "file_lines": 134,
    "max_fn_lines": 119,
