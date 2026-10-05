@@ -711,8 +711,23 @@
    "max_type_members": 17
   },
   "crates/vxl-phys-narrow/src/tests.rs": {
-   "file_lines": 836,
-   "max_fn_lines": 97,
+   "file_lines": 33,
+   "max_fn_lines": 20,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys-narrow/src/tests/heightfield.rs": {
+   "file_lines": 235,
+   "max_fn_lines": 63,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys-narrow/src/tests/sat.rs": {
+   "file_lines": 164,
+   "max_fn_lines": 94,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys-narrow/src/tests/shapes.rs": {
+   "file_lines": 429,
+   "max_fn_lines": 95,
    "max_type_members": 0
   },
   "crates/vxl-phys-narrow/src/types.rs": {
@@ -1196,7 +1211,27 @@
    "max_type_members": 10
   },
   "crates/vxl-phys/src/tests.rs": {
-   "file_lines": 968,
+   "file_lines": 33,
+   "max_fn_lines": 11,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys/src/tests/mesh_carve.rs": {
+   "file_lines": 142,
+   "max_fn_lines": 38,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys/src/tests/providers.rs": {
+   "file_lines": 207,
+   "max_fn_lines": 51,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys/src/tests/solver_misc.rs": {
+   "file_lines": 281,
+   "max_fn_lines": 45,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys/src/tests/splat.rs": {
+   "file_lines": 348,
    "max_fn_lines": 68,
    "max_type_members": 0
   },
