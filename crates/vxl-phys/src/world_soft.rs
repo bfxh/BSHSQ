@@ -14,6 +14,12 @@
 use super::*;
 use crate::world_step::coupling as cpl; // 耦合契约短别名（用 add_force / add_tick_torque / apply_two_leg_reactions）
 
+// **域反作用的自由函数**（角反作用 + 布→介质反作用）：走 `#[path]` 子模块——`lib.rs` 零行预算，
+// 加不了 crate 级 `mod`（同 `vxl-phys-soft` 的 `cloth_medium` 先例）。
+#[path = "world_soft_reaction.rs"]
+mod soft_reaction;
+use soft_reaction::{apply_rope_angular_reactions, cloth_medium_reaction};
+
 /// 2b（Akinci 边界粒子）那一族的成组状态（原为 `World` 的 3 个散字段：开关 / 暂存 / 覆盖集）。
 #[derive(Default)]
 pub struct FluidBoundary {
@@ -95,6 +101,7 @@ impl World {
         }
         self.rope_pass();
         self.cloth_pass();
+        cloth_medium_reaction(self);
     }
 
     /// **重建刚体代理快照**（每 tick 一次：体在动；从 `rope_pass` 提取，绳/布共用）。
@@ -160,26 +167,10 @@ impl World {
             // **反作用两腿**（`Rope::body_dv` 速度口径 + `Rope::body_dx` 位置口径，§8.4.9）：
             // 与布料域**共用同一段实现**（切片 2b-ii 提取 —— 两处逐字相同，见 `apply_two_leg_reactions`）。
             cpl::apply_two_leg_reactions(&mut self.bodies, &proxies, &rope.body_dv, &rope.body_dx);
-            // **角反作用**（计划 2c-3，**默认开** since 2026-10-01；此前默认关）：关闭的理由不是
-            // "力矩算错了"，而是**接触模型看不见转动**：`body_disp` 只跟踪平移、摩擦的滑移用
-            // `b.linvel` 而非 `linvel + ω×r`、`crossed_face` 用的是**冻结的** `rot` ⇒ 回填角动量
-            // 等于注入模型看不见的运动（实测 1 kg 薄盒：`hit = 1` 时 `|ω|` 一 tick 就到 5~8 rad/s
-            // ⇒ 接触立刻丢 ⇒ 盒子被甩下去，门面 1800 tick y = −2420）。**翻默认的依据**（换代级，
-            // 与 C2 同批，`PLAN-COUPLING.md` §5 P1）：§8.4.31/§8.4.32 实测打开后中心场景仍托住，
-            // 且 `angular_reaction_holds`（带转动的自扮引擎）与 `rope_scene` 偏置判据守着符号与量级；
-            // 残留局限 = 上面的"模型看不见转动"三条（转动感知代理，见 `PLAN-COUPLING.md` §9）。
-            //
-            // ⚠️ **口径**（`crates/vxl-phys/tests/angular_impulse_contract.rs` 钉住，2026-09-28 §8.4.28）：
-            // `torque` 是**每子步消费并清零**的累加器，而本处注入发生在**所有子步之后**
-            // ⇒ 只被**一个**子步消费 ⇒ 交付"整 tick 的角冲量 `r.torque`"必须 `÷ dt_sub`
-            // （= `× substeps / dt`）；写成 `÷ dt` 只会交付 `1/substeps`（默认 2 ⇒ **差 2×**，
-            // 那条判据的金丝雀里实测比值正好 `0.500000`）。
+            // **角反作用**（默认开；为什么/怎么算，长注已随实现搬进 `apply_rope_angular_reactions`）。
             if rope.angular_reaction {
                 let substeps = self.config.substeps.max(1) as f32;
-                for r in &rope.reactions {
-                    // 经受体门 + tick 末注入契约（`PLAN-COUPLING.md` §2 A3 / §3.5：原先无 awake 检查）。
-                    cpl::add_tick_torque(&mut self.bodies, r.body, r.torque, substeps, dt);
-                }
+                apply_rope_angular_reactions(&mut self.bodies, rope, substeps, dt);
             }
         }
         self.soft.rope_proxies = proxies;

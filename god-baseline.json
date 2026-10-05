@@ -236,8 +236,13 @@
    "max_type_members": 4
   },
   "crates/vxl-phys-fluid/src/fluid_medium.rs": {
-   "file_lines": 82,
-   "max_fn_lines": 58,
+   "file_lines": 62,
+   "max_fn_lines": 21,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys-fluid/src/fluid_medium/scan.rs": {
+   "file_lines": 70,
+   "max_fn_lines": 32,
    "max_type_members": 0
   },
   "crates/vxl-phys-fluid/src/fluid_step.rs": {
@@ -278,6 +283,11 @@
   "crates/vxl-phys-fluid/tests/boundary_reaction_balance.rs": {
    "file_lines": 76,
    "max_fn_lines": 61,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys-fluid/tests/medium_deposit.rs": {
+   "file_lines": 88,
+   "max_fn_lines": 29,
    "max_type_members": 0
   },
   "crates/vxl-phys-fluid/tests/reaction_sampling_probe.rs": {
@@ -786,8 +796,8 @@
    "max_type_members": 7
   },
   "crates/vxl-phys-soft/src/cloth_medium.rs": {
-   "file_lines": 53,
-   "max_fn_lines": 28,
+   "file_lines": 62,
+   "max_fn_lines": 17,
    "max_type_members": 0
   },
   "crates/vxl-phys-soft/src/cloth_self_collide_pass.rs": {
@@ -1276,9 +1286,14 @@
    "max_type_members": 9
   },
   "crates/vxl-phys/src/world_soft.rs": {
-   "file_lines": 221,
-   "max_fn_lines": 41,
+   "file_lines": 212,
+   "max_fn_lines": 39,
    "max_type_members": 10
+  },
+  "crates/vxl-phys/src/world_soft_reaction.rs": {
+   "file_lines": 80,
+   "max_fn_lines": 31,
+   "max_type_members": 0
   },
   "crates/vxl-phys/src/world_step.rs": {
    "file_lines": 382,
@@ -1473,6 +1488,11 @@
   "crates/vxl-phys/tests/wet_cloth_gap.rs": {
    "file_lines": 133,
    "max_fn_lines": 31,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys/tests/wet_cloth_two_way.rs": {
+   "file_lines": 101,
+   "max_fn_lines": 19,
    "max_type_members": 0
   },
   "scripts/args_gate.py": {
