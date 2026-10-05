@@ -34,6 +34,13 @@ impl Providers {
         id
     }
 
+    /// 注册**高度场**（同 id 空间；`OPEN-PROBLEMS.md` #6 的迁移落点）。
+    pub fn push_heightfield(&mut self, hf: vxl_phys_narrow::heightfield::HeightField) -> u32 {
+        let id = self.entries.len() as u32;
+        self.entries.push(ProviderEntry::HeightField(hf));
+        id
+    }
+
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -50,6 +57,7 @@ impl Providers {
                 use vxl_phys_core::interop::ProviderColliders;
                 f.bounds(id)
             }
+            ProviderEntry::HeightField(h) => Some(h.bounds()),
             ProviderEntry::Mesh(m) => {
                 use vxl_phys_core::interop::ProviderColliders;
                 m.bounds(id)
@@ -94,6 +102,7 @@ impl vxl_phys_core::interop::ProviderColliders for Providers {
             ProviderEntry::Voxel(v) => Some(v.bounds()),
             ProviderEntry::Splat(f) => f.bounds(id),
             ProviderEntry::Mesh(m) => m.bounds(id),
+            ProviderEntry::HeightField(h) => Some(h.bounds()),
         }
     }
 
@@ -110,6 +119,7 @@ impl vxl_phys_core::interop::ProviderColliders for Providers {
             Some(ProviderEntry::Voxel(v)) => v.contacts_box(half, pos, rot, skin, out),
             Some(ProviderEntry::Splat(f)) => f.contacts_box(id, half, pos, rot, skin, out),
             Some(ProviderEntry::Mesh(m)) => m.contacts_box(id, half, pos, rot, skin, out),
+            Some(ProviderEntry::HeightField(h)) => h.contacts_box(half, pos, rot, skin, out),
             None => false,
         }
     }
@@ -125,6 +135,7 @@ impl vxl_phys_core::interop::ProviderColliders for Providers {
             Some(ProviderEntry::Voxel(v)) => v.contacts_point(p, skin, out),
             Some(ProviderEntry::Splat(f)) => f.contacts_point(id, p, skin, out),
             Some(ProviderEntry::Mesh(m)) => m.contacts_point(id, p, skin, out),
+            Some(ProviderEntry::HeightField(h)) => h.contacts_point(p, skin, out),
             None => false,
         }
     }
@@ -164,6 +175,7 @@ impl vxl_phys_core::interop::ProviderColliders for Providers {
             Some(ProviderEntry::Voxel(v)) => v.contacts_sphere(center, radius, skin, out),
             Some(ProviderEntry::Splat(f)) => f.contacts_sphere(id, center, radius, skin, out),
             Some(ProviderEntry::Mesh(m)) => m.contacts_sphere(id, center, radius, skin, out),
+            Some(ProviderEntry::HeightField(h)) => h.contacts_sphere(center, radius, skin, out),
             None => false,
         }
     }

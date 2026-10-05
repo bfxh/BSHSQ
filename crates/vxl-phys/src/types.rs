@@ -7,6 +7,9 @@ pub enum ProviderEntry {
     Splat(vxl_phys_splat::GaussianSplatField),
     /// **三角网格**（网格域：静态关卡几何，薄壳接触，见 `vxl-phys-terrain::mesh`）。
     Mesh(vxl_phys_terrain::mesh::TriMesh),
+    /// **高度场**（地形：M2 余项迁入 provider 通道 —— 迁入后地形也拿到 provider 的
+    /// **速度自适应接触带**，见 `OPEN-PROBLEMS.md` #6；`HeightField` 早已实现 `CollisionProvider`）。
+    HeightField(vxl_phys_narrow::heightfield::HeightField),
 }
 
 /// **效应键**（`PLAN-COUPLING.md` §3.4 的 I3，本仓第一次落地；V2 片只登记两个

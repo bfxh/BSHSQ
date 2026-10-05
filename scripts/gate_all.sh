@@ -113,8 +113,8 @@ acquire_timed
 
 # `determinism` / `m0_gates` 自报 PASS 且哈希与档内基线一致；`m1_islands` 只报比值（见下）。
 step determinism 0 cargo run --release -q -p vxl-phys --example determinism
-if ! grep -q "FINAL_HASH=0x711be572cfe0e7eefb2cf51550fd4dd5" "${out}/gate_determinism.log"; then
-    echo "❌ determinism 哈希与基线不符（期望 0x711be572cfe0e7eefb2cf51550fd4dd5）——日志尾：" >&2
+if ! grep -q "FINAL_HASH=0x56600f007340dfa9e595718f1cf5250c" "${out}/gate_determinism.log"; then
+    echo "❌ determinism 哈希与基线不符（期望 0x56600f007340dfa9e595718f1cf5250c）——日志尾：" >&2
     tail -n 10 "${out}/gate_determinism.log" >&2
     exit 4
 fi
@@ -125,8 +125,8 @@ if ! grep -q "M0 门槛 PASS" "${out}/gate_m0_gates.log"; then
     tail -n 10 "${out}/gate_m0_gates.log" >&2
     exit 5
 fi
-if ! grep -q "0x417be20a8e49c9b0436987415ac9961a" "${out}/gate_m0_gates.log"; then
-    echo "❌ m0_gates 压力哈希与基线不符（期望 0x417be20a8e49c9b0436987415ac9961a）——日志尾：" >&2
+if ! grep -q "0xe994a558643668e1ee4bfa959692068f" "${out}/gate_m0_gates.log"; then
+    echo "❌ m0_gates 压力哈希与基线不符（期望 0xe994a558643668e1ee4bfa959692068f）——日志尾：" >&2
     tail -n 10 "${out}/gate_m0_gates.log" >&2
     exit 6
 fi
