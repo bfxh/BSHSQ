@@ -1056,8 +1056,8 @@
    "max_type_members": 0
   },
   "crates/vxl-phys/examples/arena_bench/probes_a.rs": {
-   "file_lines": 521,
-   "max_fn_lines": 162,
+   "file_lines": 550,
+   "max_fn_lines": 59,
    "max_type_members": 14
   },
   "crates/vxl-phys/examples/arena_bench/probes_b.rs": {
