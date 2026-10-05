@@ -1,4 +1,5 @@
-//! fluid_access：从 lib.rs 按域拆出（纯搬移，语义未改）。
+//! fluid_access：从 lib.rs 按域拆出（纯搬移，语义未改）。**公开**（`pub mod`）是为了让
+//! `from_positions`（扫描点云建流体）可被外部消费方调用 —— 私有模块里的 `pub fn` 判 dead_code。
 use super::*;
 use vxl_phys_core::interop::{BridgeKind, StateBridge};
 
@@ -7,53 +8,68 @@ use vxl_phys_core::interop::{BridgeKind, StateBridge};
 mod lattice;
 use lattice::{lattice_positions, lattice_w_sum};
 
+/// **按给定位置建流体系统**（`ROUTE.md` §4「扫描场景起步」的落点）：点云/扫描件先经
+/// `StateBridge::import_positions` 或直接给位置，再由此建系统 —— 质量仍按**静止晶格**标定
+/// （`ρ0 / Σ_lattice W`），所以"扫描点云当初始粒子"与"晶格块"用的是**同一套质量口径**。
+///
+/// **自由函数而非方法**：`FluidSystem` 的方法数是 god 门的**已登记债务**（只准减），
+/// 新入口不占方法位（同 `for_each_neighbor` / `lattice_positions` 先例）。
+pub fn from_positions(cfg: FluidConfig, pos: Vec<Vec3>, spacing: f32) -> FluidSystem {
+    assemble(cfg, pos, spacing)
+}
+
+/// 组装本体（`new` 的晶格路径与 `from_positions` 的点云路径**共用**一条：核常数 + 质量标定 +
+/// 逐段缓冲初始化）。抽出来的另一个理由：`new` 是本文件最长函数，god 门"合法交换"要求它严格下降。
+fn assemble(cfg: FluidConfig, pos: Vec<Vec3>, spacing: f32) -> FluidSystem {
+    let h = cfg.smoothing_radius.max(1e-5);
+    let h2 = h * h;
+    let k6 = 315.0 / (64.0 * std::f32::consts::PI * h.powi(9));
+    let ks = 45.0 / (std::f32::consts::PI * h.powi(6));
+    let w0 = k6 * h2 * h2 * h2; // (h²)³
+    let b_tait = cfg.sound_speed * cfg.sound_speed * cfg.rest_density / cfg.gamma_tait;
+    let n = pos.len();
+    // 质量标定：对晶格求 Σ W（间距 spacing 的无限晶格截断到核半径内）。
+    let mass = cfg.rest_density / lattice_w_sum(h, h2, k6, spacing);
+    FluidSystem {
+        // 接触带 0.15h：粒子静置在 sdf = skin 处，带越薄壁邻密度亏越小
+        // （镜像鬼影对贴壁层全额补回固体侧缺失的核质量）。带内最深穿透
+        // 仍被推出（半空间无「另一侧」，薄带不引入穿隧）。
+        skin: 0.15 * h,
+        h,
+        h2,
+        k6,
+        ks,
+        w0,
+        b_tait,
+        mass,
+        boundaries: Vec::new(),
+        vel: vec![Vec3::ZERO; n],
+        dens: vec![0.0; n],
+        press: vec![0.0; n],
+        acc: vec![Vec3::ZERO; n],
+        xsph: vec![Vec3::ZERO; n],
+        grid: UniformGrid::default(),
+        contacts: Vec::new(),
+        spacing,
+        n_fluid: n,
+        pmass: vec![mass; n],
+        spans: Vec::new(),
+        breact: Vec::new(),
+        // 不变式：`bforce.len() == pos.len()`（`assemble` 给流体段；`set_boundary_particles`
+        // 随 `pos` 一起 resize；`truncate_to_fluid` 一起截断）。
+        bforce: vec![Vec3::ZERO; n],
+        lattice_cache: Vec::new(),
+        phase_us: [0; 5],
+        pos,
+        cfg,
+    }
+}
+
 impl FluidSystem {
     /// 晶格块初始化：粒子位于 `origin + (i + ½)·spacing`（三轴 `dims` 个），
     /// 质量按「静止晶格密度 = ρ0」反解：m = ρ0 / Σ_lattice W（含自身项）。
     pub fn new(cfg: FluidConfig, origin: Vec3, dims: [usize; 3], spacing: f32) -> Self {
-        let h = cfg.smoothing_radius.max(1e-5);
-        let h2 = h * h;
-        let k6 = 315.0 / (64.0 * std::f32::consts::PI * h.powi(9));
-        let ks = 45.0 / (std::f32::consts::PI * h.powi(6));
-        let w0 = k6 * h2 * h2 * h2; // (h²)³
-        let b_tait = cfg.sound_speed * cfg.sound_speed * cfg.rest_density / cfg.gamma_tait;
-        let n = dims[0] * dims[1] * dims[2];
-        let pos = lattice_positions(origin, dims, spacing);
-        // 质量标定：对晶格求 Σ W（间距 spacing 的无限晶格截断到核半径内）。
-        let mass = cfg.rest_density / lattice_w_sum(h, h2, k6, spacing);
-        Self {
-            // 接触带 0.15h：粒子静置在 sdf = skin 处，带越薄壁邻密度亏越小
-            // （镜像鬼影对贴壁层全额补回固体侧缺失的核质量）。带内最深穿透
-            // 仍被推出（半空间无「另一侧」，薄带不引入穿隧）。
-            skin: 0.15 * h,
-            h,
-            h2,
-            k6,
-            ks,
-            w0,
-            b_tait,
-            mass,
-            boundaries: Vec::new(),
-            vel: vec![Vec3::ZERO; n],
-            dens: vec![0.0; n],
-            press: vec![0.0; n],
-            acc: vec![Vec3::ZERO; n],
-            xsph: vec![Vec3::ZERO; n],
-            grid: UniformGrid::default(),
-            contacts: Vec::new(),
-            spacing,
-            n_fluid: n,
-            pmass: vec![mass; n],
-            spans: Vec::new(),
-            breact: Vec::new(),
-            // 不变式：`bforce.len() == pos.len()`（`new` 给流体段；`set_boundary_particles`
-            // 随 `pos` 一起 resize；`truncate_to_fluid` 一起截断）。
-            bforce: vec![Vec3::ZERO; n],
-            lattice_cache: Vec::new(),
-            phase_us: [0; 5],
-            pos,
-            cfg,
-        }
+        assemble(cfg, lattice_positions(origin, dims, spacing), spacing)
     }
 
     /// 流体粒子数（**不含**边界粒子）。

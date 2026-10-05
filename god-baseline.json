@@ -211,8 +211,8 @@
    "max_type_members": 14
   },
   "crates/vxl-phys-fluid/src/fluid_access.rs": {
-   "file_lines": 188,
-   "max_fn_lines": 45,
+   "file_lines": 204,
+   "max_fn_lines": 44,
    "max_type_members": 20
   },
   "crates/vxl-phys-fluid/src/fluid_access/lattice.rs": {
@@ -1493,6 +1493,11 @@
   "crates/vxl-phys/tests/rope_scene.rs": {
    "file_lines": 325,
    "max_fn_lines": 60,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys/tests/scan_startup.rs": {
+   "file_lines": 51,
+   "max_fn_lines": 27,
    "max_type_members": 0
   },
   "crates/vxl-phys/tests/shape_support_matrix.rs": {
