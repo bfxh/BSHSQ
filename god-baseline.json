@@ -1321,8 +1321,8 @@
    "max_type_members": 6
   },
   "crates/vxl-phys/src/world_step/aero.rs": {
-   "file_lines": 65,
-   "max_fn_lines": 49,
+   "file_lines": 78,
+   "max_fn_lines": 33,
    "max_type_members": 1
   },
   "crates/vxl-phys/src/world_step/conversion.rs": {
@@ -1388,6 +1388,11 @@
   "crates/vxl-phys/tests/cloth_scene.rs": {
    "file_lines": 76,
    "max_fn_lines": 45,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys/tests/cloth_wind_scene.rs": {
+   "file_lines": 97,
+   "max_fn_lines": 25,
    "max_type_members": 0
   },
   "crates/vxl-phys/tests/compound_mass.rs": {
