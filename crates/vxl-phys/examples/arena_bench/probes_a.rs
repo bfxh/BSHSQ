@@ -347,7 +347,20 @@ fn report_spread(s: &Stats) {
 }
 
 /// 读数报表：规模/相位占比 + 窄相计数 + 点承载力 + warm 匹配/回退成因 + 求解细分。
+/// 读数报表：规模/相位占比 + 窄相计数 + 点承载力 + warm 匹配/回退成因 + 求解细分。
+///
+/// 2026-10-05 拆：原来这一个函数 162 行（全仓最长），按**读数分节**拆成五个 helper（纯搬移，
+/// 每个 helper 自己取所需的 `println!` 段与局部量，打印顺序与内容逐字不变）。
 fn report(name: &str, w: &World, s: &Stats) {
+    report_timings(name, w, s);
+    report_narrow(w);
+    report_solver_points(w);
+    report_warm();
+    report_solver_phases(w);
+}
+
+/// 读数 A：规模/帧时 + 相位均值。
+fn report_timings(name: &str, w: &World, s: &Stats) {
     let (p50, p95, mean) = (s.p50, s.p95, s.mean);
     let (bodies, dynb, points) = (s.bodies, s.dynb, s.points);
     let (min_sep, max_y) = (s.min_sep, s.max_y);
@@ -385,6 +398,10 @@ fn report(name: &str, w: &World, s: &Stats) {
         points as f64 / w.manifolds().len().max(1) as f64,
         min_sep,
     );
+}
+
+/// 读数 B：窄相/提供者/三角网内部仪器（含 AABB 预筛判决）。
+fn report_narrow(w: &World) {
     let p = w.narrow.probe_stats();
     let per = |v: u64| v as f64 / MEASURE as f64;
     println!(
@@ -431,6 +448,10 @@ fn report(name: &str, w: &World, s: &Stats) {
         t.push_far,
         100.0 * t.push_far as f64 / t.pushes.max(1) as f64,
     );
+}
+
+/// 读数 C1：点承载力（**上一次解算调用**＝一个子步）。
+fn report_solver_points(w: &World) {
     let lp = w.solver.last_points;
     println!(
         "  点承载力（**上一次解算调用**＝一个子步）：被解算接触点 {} 个，其中法向冲量≈0 的 {} 个（{:.1}%）",
@@ -438,6 +459,10 @@ fn report(name: &str, w: &World, s: &Stats) {
         lp.1,
         100.0 * lp.1 as f64 / lp.0.max(1) as f64,
     );
+}
+
+/// 读数 C2：warm 匹配分支与回退成因（全程累计）。
+fn report_warm() {
     let (we, wf, wm) = vxl_phys_solver::warm_match_stats_take();
     let wt = (we + wf + wm).max(1) as f64;
     println!(
@@ -463,6 +488,10 @@ fn report(name: &str, w: &World, s: &Stats) {
         bsame,
         100.0 * bsame as f64 / bt,
     );
+}
+
+/// 读数 C3：求解细分与相位账本（**原值快照**口径）。
+fn report_solver_phases(w: &World) {
     let dd = w.solver.last_detail_us;
     let dd_sum = (dd[0] + dd[1] + dd[2] + dd[3]).max(1) as f64;
     if dd[1] + dd[2] + dd[3] == 0 {

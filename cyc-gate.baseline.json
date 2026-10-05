@@ -16,7 +16,7 @@
   "crates/vxl-phys-narrow/src/pair_shaped.rs": 2,
   "crates/vxl-phys-narrow/src/sat.rs": 1,
   "crates/vxl-phys-narrow/src/support.rs": 1,
-  "crates/vxl-phys-narrow/src/tests.rs": 1,
+  "crates/vxl-phys-narrow/src/tests/sat.rs": 1,
   "crates/vxl-phys-soft/src/cloth_self_collide_pass.rs": 1,
   "crates/vxl-phys-soft/src/cloth_self_collision/edge.rs": 1,
   "crates/vxl-phys-soft/src/rigid.rs": 2,
