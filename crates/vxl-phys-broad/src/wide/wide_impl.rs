@@ -710,11 +710,3 @@ impl WideBvh {
         }
     }
 }
-
-/// 体 id 集合排序去重（测试对照用）。
-#[allow(dead_code)]
-pub fn sorted_unique(mut v: Vec<u32>) -> Vec<u32> {
-    v.sort_unstable();
-    v.dedup();
-    v
-}
