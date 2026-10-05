@@ -58,6 +58,14 @@ impl World {
                 self.fluids[fi].0.step(dt, &self.providers);
             }
         }
+        // **布 × 介质（湿布）**：流体推进后按**面心**把介质样本填给每张布（`cloth.medium`，
+        // 随后 `cloth_medium::inject` 在 `predict` 里消费）。多流体介质的叠加口径待定 ⇒ 取第一个。
+        if !self.soft.cloths.is_empty() {
+            let f = &self.fluids[0].0;
+            for cloth in &mut self.soft.cloths {
+                fill_cloth_medium(cloth, f);
+            }
+        }
     }
 
     /// **2b 边界粒子重建**（每 tick 一次）：把近域体的表面两层粒子装进该流体系统，
@@ -264,11 +272,7 @@ impl World {
         self.fluid_reaction_pass();
         self.timings.fields_us += vxl_phys_core::probe::us(t0);
         // 2) 速度积分。
-        let t0 = vxl_phys_core::probe::start();
-        let maxl = self.config.max_linear_velocity;
-        let maxa = self.config.max_angular_velocity;
-        Integrator::integrate_velocities(&mut self.bodies, Vec3::ZERO, dt, maxl, maxa);
-        self.timings.integrate_vel_us += vxl_phys_core::probe::us(t0);
+        integrate_velocity_pass(self, dt);
         // 3) 宽相（先注入步长：速度自适应 fat 边距用）。
         //    **检测每步一次**（实验开关 `detect_once_per_tick` + 准静态判据）：
         //    非首子步且准静态时跳过宽相 + 窄相，复用本 tick 首子步的流形表。
@@ -348,5 +352,30 @@ impl World {
         let t0 = vxl_phys_core::probe::start();
         self.ccd_pass(dt);
         self.timings.ccd_us += vxl_phys_core::probe::us(t0);
+    }
+}
+
+/// 2) 速度积分（含计时累加）。从 `substep` 抽出——那里是全文件最长函数。
+///
+/// ⚠️ **自由函数而不是方法**：`World` 的方法数顶在 god 门类型账（76，只准减）。
+fn integrate_velocity_pass(w: &mut World, dt: f32) {
+    let t0 = vxl_phys_core::probe::start();
+    let maxl = w.config.max_linear_velocity;
+    let maxa = w.config.max_angular_velocity;
+    Integrator::integrate_velocities(&mut w.bodies, Vec3::ZERO, dt, maxl, maxa);
+    w.timings.integrate_vel_us += vxl_phys_core::probe::us(t0);
+}
+
+/// **按面心逐三角采样介质**，填进布片的 scratch（`cloth_medium::inject` 在 `predict` 里消费它）。
+/// 只在"有流体 + 有布"时调用 ⇒ 默认档一行不走（`cloth.medium` 保持空 = 关）。
+fn fill_cloth_medium(
+    cloth: &mut vxl_phys_soft::ClothSheet,
+    medium: &dyn vxl_phys_core::interop::MediumField,
+) {
+    cloth.medium.clear();
+    for tri in &cloth.tris {
+        let (a, b, c) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
+        let center = (cloth.pos[a] + cloth.pos[b] + cloth.pos[c]) * (1.0 / 3.0);
+        cloth.medium.push(medium.sample(center));
     }
 }
