@@ -74,6 +74,13 @@
 | `vxl-phys-mech` | 机械/关节族 | 参数骨架 | — | 🦴 | 🔥（关节求解） |
 | `vxl-phys-gpu` | GPU 档（§8 / M4，**显式档**） | **wgpu 计算管线**：常驻 `Packet`（网格重建 → 密度 → EOS → 力 → 积分，含壁面镜像鬼影 + 投影、卡上反作用聚合、刚体积分腿）+ `NarrowTier`（窄相固定槽 + 主机回填）+ 宽相/BVH-bbox 探针；**13 个 WGSL**（12 在 `src/`、1 在 `examples/`） | wgpu（唯一外部运行期依赖之一） | ✅（口径 B；默认路径一行不走 ⇒ 三哈希/金样不受影响） | 🌤 每 tick（卡上相位） |
 
+> **⚠️ 2026-10-05 补正（液体行的 `deposit` 那句会误导）**：液体的**双向（2b）已经落地**，
+> 走的是**边界粒子**路线 —— `FluidSystem::boundary_reactions()` → 门面 `world_step::fluid_reaction_pass()`
+> （带时间加权账 `coupling::fluid_reaction_ledger`；判据 `vxl-phys-fluid/src/tests.rs` 的 2b 组 +
+> 门面 `tests/fluid_boundary.rs` / `fluid_reaction_torque.rs`）。**`MediumField::deposit` 对液体仍是 no-op**
+> （`fluid_medium.rs`）——那条通道是给 splat / 软体侧用的 2a 采样口，**不是** 2b 的实现位置。
+> ⇒ 读"`deposit` 留空待 2b"时别推出"液体还不能双向"。
+
 ### 桥接层（对外/对工具）
 
 | crate | 职责 | 关键件 | 状态 |
