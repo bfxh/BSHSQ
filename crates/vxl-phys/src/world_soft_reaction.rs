@@ -39,7 +39,7 @@ pub(super) fn apply_rope_angular_reactions(
 /// **布 × 液的反作用段（布 → 流体，2026-10-05）**：把每张布逐面**已累加好的**反作用冲量沉积回
 /// 流场（`MediumField::deposit`，点式；分摊与守恒证明见 `vxl_phys_fluid::fluid_medium`）。
 ///
-/// **冲量不在这里算**：`predict` 每个子步把 `−F(s)·h` 累加进 `cloth.medium_reaction`（与受力
+/// **冲量不在这里算**：`predict` 每个子步把 `−F(s)·h` 累加进 `cloth.medium.reaction`（与受力
 /// **同一份公式**）⇒ 这里读到的是**整 tick 的精确冲量**，不是"按 tick 末速度重算"的近似。
 /// 口径仍与 2a 同款（**一 tick 滞后**）；**为什么默认生效**：全仓"布 + 介质"场景只有
 /// `wet_cloth_gap.rs` 一个，三条冻结哈希都不含布 ⇒ 默认档逐位不变；多流体取第一个。
@@ -50,7 +50,7 @@ pub(super) fn cloth_medium_reaction(w: &mut World) {
     let pending = cloth_impulses(w);
     // 冲量是**逐 tick 累加器**：读完立刻原地清零（**不改长度** ⇒ 不触发重分配）。
     for cloth in &mut w.soft.cloths {
-        for j in cloth.medium_reaction.iter_mut() {
+        for j in cloth.medium.reaction.iter_mut() {
             *j = Vec3::ZERO;
         }
     }
@@ -63,16 +63,16 @@ pub(super) fn cloth_medium_reaction(w: &mut World) {
     }
 }
 
-/// 逐面收**已累加好的**反作用冲量（`cloth.medium_reaction`）与面心；未采样（本 tick 无介质）跳过。
+/// 逐面收**已累加好的**反作用冲量（`cloth.medium.reaction`）与面心；未采样（本 tick 无介质）跳过。
 fn cloth_impulses(w: &World) -> Vec<(Vec3, Vec3)> {
     let mut pending: Vec<(Vec3, Vec3)> = Vec::new();
     for cloth in &w.soft.cloths {
-        if cloth.medium.len() != cloth.tris.len() || cloth.medium_reaction.len() != cloth.tris.len()
-        {
-            continue;
+        let (ns, nr) = (cloth.medium.samples.len(), cloth.medium.reaction.len());
+        if ns != cloth.tris.len() || nr != cloth.tris.len() {
+            continue; // 本 tick 没采到介质（无流体/未填）⇒ 零作用
         }
         for k in 0..cloth.tris.len() {
-            let j = cloth.medium_reaction[k];
+            let j = cloth.medium.reaction[k];
             if j == Vec3::ZERO {
                 continue;
             }

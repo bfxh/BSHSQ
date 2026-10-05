@@ -35,7 +35,7 @@ fn sheet() -> ClothSheet {
 
 /// 每个三角面填一份均匀介质样本。
 fn fill(sc: &mut ClothSheet, density: f32, velocity: Vec3) {
-    sc.medium = sc
+    sc.medium.samples = sc
         .tris
         .iter()
         .map(|_| MediumSample {

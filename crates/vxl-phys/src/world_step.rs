@@ -376,6 +376,6 @@ fn fill_cloth_medium(
     for tri in &cloth.tris {
         let (a, b, c) = (tri[0] as usize, tri[1] as usize, tri[2] as usize);
         let center = (cloth.pos[a] + cloth.pos[b] + cloth.pos[c]) * (1.0 / 3.0);
-        cloth.medium.push(medium.sample(center));
+        cloth.medium.samples.push(medium.sample(center));
     }
 }

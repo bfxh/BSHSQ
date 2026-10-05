@@ -19,7 +19,7 @@ use crate::cloth_self_collision::SelfContacts;
 use crate::params::Stiffness;
 use crate::rigid::RigidProxy;
 use std::collections::HashSet;
-use vxl_phys_core::interop::{InteropContact, MediumSample, ProviderColliders};
+use vxl_phys_core::interop::{InteropContact, ProviderColliders};
 use vxl_phys_core::Vec3;
 
 pub mod damage;
@@ -28,6 +28,10 @@ pub mod plastic;
 // 所以走 `cloth.rs` 的子模块（不需要 crate 级 `mod`）。
 mod bend;
 use bend::BendSet;
+// **湿质量**（吸水后有效质量）：与 `cloth_medium`（阻力 + 双向）同属"布 × 液"那一格。
+pub mod medium;
+mod wet;
+use medium::ClothMedium;
 // **布 × 介质（湿布）**：力必须进 `predict`（XPBD 是位置式，速度级注入会被 `write_back` 吞掉）。
 // 走 `#[path]` 子模块（`soft/lib.rs` 零预算）；反作用冲量落在 `ClothSheet::medium_reaction`
 // （`pub` 数据场），公式不外露 ⇒ 本模块保持私有。
@@ -68,17 +72,22 @@ pub(crate) fn sphere_contacts_project(
                 pos[i] += n * c.depth;
                 // ② 切向：库仑锥（锥内整段吃掉 ⇒ 静摩擦黏住；只扣超出部分会恒定蠕变——rope 首版教训）。
                 if friction > 0.0 {
-                    let dp = pos[i] - prev[i];
-                    let t = dp - n * dp.dot(n);
-                    let slip = t.length();
-                    if slip > 0.0 {
-                        let budget = friction * c.depth;
-                        let removed = if slip < budget { slip } else { budget };
-                        pos[i] -= t * (removed / slip);
-                    }
+                    friction_cone(&mut pos[i], prev[i], n, c.depth, friction);
                 }
             }
         }
+    }
+}
+
+/// **切向库仑锥**（一遍；从 `sphere_contacts_project` 抽出 —— 那边是全文件最长函数，
+/// god 门"合法交换"要求最长函数**严格下降**）：`slip ≤ budget` 整段吃掉（静摩擦黏住），
+/// 否则只扣 `budget`（只扣超出部分会恒定蠕变 —— rope 首版的教训）。
+fn friction_cone(p: &mut Vec3, prev: Vec3, n: Vec3, depth: f32, friction: f32) {
+    let dp = *p - prev;
+    let t = dp - n * dp.dot(n);
+    let slip = t.length();
+    if slip > 0.0 {
+        *p -= t * (slip.min(friction * depth) / slip);
     }
 }
 
@@ -149,13 +158,9 @@ pub struct ClothSheet {
     /// **损伤域**（撕裂 + 塑性**并组**：成员棘轮 23/24 顶格 ⇒ 按 `BodyCoupling` / `SelfContacts`
     /// 先例合并；两子域各自默认关 ⇒ 默认档逐位不变。见 `cloth/damage.rs`）。
     pub damage: damage::Damage,
-    /// **介质采样 scratch（布 × 液，2026-10-05）**：长度 = `tris.len()` 时逐面生效；
-    /// **空 = 关**（默认）⇒ 默认档逐位不变。门面每 tick 按**面心**填（见 `cloth_medium`）。
-    pub medium: Vec<MediumSample>,
-    /// **逐面反作用冲量 scratch**（N·s；布 → 介质）：`inject` 每子步累加 `−F·h`，
-    /// 门面每 tick 末读走并**原地清零**（`world_soft_reaction::cloth_medium_reaction`）。
-    /// 长度 = `tris.len()`（`step` 里补），所以"有无介质"由 `medium` 判定 ⇒ 逐位不变。
-    pub medium_reaction: Vec<Vec3>,
+    /// **布 × 介质的 scratch 组**（逐面样本 + 反作用冲量 + 逐顶点质量倍率；三者并组腾成员位，
+    /// 见 `cloth/medium.rs`）：`samples` 空 = 关（默认）⇒ 阻力/双向/湿质量**三半都短路**。
+    pub medium: ClothMedium,
 }
 
 impl ClothSheet {
@@ -175,14 +180,15 @@ impl ClothSheet {
         // （`new` 顶 god 门最长函数棘轮，2026-09-29 抽出）。
         let (cons, rest, bend, bend_rest) = topology(&tris, &points, n);
         let mass = shell_mass(&tris, &points, rho, t);
-        let inv_mass = inv_mass_of(&mass);
-        let self_contacts = SelfContacts::new(t * 0.5, &cons, &bend);
         Self {
             pos: points,
             prev: Vec::new(),
             vel: vec![Vec3::ZERO; n],
-            inv_mass,
+            // `inv_mass` / `self_contacts` **就地**算：前者要 `mass`、后者要 `cons`/`bend` ⇒ 必须排在
+            // 这三个字段**被移走之前**（结构体字面量按书写序求值）。顺带让 `new` 少两行（尺寸棘轮）。
+            inv_mass: inv_mass_of(&mass),
             mass,
+            self_contacts: SelfContacts::new(t * 0.5, &cons, &bend),
             tris,
             cons,
             rest,
@@ -196,11 +202,9 @@ impl ClothSheet {
             contact: ContactTuning::new(t * 0.5),
             buf: Vec::new(),
             body: BodyCoupling::default(),
-            self_contacts,
             aero: ClothAero::default(),
             damage: damage::Damage::default(),
-            medium: Vec::new(),
-            medium_reaction: Vec::new(),
+            medium: ClothMedium::default(),
         }
     }
 
@@ -245,8 +249,11 @@ impl ClothSheet {
         if self.bend.lambda.len() != self.bend.pairs.len() {
             self.bend.lambda = vec![0.0; self.bend.pairs.len()];
         }
-        if self.medium_reaction.len() != self.tris.len() {
-            self.medium_reaction.resize(self.tris.len(), Vec3::ZERO);
+        if self.medium.reaction.len() != self.tris.len() {
+            self.medium.reaction.resize(self.tris.len(), Vec3::ZERO);
+        }
+        if self.medium.mass_scale.len() != self.pos.len() {
+            self.medium.mass_scale.resize(self.pos.len(), 1.0);
         }
         self.reset_body_state(bodies.len());
         let h = dt / self.substeps.max(1) as f32;
@@ -280,8 +287,9 @@ impl ClothSheet {
         if self.aero.enabled {
             self.apply_aero(h);
         }
-        // **布 × 介质**（`medium` 空 ⇒ 首行短路）：与气动**同段位**、在 `prev = pos` 之前把
-        // `F/m·h` 加进 `vel` —— XPBD 是位置式，晚于此处的注入会被 `write_back` 重算吞掉。
+        // **布 × 介质**（`medium` 空 ⇒ 首行短路）：湿质量先重算 `inv_mass`，再把 `F/m·h` 加进
+        // `vel` —— 两者都要在 `prev = pos` **之前**（XPBD 位置式，晚于此处的注入会被回写吞掉）。
+        wet::apply(self);
         cloth_medium::inject(self, h);
         for i in 0..self.pos.len() {
             if self.inv_mass[i] == 0.0 {

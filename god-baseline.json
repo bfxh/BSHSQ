@@ -771,9 +771,9 @@
    "max_type_members": 3
   },
   "crates/vxl-phys-soft/src/cloth.rs": {
-   "file_lines": 531,
-   "max_fn_lines": 42,
-   "max_type_members": 23
+   "file_lines": 539,
+   "max_fn_lines": 41,
+   "max_type_members": 22
   },
   "crates/vxl-phys-soft/src/cloth/bend.rs": {
    "file_lines": 36,
@@ -785,10 +785,20 @@
    "max_fn_lines": 4,
    "max_type_members": 2
   },
+  "crates/vxl-phys-soft/src/cloth/medium.rs": {
+   "file_lines": 37,
+   "max_fn_lines": 4,
+   "max_type_members": 4
+  },
   "crates/vxl-phys-soft/src/cloth/plastic.rs": {
    "file_lines": 131,
    "max_fn_lines": 45,
    "max_type_members": 4
+  },
+  "crates/vxl-phys-soft/src/cloth/wet.rs": {
+   "file_lines": 51,
+   "max_fn_lines": 28,
+   "max_type_members": 0
   },
   "crates/vxl-phys-soft/src/cloth_aero.rs": {
    "file_lines": 69,
@@ -923,6 +933,11 @@
   "crates/vxl-phys-soft/tests/cloth_tear.rs": {
    "file_lines": 203,
    "max_fn_lines": 22,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys-soft/tests/cloth_wet_mass.rs": {
+   "file_lines": 94,
+   "max_fn_lines": 26,
    "max_type_members": 0
   },
   "crates/vxl-phys-soft/tests/crossed_face_probe.rs": {
@@ -2292,8 +2307,12 @@
    "fields": 4,
    "methods": 0
   },
+  "crates/vxl-phys-soft::ClothMedium": {
+   "fields": 4,
+   "methods": 1
+  },
   "crates/vxl-phys-soft::ClothSheet": {
-   "fields": 23,
+   "fields": 22,
    "methods": 36
   },
   "crates/vxl-phys-soft::ContactTuning": {
