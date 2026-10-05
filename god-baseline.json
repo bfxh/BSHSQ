@@ -212,8 +212,13 @@
   },
   "crates/vxl-phys-fluid/src/fluid_access.rs": {
    "file_lines": 188,
-   "max_fn_lines": 70,
+   "max_fn_lines": 45,
    "max_type_members": 20
+  },
+  "crates/vxl-phys-fluid/src/fluid_access/lattice.rs": {
+   "file_lines": 42,
+   "max_fn_lines": 17,
+   "max_type_members": 0
   },
   "crates/vxl-phys-fluid/src/fluid_boundary.rs": {
    "file_lines": 137,
@@ -294,6 +299,11 @@
    "file_lines": 274,
    "max_fn_lines": 108,
    "max_type_members": 2
+  },
+  "crates/vxl-phys-fluid/tests/state_bridge_roundtrip.rs": {
+   "file_lines": 62,
+   "max_fn_lines": 31,
+   "max_type_members": 0
   },
   "crates/vxl-phys-gpu/examples/gpu_body_integrate_probe.rs": {
    "file_lines": 153,
