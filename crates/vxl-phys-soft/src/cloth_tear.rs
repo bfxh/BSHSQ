@@ -75,10 +75,10 @@ impl ClothSheet {
             cons,
             rest,
             bend,
-            bend_rest,
             damage,
             ..
         } = self;
+        let (bend, bend_rest) = bend.parts();
         mark_torn(cons, rest, &mut damage.tear.torn, pos, eps);
         mark_torn(bend, bend_rest, &mut damage.tear.torn_bend, pos, eps);
     }
@@ -92,13 +92,10 @@ impl ClothSheet {
             }
             let (i, j) = (*i as usize, *j as usize);
             let w = self.inv_mass[i] + self.inv_mass[j];
-            if w <= 0.0 {
-                continue;
-            }
             let d = self.pos[j] - self.pos[i];
             let len = d.length();
-            if len < 1e-9 {
-                continue;
+            if w <= 0.0 || len < 1e-9 {
+                continue; // 双边都钉住 / 退化对（两条早退在**任何写之前** ⇒ 合并判据逐位无差）
             }
             let dir = d * (1.0 / len);
             let c = len - self.rest[k];

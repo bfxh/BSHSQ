@@ -36,44 +36,52 @@ pub(super) fn apply_rope_angular_reactions(
     }
 }
 
-/// **布 × 液的反作用段（布 → 流体，2026-10-05）**：把每张布逐面受的介质阻力**等大反向**
-/// 沉积回流场（`MediumField::deposit`，点式；分摊与守恒证明见 `vxl_phys_fluid::fluid_medium`）。
+/// **布 × 液的反作用段（布 → 流体，2026-10-05）**：把每张布逐面**已累加好的**反作用冲量沉积回
+/// 流场（`MediumField::deposit`，点式；分摊与守恒证明见 `vxl_phys_fluid::fluid_medium`）。
 ///
-/// **口径**：与 2a 既有约定同款 —— **一 tick 滞后、值取最新状态**（流体本 tick 已推进，沉积
-/// 喂的是**下一 tick**）。逐面力由 `vxl_phys_soft` 的 `cloth_medium::face_drag` 给（与 `predict`
-/// 里那份**同一式**）⇒ 本段不重写任何公式。**无布或无流体 ⇒ 首行短路**（其余场景零成本）。
-///
-/// **为什么默认生效（不是开关）**：牛顿第三定律不是可选项；且全仓"布 + 介质同时存在"的场景
-/// 只有 `tests/wet_cloth_gap.rs` 一个，三条冻结哈希（`determinism` / `m0_gates` / `m1_islands`）
-/// 都不含布 ⇒ 默认档逐位不变。多流体时取第一个（与采样侧 `fill_cloth_medium` 同口径）。
+/// **冲量不在这里算**：`predict` 每个子步把 `−F(s)·h` 累加进 `cloth.medium_reaction`（与受力
+/// **同一份公式**）⇒ 这里读到的是**整 tick 的精确冲量**，不是"按 tick 末速度重算"的近似。
+/// 口径仍与 2a 同款（**一 tick 滞后**）；**为什么默认生效**：全仓"布 + 介质"场景只有
+/// `wet_cloth_gap.rs` 一个，三条冻结哈希都不含布 ⇒ 默认档逐位不变；多流体取第一个。
 pub(super) fn cloth_medium_reaction(w: &mut World) {
     if w.soft.cloths.is_empty() || w.fluids.is_empty() {
         return;
     }
-    let dt = w.config.dt;
-    let mut pending: Vec<(Vec3, Vec3)> = Vec::new();
-    for cloth in &w.soft.cloths {
-        if cloth.medium.len() != cloth.tris.len() {
-            continue; // 本 tick 没采到介质（无流体/未填）⇒ 零作用
-        }
-        for k in 0..cloth.tris.len() {
-            let f = vxl_phys_soft::cloth::cloth_medium::face_drag(cloth, k);
-            if f == Vec3::ZERO {
-                continue;
-            }
-            let t = cloth.tris[k];
-            let c =
-                (cloth.pos[t[0] as usize] + cloth.pos[t[1] as usize] + cloth.pos[t[2] as usize])
-                    * (1.0 / 3.0);
-            pending.push((c, f * (-dt)));
+    let pending = cloth_impulses(w);
+    // 冲量是**逐 tick 累加器**：读完立刻原地清零（**不改长度** ⇒ 不触发重分配）。
+    for cloth in &mut w.soft.cloths {
+        for j in cloth.medium_reaction.iter_mut() {
+            *j = Vec3::ZERO;
         }
     }
     if pending.is_empty() {
         return;
     }
     use vxl_phys_core::interop::MediumField as _;
-    let fluid = &mut w.fluids[0].0;
     for (p, j) in pending {
-        fluid.deposit(p, j, 0.0, 0.0);
+        w.fluids[0].0.deposit(p, j, 0.0, 0.0);
     }
+}
+
+/// 逐面收**已累加好的**反作用冲量（`cloth.medium_reaction`）与面心；未采样（本 tick 无介质）跳过。
+fn cloth_impulses(w: &World) -> Vec<(Vec3, Vec3)> {
+    let mut pending: Vec<(Vec3, Vec3)> = Vec::new();
+    for cloth in &w.soft.cloths {
+        if cloth.medium.len() != cloth.tris.len() || cloth.medium_reaction.len() != cloth.tris.len()
+        {
+            continue;
+        }
+        for k in 0..cloth.tris.len() {
+            let j = cloth.medium_reaction[k];
+            if j == Vec3::ZERO {
+                continue;
+            }
+            let t = cloth.tris[k];
+            let c =
+                (cloth.pos[t[0] as usize] + cloth.pos[t[1] as usize] + cloth.pos[t[2] as usize])
+                    * (1.0 / 3.0);
+            pending.push((c, j));
+        }
+    }
+    pending
 }

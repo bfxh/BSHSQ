@@ -95,17 +95,19 @@
 >   **介质 → 布**：门面在水推进后按**面心**采样 `FluidSystem` 的 `MediumField` 填进 `cloth.medium`，
 >   `predict` 里 `cloth_medium::inject` 施加 **Bridson 线化阻力** `F = ½·ρ·Cd·A·u·|u|`（与
 >   `cloth_aero` 同式；**必须在 `predict` 内**，见下面的试刀记录）。
->   **布 → 介质**：门面的 `world_soft_reaction::cloth_medium_reaction` 逐面取**同一份**
->   `cloth_medium::face_drag`，把反作用 `−F·dt` 经 `MediumField::deposit` 沉积回流体
->   （`fluid_medium`：按同一 poly6 权重分摊，**`Σ m·Δv` 严格守恒**）。
+>   **布 → 介质**：`predict` 的每个子步把**反作用冲量** `−F(s)·h`（与受力同一份公式）累加进
+>   `cloth.medium_reaction`；门面每 tick 末 `world_soft_reaction::cloth_medium_reaction` 读走并
+>   沉积回流体（`MediumField::deposit`：按同一 poly6 权重分摊，**`Σ m·Δv` 严格守恒**）。
+>   ⇒ 反作用用的是**整 tick 的精确冲量**，不是"按 tick 末速度重算一次"的近似；冲量是**逐 tick
+>   累加器**，门面读完**原地清零**（长度不变 ⇒ 无重分配）。
 >   判据：`crates/vxl-phys/tests/wet_cloth_gap.rs`（干对照自由落体 vs 湿布被拖住、落地明显更晚
->   且不穿透槽底）+ `tests/wet_cloth_two_way.rs`（布沿 +x 拖水 ⇒ 水获得 +x 动量，干对照恒 0）+
+>   且不穿透槽底）+ `tests/wet_cloth_two_way.rs`（布沿 +x 拖水；**定量**：`Δp布 + Δp水 ≈ 0`，
+>   实测残差 1.2e-5 / Δp 0.806，**干对照恒 0**）+
 >   `vxl-phys-soft/tests/cloth_medium.rs`（介质流带起布 / 空与 `density=0` 逐位不变）+
 >   `vxl-phys-fluid/tests/medium_deposit.rs`（沉积动量守恒 / 真空逐位不变）。
->   **仍缺**：湿质量（吸水后有效质量）、per-substep 采样（现为每 tick 一次，子步内复用）。
->   ⚠️ **登记精度欠账**：反作用按**tick 末速度**评估（沿用 2a「一 tick 滞后、值取最新状态」口径）
->   ⇒ 对强非线性阻力**系统性略偏小**（实测 15 tick：布失去 ≈0.82 N·s、水获得 ≈0.51 N·s）。
->   要精确就得把**逐子步的反作用冲量**存下来（`ClothSheet` 成员 24/24 顶格 ⇒ 需先并组腾位）；
+>   **仍缺**：**湿质量**（吸水后有效质量）、per-substep 采样（现为每 tick 一次，子步内复用）。
+>   本片顺带把弯曲族并组成 `BendSet`（`ClothSheet` 成员 **24 → 23**）⇒ 腾出了位，
+>   上面两条都不再被成员棘轮挡住；
 > - **风 × 液（表面驱动）**、**溅水（刚-液-风）** —— ❌ 未落地（前者要气动-液面耦合，后者是三域编排）；
 > - **喷溅 × {刚/布}（代理/场）** —— 部分：splat 作为 `CollisionProvider`/`MediumField` 已落地，
 >   "扫描场景起步"（splat→初始粒子/代理的反向导入）仍未做；

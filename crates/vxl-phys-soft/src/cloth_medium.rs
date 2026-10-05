@@ -20,8 +20,9 @@ use crate::cloth::ClothSheet;
 use vxl_phys_core::Vec3;
 
 /// **单面介质阻力**（N；`k` = 三角序）：`F = ½·ρ·Cd·A·u·|u|`、`u = v_medium − v_face`；
-/// `ρ ≤ 0` 或退化面（`2A ≤ 1e-12`）⇒ [`Vec3::ZERO`]。`inject` 与门面反作用段共用这一份。
-pub fn face_drag(cloth: &ClothSheet, k: usize) -> Vec3 {
+/// `ρ ≤ 0` 或退化面（`2A ≤ 1e-12`）⇒ [`Vec3::ZERO`]。反作用 `−F·h` 由 `inject` 就地累加
+/// 进 `cloth.medium_reaction`（**同一份公式**，不给门面开二次实现的口子）。
+fn face_drag(cloth: &ClothSheet, k: usize) -> Vec3 {
     let s = cloth.medium[k];
     if s.density <= 0.0 {
         return Vec3::ZERO; // 真空/无介质 ⇒ 零力
@@ -38,23 +39,22 @@ pub fn face_drag(cloth: &ClothSheet, k: usize) -> Vec3 {
     u * (0.5 * s.density * CD * (two_a * 0.5) * u.length())
 }
 
-/// 把"这一子步的介质阻力"注入 `cloth.vel`（`Δv_i = (F/3)·inv_mass_i·h`；长度不符首行短路）。
+/// 把"这一子步的介质阻力"注入 `cloth.vel`（`Δv_i = (F/3)·inv_mass_i·h`；长度不符首行短路），
+/// 并把**反作用冲量** `−F·h` 累加进 `cloth.medium_reaction`（门面 tick 末读走并清零）。
 pub(crate) fn inject(cloth: &mut ClothSheet, h: f32) {
     if cloth.medium.len() != cloth.tris.len() || h <= 0.0 {
         return;
     }
     let mut dv = vec![Vec3::ZERO; cloth.pos.len()];
     for k in 0..cloth.tris.len() {
-        let share = face_drag(cloth, k) * (1.0 / 3.0); // 真空/退化面 = ZERO ⇒ 加它逐位不变
-        let t = cloth.tris[k];
-        let (i0, i1, i2) = (t[0] as usize, t[1] as usize, t[2] as usize);
-        dv[i0] += share * (cloth.inv_mass[i0] * h);
-        dv[i1] += share * (cloth.inv_mass[i1] * h);
-        dv[i2] += share * (cloth.inv_mass[i2] * h);
+        let f = face_drag(cloth, k); // 真空/退化面 = ZERO ⇒ 下方的加/减都逐位不变
+        let [i0, i1, i2] = cloth.tris[k].map(|x| x as usize);
+        cloth.medium_reaction[k] -= f * h;
+        dv[i0] += f * (1.0 / 3.0) * (cloth.inv_mass[i0] * h);
+        dv[i1] += f * (1.0 / 3.0) * (cloth.inv_mass[i1] * h);
+        dv[i2] += f * (1.0 / 3.0) * (cloth.inv_mass[i2] * h);
     }
-    for (v, d) in cloth.vel.iter_mut().zip(dv) {
-        *v += d;
-    }
+    cloth.vel.iter_mut().zip(&dv).for_each(|(v, d)| *v += *d);
 }
 
 /// 面元阻力系数（与 `world_step/medium.rs` 的 `DRAG_CD` 同值；专用 setter 属后续片）。
