@@ -1495,6 +1495,11 @@
    "max_fn_lines": 60,
    "max_type_members": 0
   },
+  "crates/vxl-phys/tests/splash_scene.rs": {
+   "file_lines": 140,
+   "max_fn_lines": 34,
+   "max_type_members": 0
+  },
   "crates/vxl-phys/tests/voxel_mesh_extract_rest.rs": {
    "file_lines": 86,
    "max_fn_lines": 39,
