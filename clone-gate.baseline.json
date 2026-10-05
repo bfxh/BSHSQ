@@ -7,7 +7,6 @@
   "crates/vxl-phys-narrow/src/gjk.rs": 1,
   "crates/vxl-phys-narrow/src/mesh_store.rs": 1,
   "crates/vxl-phys-narrow/src/polytope.rs": 1,
-  "crates/vxl-phys-narrow/src/tests.rs": 2,
   "crates/vxl-phys-soft/src/cloth.rs": 1,
   "crates/vxl-phys-soft/src/rope.rs": 1,
   "crates/vxl-phys-terrain/src/mesh.rs": 2,

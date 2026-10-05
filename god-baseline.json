@@ -1541,8 +1541,8 @@
    "max_type_members": 0
   },
   "scripts/gates_common.py": {
-   "file_lines": 472,
-   "max_fn_lines": 75,
+   "file_lines": 504,
+   "max_fn_lines": 49,
    "max_type_members": 0
   },
   "scripts/glob_gate.py": {
