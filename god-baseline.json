@@ -1460,6 +1460,11 @@
    "max_fn_lines": 58,
    "max_type_members": 0
   },
+  "crates/vxl-phys/tests/wet_cloth_gap.rs": {
+   "file_lines": 121,
+   "max_fn_lines": 41,
+   "max_type_members": 0
+  },
   "scripts/args_gate.py": {
    "file_lines": 30,
    "max_fn_lines": 10,
