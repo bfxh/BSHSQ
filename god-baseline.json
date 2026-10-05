@@ -771,9 +771,14 @@
    "max_type_members": 3
   },
   "crates/vxl-phys-soft/src/cloth.rs": {
-   "file_lines": 522,
-   "max_fn_lines": 43,
-   "max_type_members": 24
+   "file_lines": 531,
+   "max_fn_lines": 42,
+   "max_type_members": 23
+  },
+  "crates/vxl-phys-soft/src/cloth/bend.rs": {
+   "file_lines": 36,
+   "max_fn_lines": 7,
+   "max_type_members": 2
   },
   "crates/vxl-phys-soft/src/cloth/damage.rs": {
    "file_lines": 27,
@@ -797,7 +802,7 @@
   },
   "crates/vxl-phys-soft/src/cloth_medium.rs": {
    "file_lines": 62,
-   "max_fn_lines": 17,
+   "max_fn_lines": 16,
    "max_type_members": 0
   },
   "crates/vxl-phys-soft/src/cloth_self_collide_pass.rs": {
@@ -821,8 +826,8 @@
    "max_type_members": 0
   },
   "crates/vxl-phys-soft/src/cloth_tear.rs": {
-   "file_lines": 152,
-   "max_fn_lines": 23,
+   "file_lines": 149,
+   "max_fn_lines": 20,
    "max_type_members": 8
   },
   "crates/vxl-phys-soft/src/lib.rs": {
@@ -1291,8 +1296,8 @@
    "max_type_members": 10
   },
   "crates/vxl-phys/src/world_soft_reaction.rs": {
-   "file_lines": 80,
-   "max_fn_lines": 31,
+   "file_lines": 88,
+   "max_fn_lines": 21,
    "max_type_members": 0
   },
   "crates/vxl-phys/src/world_step.rs": {
@@ -1491,8 +1496,8 @@
    "max_type_members": 0
   },
   "crates/vxl-phys/tests/wet_cloth_two_way.rs": {
-   "file_lines": 101,
-   "max_fn_lines": 19,
+   "file_lines": 106,
+   "max_fn_lines": 18,
    "max_type_members": 0
   },
   "scripts/args_gate.py": {
@@ -2263,6 +2268,10 @@
    "fields": 3,
    "methods": 0
   },
+  "crates/vxl-phys-soft::BendSet": {
+   "fields": 0,
+   "methods": 2
+  },
   "crates/vxl-phys-soft::BodyCoupling": {
    "fields": 4,
    "methods": 0
@@ -2284,7 +2293,7 @@
    "methods": 0
   },
   "crates/vxl-phys-soft::ClothSheet": {
-   "fields": 24,
+   "fields": 23,
    "methods": 36
   },
   "crates/vxl-phys-soft::ContactTuning": {

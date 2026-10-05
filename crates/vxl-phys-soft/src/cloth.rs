@@ -24,10 +24,15 @@ use vxl_phys_core::Vec3;
 
 pub mod damage;
 pub mod plastic;
+// **弯曲约束族并组**（腾 `ClothSheet` 成员位；见 `cloth/bend.rs`）——`soft/lib.rs` 零预算，
+// 所以走 `cloth.rs` 的子模块（不需要 crate 级 `mod`）。
+mod bend;
+use bend::BendSet;
 // **布 × 介质（湿布）**：力必须进 `predict`（XPBD 是位置式，速度级注入会被 `write_back` 吞掉）。
-// 走 `#[path]` 子模块（`soft/lib.rs` 零预算）；门面的反作用段要 `face_drag` ⇒ 本模块 `pub`。
+// 走 `#[path]` 子模块（`soft/lib.rs` 零预算）；反作用冲量落在 `ClothSheet::medium_reaction`
+// （`pub` 数据场），公式不外露 ⇒ 本模块保持私有。
 #[path = "cloth_medium.rs"]
-pub mod cloth_medium;
+mod cloth_medium;
 
 /// **球采样接触投影 + 库仑锥**（从 `rope.rs::project_contacts` **纯搬移**——rope 现委托本函数
 /// ⇒ 那边净缩、这边新增，口径逐字不变）：法向推出（只有真穿透才推 ⇒ 无恢复系数）+
@@ -119,10 +124,8 @@ pub struct ClothSheet {
     pub cons: Vec<[u32; 2]>,
     pub(crate) rest: Vec<f32>,
     pub(crate) lambda: Vec<f32>,
-    /// **弯曲约束**（二环对；`[min, max]` 有序，插入序见 `new`）。
-    pub(crate) bend: Vec<[u32; 2]>,
-    pub(crate) bend_rest: Vec<f32>,
-    pub(crate) bend_lambda: Vec<f32>,
+    /// **弯曲约束族**（二环对 + 注册长度 + XPBD 乘子并组；见 `cloth/bend.rs`）。
+    pub(crate) bend: BendSet,
     /// 弯曲 compliance（默认 `Soft` 档；`f32::INFINITY` ⇒ 关弯曲）。
     pub bend_compliance: f32,
     /// 距离约束 compliance（m/N；`Stiffness::alpha`）。
@@ -149,6 +152,10 @@ pub struct ClothSheet {
     /// **介质采样 scratch（布 × 液，2026-10-05）**：长度 = `tris.len()` 时逐面生效；
     /// **空 = 关**（默认）⇒ 默认档逐位不变。门面每 tick 按**面心**填（见 `cloth_medium`）。
     pub medium: Vec<MediumSample>,
+    /// **逐面反作用冲量 scratch**（N·s；布 → 介质）：`inject` 每子步累加 `−F·h`，
+    /// 门面每 tick 末读走并**原地清零**（`world_soft_reaction::cloth_medium_reaction`）。
+    /// 长度 = `tris.len()`（`step` 里补），所以"有无介质"由 `medium` 判定 ⇒ 逐位不变。
+    pub medium_reaction: Vec<Vec3>,
 }
 
 impl ClothSheet {
@@ -181,9 +188,7 @@ impl ClothSheet {
             rest,
             lambda: Vec::new(),
             compliance: stiffness.alpha(),
-            bend,
-            bend_rest,
-            bend_lambda: Vec::new(),
+            bend: BendSet::new(bend, bend_rest),
             bend_compliance: Stiffness::Soft.alpha(),
             substeps: 8,
             iterations: 1,
@@ -195,6 +200,7 @@ impl ClothSheet {
             aero: ClothAero::default(),
             damage: damage::Damage::default(),
             medium: Vec::new(),
+            medium_reaction: Vec::new(),
         }
     }
 
@@ -236,8 +242,11 @@ impl ClothSheet {
         if self.lambda.len() != self.cons.len() {
             self.lambda = vec![0.0; self.cons.len()];
         }
-        if self.bend_lambda.len() != self.bend.len() {
-            self.bend_lambda = vec![0.0; self.bend.len()];
+        if self.bend.lambda.len() != self.bend.pairs.len() {
+            self.bend.lambda = vec![0.0; self.bend.pairs.len()];
+        }
+        if self.medium_reaction.len() != self.tris.len() {
+            self.medium_reaction.resize(self.tris.len(), Vec3::ZERO);
         }
         self.reset_body_state(bodies.len());
         let h = dt / self.substeps.max(1) as f32;
@@ -294,7 +303,7 @@ impl ClothSheet {
         for l in self.lambda.iter_mut() {
             *l = 0.0;
         }
-        for l in self.bend_lambda.iter_mut() {
+        for l in self.bend.lambda.iter_mut() {
             *l = 0.0;
         }
         let a_tilde = self.compliance / (h * h);
@@ -322,7 +331,7 @@ impl ClothSheet {
         if !a_tilde_bend.is_finite() {
             return;
         }
-        for (k, [i, j]) in self.bend.iter().enumerate() {
+        for (k, [i, j]) in self.bend.pairs.iter().enumerate() {
             if self.damage.tear.torn_bend.get(k).copied().unwrap_or(false) {
                 continue; // **已撕裂**：撕口两侧的弯曲刚度也该消失（见 `Tearing::torn_bend`）
             }
@@ -337,9 +346,9 @@ impl ClothSheet {
                 continue;
             }
             let dir = d * (1.0 / len);
-            let c = len - self.bend_rest[k];
-            let dl = (-c - a_tilde_bend * self.bend_lambda[k]) / (w + a_tilde_bend);
-            self.bend_lambda[k] += dl;
+            let c = len - self.bend.rest[k];
+            let dl = (-c - a_tilde_bend * self.bend.lambda[k]) / (w + a_tilde_bend);
+            self.bend.lambda[k] += dl;
             self.pos[i] -= dir * (self.inv_mass[i] * dl);
             self.pos[j] += dir * (self.inv_mass[j] * dl);
         }
@@ -421,7 +430,7 @@ impl ClothSheet {
 
     /// 弯曲对的条数（判据/诊断用）。
     pub fn bend_count(&self) -> usize {
-        self.bend.len()
+        self.bend.pairs.len()
     }
 }
 

@@ -96,14 +96,14 @@ impl ClothSheet {
             self.damage.plastic.strain[k] += step;
         }
         if self.damage.plastic.bend {
-            for k in 0..self.bend.len() {
+            for k in 0..self.bend.pairs.len() {
                 if self.damage.tear.torn_bend.get(k).copied().unwrap_or(false) {
                     continue; // 已撕裂的弯曲对：与 `cons` 同口径
                 }
-                let [i, j] = self.bend[k];
+                let [i, j] = self.bend.pairs[k];
                 flow_pair(
                     &self.pos,
-                    &mut self.bend_rest[k],
+                    &mut self.bend.rest[k],
                     i as usize,
                     j as usize,
                     gy,
@@ -120,7 +120,7 @@ impl ClothSheet {
 
     /// 第 `k` 条**弯曲对（二环对）**的当前注册长度（判据仪器）。
     pub fn bend_rest_of(&self, k: usize) -> f32 {
-        self.bend_rest[k]
+        self.bend.rest[k]
     }
 
     /// 第 `k` 条边的**累计塑性应变**（诊断/判据读；未流动过 ⇒ `0`）。
