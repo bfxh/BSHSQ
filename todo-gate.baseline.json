@@ -5,6 +5,5 @@
   "crates/vxl-phys-gpu/src/mapped.rs": 1,
   "crates/vxl-phys-narrow/src/gjk.rs": 1,
   "crates/vxl-phys-narrow/src/simd.rs": 1,
-  "crates/vxl-phys-narrow/src/tests.rs": 2,
   "crates/vxl-phys/tests/debris_mass.rs": 1
 }

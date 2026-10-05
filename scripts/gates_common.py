@@ -187,6 +187,41 @@ def cyclomatic(body):
 _FN_RE = re.compile(r"\bfn\b")
 
 
+def _skip_generics_to_paren(src, j):
+    """从 `j` 起跳过泛型 `<...>`（跟踪深度）直到参数表的 `(`；越界返回 `len(src)`。"""
+    while j < len(src) and src[j] != "(":
+        if src[j] == "<":
+            depth = 1
+            j += 1
+            while j < len(src) and depth:
+                if src[j] == "<":
+                    depth += 1
+                elif src[j] == ">":
+                    depth -= 1
+                j += 1
+            continue
+        j += 1
+    return j
+
+
+def _match_span(src, start, open_ch, close_ch):
+    """`start` 处是 `open_ch`：返回其**匹配** `close_ch` 的下标；不配对返回 `None`。
+
+    参数表 `()` 与函数体 `{}` 共用同一套配平（掩码纪律：注释/字符串里的括号已抹掉）。
+    """
+    depth = 0
+    k = start
+    while k < len(src):
+        if src[k] == open_ch:
+            depth += 1
+        elif src[k] == close_ch:
+            depth -= 1
+            if depth == 0:
+                return k
+        k += 1
+    return None
+
+
 def iter_fns(src):
     """产出每个带函数体的 `fn` 的指标字典。src 已是掩码后文本。"""
     out = []
@@ -200,32 +235,13 @@ def iter_fns(src):
         name = nm.group(0)
         j += nm.end()
         # 跳过泛型 <...> 找到参数列表 '('（跟踪 < > 深度）
-        k = j
-        while k < len(src) and src[k] != "(":
-            if src[k] == "<":
-                depth = 1
-                k += 1
-                while k < len(src) and depth:
-                    if src[k] == "<":
-                        depth += 1
-                    elif src[k] == ">":
-                        depth -= 1
-                    k += 1
-                continue
-            k += 1
+        k = _skip_generics_to_paren(src, j)
         if k >= len(src):
             continue
         # 找匹配 ')'
-        paren = 0
-        p = k
-        while p < len(src):
-            if src[p] == "(":
-                paren += 1
-            elif src[p] == ")":
-                paren -= 1
-                if paren == 0:
-                    break
-            p += 1
+        p = _match_span(src, k, "(", ")")
+        if p is None:
+            continue
         args_span = src[k + 1 : p]
         # 参数列表之后：跳过返回类型 / where，找 '{' 或 ';'
         body_start = None
@@ -241,16 +257,9 @@ def iter_fns(src):
         if body_start is None:
             continue  # trait 签名 / extern 声明，无函数体
         # 找匹配 '}'
-        depth2 = 0
-        s = body_start
-        while s < len(src):
-            if src[s] == "{":
-                depth2 += 1
-            elif src[s] == "}":
-                depth2 -= 1
-                if depth2 == 0:
-                    break
-            s += 1
+        s = _match_span(src, body_start, "{", "}")
+        if s is None:
+            s = len(src)
         body = src[body_start + 1 : s]
         out.append(
             {
@@ -292,6 +301,23 @@ def ratchet_check(baseline, current):
     return viol
 
 
+def slack_check(baseline, current):
+    """基线里比现状**松**的条目（陈旧额度），返回提示清单（字符串）。
+
+    `ratchet_check` 只管「涨」——**条目消失或计数下降它一声不吭**，于是死额度会
+    静默留在基线里，把"合计 N"这个指标稀释成一个再也对不上的数（实测 2026-10-05：
+    linelen 基线 632 里 207 来自一个已删掉的 example；clone/glob/todo/cyc/nest 各有
+    1~3 条陈尸）。这里把松量量出来**只提示不判红**——删代码的 PR 不该被门卡住，
+    但不该让额度悄悄烂掉。`god_gate` 早已是这套语义（shrank ⇒ 提示 `--write-baseline`）。
+    """
+    slack = []
+    for rel, base in sorted(baseline.items()):
+        cur = current.get(rel, 0)
+        if cur < base:
+            slack.append(f"{rel}: 基线 {base} → 现状 {cur}")
+    return slack
+
+
 # --------------------------------------------------------------------------
 # 统一入口 A：按文件计数的门（unwrap/unsafe/glob/todo/linelen/god）
 # --------------------------------------------------------------------------
@@ -322,6 +348,9 @@ def run_gate(name, scan_fn, git_tracked, write, top, list_only):
         for v in viol[:30]:
             print("   " + v)
         return 1
+    slack = slack_check(baseline, current)
+    if slack:
+        print(f"  （{len(slack)} 条基线可收紧/可清理，跑 `--write` 更新）")
     print(f"✅ {name}: 0 新增（基线合计 {sum(baseline.values())}）")
     return 0
 
@@ -373,6 +402,9 @@ def fn_metric_gate(name, metric_key, soft, hard, git_tracked, write, top, list_o
         for v in viol[:30]:
             print("   " + v)
         return 1
+    slack = slack_check(baseline, per_file)
+    if slack:
+        print(f"  （{len(slack)} 条基线可收紧/可清理，跑 `--write` 更新）")
     print(f"✅ {name}: 0 新增（基线超 soft 计数 {sum(baseline.values())}）")
     return 0
 
