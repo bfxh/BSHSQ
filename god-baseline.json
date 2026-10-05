@@ -1410,6 +1410,11 @@
    "max_fn_lines": 38,
    "max_type_members": 4
   },
+  "crates/vxl-phys/tests/provider_pair_gaps.rs": {
+   "file_lines": 84,
+   "max_fn_lines": 21,
+   "max_type_members": 0
+  },
   "crates/vxl-phys/tests/provider_shape_coverage.rs": {
    "file_lines": 213,
    "max_fn_lines": 38,
