@@ -19,11 +19,15 @@ use crate::cloth_self_collision::SelfContacts;
 use crate::params::Stiffness;
 use crate::rigid::RigidProxy;
 use std::collections::HashSet;
-use vxl_phys_core::interop::{InteropContact, ProviderColliders};
+use vxl_phys_core::interop::{InteropContact, MediumSample, ProviderColliders};
 use vxl_phys_core::Vec3;
 
 pub mod damage;
 pub mod plastic;
+// **布 × 介质（湿布）**：力必须进 `predict`（XPBD 是位置式，速度级注入会被 `write_back` 吞掉）。
+// 走 `#[path]` 子模块：`soft/lib.rs` 只剩 0 行预算，加不了 crate 级 `mod`。
+#[path = "cloth_medium.rs"]
+mod cloth_medium;
 
 /// **球采样接触投影 + 库仑锥**（从 `rope.rs::project_contacts` **纯搬移**——rope 现委托本函数
 /// ⇒ 那边净缩、这边新增，口径逐字不变）：法向推出（只有真穿透才推 ⇒ 无恢复系数）+
@@ -142,6 +146,9 @@ pub struct ClothSheet {
     /// **损伤域**（撕裂 + 塑性**并组**：成员棘轮 23/24 顶格 ⇒ 按 `BodyCoupling` / `SelfContacts`
     /// 先例合并；两子域各自默认关 ⇒ 默认档逐位不变。见 `cloth/damage.rs`）。
     pub damage: damage::Damage,
+    /// **介质采样 scratch（布 × 液，2026-10-05）**：长度 = `tris.len()` 时逐面生效；
+    /// **空 = 关**（默认）⇒ 默认档逐位不变。门面每 tick 按**面心**填（见 `cloth_medium`）。
+    pub medium: Vec<MediumSample>,
 }
 
 impl ClothSheet {
@@ -161,10 +168,7 @@ impl ClothSheet {
         // （`new` 顶 god 门最长函数棘轮，2026-09-29 抽出）。
         let (cons, rest, bend, bend_rest) = topology(&tris, &points, n);
         let mass = shell_mass(&tris, &points, rho, t);
-        let inv_mass = mass
-            .iter()
-            .map(|&m| if m > 0.0 { 1.0 / m } else { 0.0 })
-            .collect();
+        let inv_mass = inv_mass_of(&mass);
         let self_contacts = SelfContacts::new(t * 0.5, &cons, &bend);
         Self {
             pos: points,
@@ -190,6 +194,7 @@ impl ClothSheet {
             self_contacts,
             aero: ClothAero::default(),
             damage: damage::Damage::default(),
+            medium: Vec::new(),
         }
     }
 
@@ -266,6 +271,9 @@ impl ClothSheet {
         if self.aero.enabled {
             self.apply_aero(h);
         }
+        // **布 × 介质**（`medium` 空 ⇒ 首行短路）：与气动**同段位**、在 `prev = pos` 之前把
+        // `F/m·h` 加进 `vel` —— XPBD 是位置式，晚于此处的注入会被 `write_back` 重算吞掉。
+        cloth_medium::inject(self, h);
         for i in 0..self.pos.len() {
             if self.inv_mass[i] == 0.0 {
                 self.prev[i] = self.pos[i];
@@ -483,6 +491,13 @@ fn pair_lengths(pairs: &[[u32; 2]], points: &[Vec3]) -> Vec<f32> {
     pairs
         .iter()
         .map(|[a, b]| (points[*b as usize] - points[*a as usize]).length())
+        .collect()
+}
+
+/// 质量 → 逆质量（`m ≤ 0` ⇒ 0 = 钉住/退化，同 `set_pinned` 口径）。从 `new` 抽出腾函数行数。
+fn inv_mass_of(mass: &[f32]) -> Vec<f32> {
+    mass.iter()
+        .map(|&m| if m > 0.0 { 1.0 / m } else { 0.0 })
         .collect()
 }
 

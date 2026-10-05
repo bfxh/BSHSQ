@@ -761,9 +761,9 @@
    "max_type_members": 3
   },
   "crates/vxl-phys-soft/src/cloth.rs": {
-   "file_lines": 507,
-   "max_fn_lines": 45,
-   "max_type_members": 23
+   "file_lines": 522,
+   "max_fn_lines": 43,
+   "max_type_members": 24
   },
   "crates/vxl-phys-soft/src/cloth/damage.rs": {
    "file_lines": 27,
@@ -784,6 +784,11 @@
    "file_lines": 278,
    "max_fn_lines": 55,
    "max_type_members": 7
+  },
+  "crates/vxl-phys-soft/src/cloth_medium.rs": {
+   "file_lines": 53,
+   "max_fn_lines": 28,
+   "max_type_members": 0
   },
   "crates/vxl-phys-soft/src/cloth_self_collide_pass.rs": {
    "file_lines": 102,
@@ -863,6 +868,11 @@
   "crates/vxl-phys-soft/tests/cloth_contact.rs": {
    "file_lines": 151,
    "max_fn_lines": 38,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys-soft/tests/cloth_medium.rs": {
+   "file_lines": 95,
+   "max_fn_lines": 21,
    "max_type_members": 0
   },
   "crates/vxl-phys-soft/tests/cloth_minimal.rs": {
@@ -1271,8 +1281,8 @@
    "max_type_members": 10
   },
   "crates/vxl-phys/src/world_step.rs": {
-   "file_lines": 353,
-   "max_fn_lines": 99,
+   "file_lines": 382,
+   "max_fn_lines": 95,
    "max_type_members": 6
   },
   "crates/vxl-phys/src/world_step/aero.rs": {
@@ -1461,8 +1471,8 @@
    "max_type_members": 0
   },
   "crates/vxl-phys/tests/wet_cloth_gap.rs": {
-   "file_lines": 121,
-   "max_fn_lines": 41,
+   "file_lines": 133,
+   "max_fn_lines": 31,
    "max_type_members": 0
   },
   "scripts/args_gate.py": {
@@ -2254,7 +2264,7 @@
    "methods": 0
   },
   "crates/vxl-phys-soft::ClothSheet": {
-   "fields": 23,
+   "fields": 24,
    "methods": 36
   },
   "crates/vxl-phys-soft::ContactTuning": {
