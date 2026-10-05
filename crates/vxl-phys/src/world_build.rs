@@ -77,17 +77,10 @@ impl World {
 
     /// 加入高度场：地形账本 + 静态 marker 体（宽相经 marker AABB 参与对生成）。
     pub fn add_heightfield(&mut self, hf: HeightField) -> BodyId {
-        // **M2 余项迁移（`OPEN-PROBLEMS.md` #6）**：高度场不再走 `hf_bounds` 旁路，而是注册成
-        // **provider** ⇒ 宽相走 `provider_bounds`、窄相走 provider 分支，地形因此也拿到
-        // **速度自适应接触带**（此前旁路在"动的体跨过皮肤带"那类会漏接触）。
-        let id = self.providers.push_heightfield(hf);
-        self.provider_bounds
-            .push(self.providers.bounds(id).unwrap_or(Aabb {
-                min: Vec3::ZERO,
-                max: Vec3::ZERO,
-            }));
-        let (pos, rot) = vxl_phys_terrain::MARKER_TRANSFORM;
-        self.bodies.push_static(Shape::Provider(id), pos, rot)
+        // **M2 余项迁移（`OPEN-PROBLEMS.md` #6）**：不再走 `hf_bounds` 旁路，改注册成 **provider**
+        // ⇒ 地形也拿到 provider 的**速度自适应接触带**。本体在 `providers_colliders`（自由函数：
+        // 本文件受行数棘轮，本体搬出后**净缩**）。
+        crate::providers::add_heightfield(self, hf)
     }
 
     /// 注册一个**体素体**为碰撞提供者（新域接入的第一条路径，ROUTE §3/§5）：

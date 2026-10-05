@@ -1,17 +1,5 @@
 //! types：从 lib.rs 按域拆出（纯搬移，语义未改）。
 
-/// 提供者条目（统一 id 空间：体素体 / 高斯喷溅场…）。
-pub enum ProviderEntry {
-    Voxel(vxl_phys_terrain::voxel::VoxelVolume),
-    /// **高斯喷溅场**（喷溅域的物理代理：隐式场提供者，见 `vxl-phys-splat`）。
-    Splat(vxl_phys_splat::GaussianSplatField),
-    /// **三角网格**（网格域：静态关卡几何，薄壳接触，见 `vxl-phys-terrain::mesh`）。
-    Mesh(vxl_phys_terrain::mesh::TriMesh),
-    /// **高度场**（地形：M2 余项迁入 provider 通道 —— 迁入后地形也拿到 provider 的
-    /// **速度自适应接触带**，见 `OPEN-PROBLEMS.md` #6；`HeightField` 早已实现 `CollisionProvider`）。
-    HeightField(vxl_phys_narrow::heightfield::HeightField),
-}
-
 /// **效应键**（`PLAN-COUPLING.md` §3.4 的 I3，本仓第一次落地；V2 片只登记两个
 /// **消费体素格**的效应）。语义：一个键在一个体素域、一个 tick 内只允许**一条路径**施加；
 /// 第二条路径 ⇒ fail-loud（`Err`），不静默二选一。

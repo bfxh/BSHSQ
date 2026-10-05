@@ -1,5 +1,19 @@
 //! providers：从 lib.rs 按域拆出（纯搬移，语义未改）。
 use super::*;
+
+// **提供者条目**（从 `types.rs` 搬来：#6 迁入高度场后本枚举与 `providers.rs` 同生共死，
+// 搬来让 `types.rs` 净缩 —— 那个文件**没有函数**，god 门"涨行必须缩函数"的账在那里无法支付）。
+/// 提供者条目（统一 id 空间：体素体 / 高斯喷溅场…）。
+pub enum ProviderEntry {
+    Voxel(vxl_phys_terrain::voxel::VoxelVolume),
+    /// **高斯喷溅场**（喷溅域的物理代理：隐式场提供者，见 `vxl-phys-splat`）。
+    Splat(vxl_phys_splat::GaussianSplatField),
+    /// **三角网格**（网格域：静态关卡几何，薄壳接触，见 `vxl-phys-terrain::mesh`）。
+    Mesh(vxl_phys_terrain::mesh::TriMesh),
+    /// **高度场**（地形：M2 余项迁入 provider 通道 —— 迁入后地形也拿到 provider 的
+    /// **速度自适应接触带**，见 `OPEN-PROBLEMS.md` #6；`HeightField` 早已实现 `CollisionProvider`）。
+    HeightField(vxl_phys_narrow::heightfield::HeightField),
+}
 use vxl_phys_core::interop::CollisionProvider;
 
 /// 外部碰撞提供者集合（门面持有；实现 `interop::ProviderColliders` 供窄相查询）。
@@ -31,13 +45,6 @@ impl Providers {
     pub fn push_mesh(&mut self, mesh: vxl_phys_terrain::mesh::TriMesh) -> u32 {
         let id = self.entries.len() as u32;
         self.entries.push(ProviderEntry::Mesh(mesh));
-        id
-    }
-
-    /// 注册**高度场**（同 id 空间；`OPEN-PROBLEMS.md` #6 的迁移落点）。
-    pub fn push_heightfield(&mut self, hf: vxl_phys_narrow::heightfield::HeightField) -> u32 {
-        let id = self.entries.len() as u32;
-        self.entries.push(ProviderEntry::HeightField(hf));
         id
     }
 
@@ -96,87 +103,8 @@ impl Providers {
     }
 }
 
-impl vxl_phys_core::interop::ProviderColliders for Providers {
-    fn bounds(&self, id: u32) -> Option<Aabb> {
-        match self.entries.get(id as usize)? {
-            ProviderEntry::Voxel(v) => Some(v.bounds()),
-            ProviderEntry::Splat(f) => f.bounds(id),
-            ProviderEntry::Mesh(m) => m.bounds(id),
-            ProviderEntry::HeightField(h) => Some(h.bounds()),
-        }
-    }
-
-    fn contacts_box(
-        &self,
-        id: u32,
-        half: Vec3,
-        pos: Vec3,
-        rot: Quat,
-        skin: f32,
-        out: &mut Vec<vxl_phys_core::interop::InteropContact>,
-    ) -> bool {
-        match self.entries.get(id as usize) {
-            Some(ProviderEntry::Voxel(v)) => v.contacts_box(half, pos, rot, skin, out),
-            Some(ProviderEntry::Splat(f)) => f.contacts_box(id, half, pos, rot, skin, out),
-            Some(ProviderEntry::Mesh(m)) => m.contacts_box(id, half, pos, rot, skin, out),
-            Some(ProviderEntry::HeightField(h)) => h.contacts_box(half, pos, rot, skin, out),
-            None => false,
-        }
-    }
-
-    fn contacts_point(
-        &self,
-        id: u32,
-        p: Vec3,
-        skin: f32,
-        out: &mut Vec<vxl_phys_core::interop::InteropContact>,
-    ) -> bool {
-        match self.entries.get(id as usize) {
-            Some(ProviderEntry::Voxel(v)) => v.contacts_point(p, skin, out),
-            Some(ProviderEntry::Splat(f)) => f.contacts_point(id, p, skin, out),
-            Some(ProviderEntry::Mesh(m)) => m.contacts_point(id, p, skin, out),
-            Some(ProviderEntry::HeightField(h)) => h.contacts_point(p, skin, out),
-            None => false,
-        }
-    }
-
-    /// 流体边界口径：体素走内点鲁棒变体（截断 SDF 在薄壁内部被格间内面
-    /// 主导 ⇒ 中心差分法线可指向固体深处，投影穿壁隧逃——见切片1实测）；
-    /// 其余提供者（解析面/半空间无内点歧义）沿用 `contacts_point`。
-    ///
-    /// ⚠️ 这一条**仍是门面直派**、没有并进域 `CollisionProvider`：它是**流体专属的第二张面**
-    /// （刚体通道要的是"外点梯度"口径，流体投影要的是"内点最近真表面"口径），
-    /// 域 trait 上目前没有对应方法 ⇒ 要么先给四域各定一份边界口径，要么让流体自己
-    /// 按域问。别为了"看起来统一"把它塞进 `contacts_point`——那是两套语义。
-    fn contacts_point_boundary(
-        &self,
-        id: u32,
-        p: Vec3,
-        skin: f32,
-        out: &mut Vec<vxl_phys_core::interop::InteropContact>,
-    ) -> bool {
-        match self.entries.get(id as usize) {
-            Some(ProviderEntry::Voxel(v)) => {
-                vxl_phys_terrain::voxel::contacts_point_voxel_solid(v, p, skin, out)
-            }
-            _ => self.contacts_point(id, p, skin, out),
-        }
-    }
-
-    fn contacts_sphere(
-        &self,
-        id: u32,
-        center: Vec3,
-        radius: f32,
-        skin: f32,
-        out: &mut Vec<vxl_phys_core::interop::InteropContact>,
-    ) -> bool {
-        match self.entries.get(id as usize) {
-            Some(ProviderEntry::Voxel(v)) => v.contacts_sphere(center, radius, skin, out),
-            Some(ProviderEntry::Splat(f)) => f.contacts_sphere(id, center, radius, skin, out),
-            Some(ProviderEntry::Mesh(m)) => m.contacts_sphere(id, center, radius, skin, out),
-            Some(ProviderEntry::HeightField(h)) => h.contacts_sphere(center, radius, skin, out),
-            None => false,
-        }
-    }
-}
+// `ProviderColliders` 实现 + `push_heightfield`：整块搬到子模块（本文件受行数棘轮，
+// #6 加第四类分派臂前必须先净缩）。
+#[path = "providers_colliders.rs"]
+mod colliders;
+pub(crate) use colliders::add_heightfield;
