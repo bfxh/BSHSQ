@@ -1,5 +1,11 @@
 //! fluid_access：从 lib.rs 按域拆出（纯搬移，语义未改）。
 use super::*;
+use vxl_phys_core::interop::{BridgeKind, StateBridge};
+
+// 晶格初始化原语：单开文件让本文件**净缩**（`new` 从这里拿回 4 行写法的两行声明）。
+#[path = "fluid_access/lattice.rs"]
+mod lattice;
+use lattice::{lattice_positions, lattice_w_sum};
 
 impl FluidSystem {
     /// 晶格块初始化：粒子位于 `origin + (i + ½)·spacing`（三轴 `dims` 个），
@@ -12,34 +18,9 @@ impl FluidSystem {
         let w0 = k6 * h2 * h2 * h2; // (h²)³
         let b_tait = cfg.sound_speed * cfg.sound_speed * cfg.rest_density / cfg.gamma_tait;
         let n = dims[0] * dims[1] * dims[2];
-        let mut pos = Vec::with_capacity(n);
-        for i in 0..dims[0] {
-            for j in 0..dims[1] {
-                for k in 0..dims[2] {
-                    pos.push(Vec3::new(
-                        origin.x + (i as f32 + 0.5) * spacing,
-                        origin.y + (j as f32 + 0.5) * spacing,
-                        origin.z + (k as f32 + 0.5) * spacing,
-                    ));
-                }
-            }
-        }
+        let pos = lattice_positions(origin, dims, spacing);
         // 质量标定：对晶格求 Σ W（间距 spacing 的无限晶格截断到核半径内）。
-        let mut wsum = 0.0f32;
-        let side = (h / spacing.max(1e-6)).ceil() as i32;
-        for i in -side..=side {
-            for j in -side..=side {
-                for k in -side..=side {
-                    let d = Vec3::new(i as f32 * spacing, j as f32 * spacing, k as f32 * spacing);
-                    let r2 = d.length_squared();
-                    if r2 <= h2 {
-                        let t = h2 - r2;
-                        wsum += k6 * t * t * t;
-                    }
-                }
-            }
-        }
-        let mass = cfg.rest_density / wsum;
+        let mass = cfg.rest_density / lattice_w_sum(h, h2, k6, spacing);
         Self {
             // 接触带 0.15h：粒子静置在 sdf = skin 处，带越薄壁邻密度亏越小
             // （镜像鬼影对贴壁层全额补回固体侧缺失的核质量）。带内最深穿透
@@ -183,5 +164,24 @@ impl FluidSystem {
 
     pub fn set_boundaries(&mut self, ids: &[u32]) {
         self.boundaries = ids.to_vec();
+    }
+}
+
+/// **状态桥（`StateBridge`）**：流体粒子段的导出/导入 —— `ROUTE.md` §5 ②表示层的**第一个**真实现
+/// （此前该 trait 全仓**零实现**）。
+///
+/// `export_positions` 按索引序只写**流体段**（2b 边界粒子每 tick 由门面重建，不算流体状态）；
+/// `import_positions` 长度必须**恰好**等于流体段，否则**拒绝且一字不动**（返回 `false`）；
+/// 成功后**同时清速度** —— 导入的语义是"把粒子放到给定位置"，不是凭空注入动能。
+// 紧凑写法（god 门文件行数棘轮）：`#[rustfmt::skip]` 保持单行 fn，本仓既有先例。
+#[rustfmt::skip]
+impl StateBridge for FluidSystem {
+    fn kind(&self) -> BridgeKind { BridgeKind::Particle }
+    fn export_positions(&self, out: &mut Vec<Vec3>) { out.extend_from_slice(&self.pos[..self.n_fluid]); }
+    fn import_positions(&mut self, src: &[Vec3]) -> bool {
+        if src.len() != self.n_fluid { return false; }
+        self.pos[..self.n_fluid].copy_from_slice(src);
+        self.vel[..self.n_fluid].fill(Vec3::ZERO);
+        true
     }
 }

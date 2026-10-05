@@ -124,8 +124,14 @@
 >   `crates/vxl-phys/tests/cloth_wind_scene.rs`（竖直旗面顶边钉住：**无风对照**自由节点
 >   `mean_x ≡ 0` 且 `aero.enabled == false`；**有风**吹向 `+x`）。此前 `cloth.aero` 只有软体
 >   crate 内部测试、**门面不接** ⇒ "旗飘"进不了 CI 场景；
-> - **喷溅 × {刚/布}（代理/场）** —— 部分：splat 作为 `CollisionProvider`/`MediumField` 已落地，
->   "扫描场景起步"（splat→初始粒子/代理的反向导入）仍未做；
+> - **喷溅 × {刚/布}（代理/场）** —— 部分：splat 作为 `CollisionProvider`/`MediumField` 已落地；
+>   "扫描场景起步"（splat→初始粒子/代理的反向导入）**仍未做**，但**导入通道已开**（见下条）；
+> - **② 表示层 `StateBridge`** —— 🔶 **第一个真实现落地（2026-10-05）**：此前该 trait 全仓**零实现**
+>   （`import_positions` 的默认实现就是 `false`）。现在 `FluidSystem` 实现它：
+>   `export_positions` 按索引序只写**流体段**（2b 边界粒子不算流体状态）、
+>   `import_positions` 长度必须**恰好**相符（否则拒绝且一字不动），成功后**同时清速度**。
+>   判据 `crates/vxl-phys-fluid/tests/state_bridge_roundtrip.rs`（长度不符拒绝且逐位不动 /
+>   导入后位置逐值相等且速度归零 / **往返逐位幂等**）。⇒ "扫描起步"只差**splat→粒子的转换**那一步；
 > - **提供者对偶（provider×provider）** 与 **高度场 × 提供者** —— 已登记为**不受理**，
 >   现状由 `crates/vxl-phys/tests/provider_pair_gaps.rs` **钉住**（做对偶解法那天那两条会红 ⇒ 翻面）；
 >   影响目前为零（都是静态 Marker ⇒ 求解器本就不产约束）。
