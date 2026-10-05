@@ -25,9 +25,9 @@ use vxl_phys_core::Vec3;
 pub mod damage;
 pub mod plastic;
 // **布 × 介质（湿布）**：力必须进 `predict`（XPBD 是位置式，速度级注入会被 `write_back` 吞掉）。
-// 走 `#[path]` 子模块：`soft/lib.rs` 只剩 0 行预算，加不了 crate 级 `mod`。
+// 走 `#[path]` 子模块（`soft/lib.rs` 零预算）；门面的反作用段要 `face_drag` ⇒ 本模块 `pub`。
 #[path = "cloth_medium.rs"]
-mod cloth_medium;
+pub mod cloth_medium;
 
 /// **球采样接触投影 + 库仑锥**（从 `rope.rs::project_contacts` **纯搬移**——rope 现委托本函数
 /// ⇒ 那边净缩、这边新增，口径逐字不变）：法向推出（只有真穿透才推 ⇒ 无恢复系数）+

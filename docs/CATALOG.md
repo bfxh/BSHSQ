@@ -67,7 +67,7 @@
 | `vxl-phys-terrain` | 体素/地形 | `TerrainSet`（高度场账本）+ **`voxel::VoxelVolume`**（占据位图 + 局域 SDF + `CollisionProvider`）+ 贪心提取/球域切割 + **`mesh::TriMesh`**（任意三角网薄壳提供者 + 均匀网格加速）+ **`contacts_point_voxel_solid`**（流体边界终版口径：占据门 + 开放面推进） | core, narrow, broad | ✅（M3 第一块） | 🌤 每 tick（体素/网格查询在外层调用时进 🔥） |
 | `vxl-phys-destruction` | 断裂/碎块形状 | **策略件已在**（264 行）：`DestructionConfig`/`FragmentBudget`/`FractureDepth` + `impact_tiers`；机制侧（Voronoi 预断裂、`extract_boxes`/`spawn_box_debris`/`apply_impact_destruction`）在窄相与门面 ⚠️ **但本 crate 目前无消费方**（不在任何 `Cargo.toml` 的依赖里）⇒ 待决：**接线或合并** | — | ⚠️ **未接线**（2026-10-05 复核；原写 🦴"骨架"） | ❄️ |
 | `vxl-phys-soft` | 软体/布（XPBD） | 布/绳 XPBD（距离/结构/弯曲 + 薄壳质量 + 接触/反作用）、点-点/点-边自碰撞、自摩擦库仑锥、撕裂、塑性、气动（含升力）、粒子↔刚体耦合；判据 = crate 内 18 个测试 | core, aero | ✅（2026-10-05 复核；原写 🦴"参数骨架"） | 🔥 |
-| `vxl-phys-fluid` | 液体（SPH/PBF/FLIP） | **WCSPH 求解器**：poly6 密度（含自身项）/ spiky 对称压力梯度 / Tait γ=7 / Monaghan 人工黏度 + XSPH / 镜像鬼影边界密度；确定性均匀网格 27 邻域；SoA + 半隐式欧拉 4 子步（`FluidSystem`）；**`MediumField` 实现**（2a 采样侧，2026-09-22）：`sample`＝27 邻域 poly6 插值出 密度/流速/占用率（**只读、不改流场**）；`deposit` 显式留空待 2b（Akinci） | core | ✅（0.3 切片 1，CPU 档） | 🔥 每 tick（4 子步 × 27 邻域） |
+| `vxl-phys-fluid` | 液体（SPH/PBF/FLIP） | **WCSPH 求解器**：poly6 密度（含自身项）/ spiky 对称压力梯度 / Tait γ=7 / Monaghan 人工黏度 + XSPH / 镜像鬼影边界密度；确定性均匀网格 27 邻域；SoA + 半隐式欧拉 4 子步（`FluidSystem`）；**`MediumField` 实现**（2a 采样侧，2026-09-22）：`sample`＝27 邻域 poly6 插值出 密度/流速/占用率（**只读、不改流场**）；`deposit`＝**点式反作用沉积**（2026-10-05 落地：同一 poly6 权重分摊、`Σ m·Δv` 严格守恒；刚体仍走 2b，本通道供软体/布） | core | ✅（0.3 切片 1，CPU 档） | 🔥 每 tick（4 子步 × 27 邻域） |
 | `vxl-phys-wheeled` | 车辆（射线悬挂/轮胎） | 参数骨架 | — | 🦴 | 🌤 |
 | `vxl-phys-aero` | 风/气动（面元） | **T4 落地**（2026-09-28/29）：`face_force_tri` + `face_force_with_lift`（Bridson 线化阻力 + 线性升力）；消费方 = 门面 `aero_pass` 与 `vxl-phys-soft::cloth_aero` | core | ✅（2026-10-05 复核；原写 🦴"参数骨架"） | 🌤 |
 | `vxl-phys-marine` | 海洋/浮力 | 参数骨架 | — | 🦴 | 🌤 |
@@ -77,9 +77,9 @@
 > **⚠️ 2026-10-05 补正（液体行的 `deposit` 那句会误导）**：液体的**双向（2b）已经落地**，
 > 走的是**边界粒子**路线 —— `FluidSystem::boundary_reactions()` → 门面 `world_step::fluid_reaction_pass()`
 > （带时间加权账 `coupling::fluid_reaction_ledger`；判据 `vxl-phys-fluid/src/tests.rs` 的 2b 组 +
-> 门面 `tests/fluid_boundary.rs` / `fluid_reaction_torque.rs`）。**`MediumField::deposit` 对液体仍是 no-op**
-> （`fluid_medium.rs`）——那条通道是给 splat / 软体侧用的 2a 采样口，**不是** 2b 的实现位置。
-> ⇒ 读"`deposit` 留空待 2b"时别推出"液体还不能双向"。
+> 门面 `tests/fluid_boundary.rs` / `fluid_reaction_torque.rs`）。**刚体**的反作用走那条路线，
+> **不**经 `MediumField::deposit` —— 后者 2026-10-05 起是**软体/布**的点式沉积口
+> （`world_soft_reaction::cloth_medium_reaction`）。⇒ 两条通道各管一类受体，别混着读。
 
 ### 桥接层（对外/对工具）
 
