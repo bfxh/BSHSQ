@@ -113,8 +113,8 @@ acquire_timed
 
 # `determinism` / `m0_gates` 自报 PASS 且哈希与档内基线一致；`m1_islands` 只报比值（见下）。
 step determinism 0 cargo run --release -q -p vxl-phys --example determinism
-if ! grep -q "FINAL_HASH=0x711be572cfe0e7eefb2cf51550fd4dd5" "${out}/gate_determinism.log"; then
-    echo "❌ determinism 哈希与基线不符（期望 0x711be572cfe0e7eefb2cf51550fd4dd5）——日志尾：" >&2
+if ! grep -q "FINAL_HASH=0x655cdbf40ed7e800b5f46785f94fec1e" "${out}/gate_determinism.log"; then
+    echo "❌ determinism 哈希与基线不符（期望 0x655cdbf40ed7e800b5f46785f94fec1e）——日志尾：" >&2
     tail -n 10 "${out}/gate_determinism.log" >&2
     exit 4
 fi
@@ -125,15 +125,16 @@ if ! grep -q "M0 门槛 PASS" "${out}/gate_m0_gates.log"; then
     tail -n 10 "${out}/gate_m0_gates.log" >&2
     exit 5
 fi
-if ! grep -q "0x417be20a8e49c9b0436987415ac9961a" "${out}/gate_m0_gates.log"; then
-    echo "❌ m0_gates 压力哈希与基线不符（期望 0x417be20a8e49c9b0436987415ac9961a）——日志尾：" >&2
+if ! grep -q "0xc23b81902a74b977c8e74e114cf9737a" "${out}/gate_m0_gates.log"; then
+    echo "❌ m0_gates 压力哈希与基线不符（期望 0xc23b81902a74b977c8e74e114cf9737a）——日志尾：" >&2
     tail -n 10 "${out}/gate_m0_gates.log" >&2
     exit 6
 fi
 
-# ⚠️ **report-only**：T4 的"解算扩展 ≥3×"在本机结构性达不到（饱和 ~2.5×，成因＝访存带宽，
-# 见 OPEN-PROBLEMS T4）⇒ 本脚本只报读数，**不据此判红**；但它的**串行/并行末态哈希逐位一致**
-# 是机器无关的，那个照样判。
+# ⚠️ **report-only**：T4 的"解算扩展 ≥3×"本机 2026-10-05 复测 **3.46/3.77/3.55×（稳定通过）**
+# —— 早前"饱和 ~2.5×、结构性不可达"的读数**已作废**（见 OPEN-PROBLEMS T4）⇒ 但门仍是
+# **只报不判**（本机非参考硬件，SPEC §5）；它的**串行/并行末态哈希逐位一致**是机器无关判据，
+# 那个照样判。
 step m1_islands report cargo run --release -q -p vxl-phys --example m1_islands
 grep -E "扩展比|串行/并行末态哈希" "${out}/gate_m1_islands.log" | sed 's/^/    /' || true
 grep -q "逐位一致" "${out}/gate_m1_islands.log" || {

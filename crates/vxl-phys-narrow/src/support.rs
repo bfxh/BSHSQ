@@ -207,9 +207,7 @@ impl DefaultNarrowPhase {
             } else {
                 bodies.linvel[b as usize] - bodies.linvel[a as usize]
             };
-            let band = self
-                .skin
-                .max(vrel.length() * (1.0 / 60.0) * 1.5 + self.skin);
+            let band = crate::pair_shaped::velocity_band(self.skin, vrel);
             let (mesh_body, mesh_pos, mesh_rot) = if a_is_hull { (b, pb, rb) } else { (a, pa, ra) };
             self.hull_vs_mesh(
                 a,

@@ -1,4 +1,4 @@
-//! hf：从 lib.rs 按域拆出（纯搬移，语义未改）。
+//! hf：高度场族采样；接受带 = `skin + ws.inflate`（由 `heightfield_pair` 按 `velocity_band` 每对置位，#6）。
 use super::*;
 
 impl DefaultNarrowPhase {
@@ -20,7 +20,7 @@ impl DefaultNarrowPhase {
             }
             let sy = center.y - (r2 - d2).sqrt();
             // skin 预期接触：允许深度小负值（speculative margin，§4.3），静止时不抖。
-            if sy < h + self.skin {
+            if sy < h + self.skin + self.ws.inflate {
                 cand.push(ContactPoint {
                     point: Vec3::new(px, h, pz),
                     depth: h - sy,
@@ -67,7 +67,7 @@ impl DefaultNarrowPhase {
         for (idx, &v) in self.ws.poly_a.verts.iter().enumerate() {
             if let Some((h, _)) = hf.sample(v.x, v.z) {
                 let depth = h - v.y;
-                if depth > -self.skin {
+                if depth > -self.skin - self.ws.inflate {
                     self.ws.cand.push(ContactPoint {
                         point: Vec3::new(v.x, h, v.z),
                         depth,
@@ -102,7 +102,7 @@ impl DefaultNarrowPhase {
             let s = seg_a + (seg_b - seg_a) * t;
             if let Some((hgt, _)) = hf.sample(s.x, s.z) {
                 let depth = hgt - s.y + radius;
-                if depth > -self.skin {
+                if depth > -self.skin - self.ws.inflate {
                     self.ws.cand.push(ContactPoint {
                         point: Vec3::new(s.x, hgt, s.z),
                         depth,

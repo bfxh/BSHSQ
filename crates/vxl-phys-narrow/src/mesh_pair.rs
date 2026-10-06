@@ -188,7 +188,7 @@ impl DefaultNarrowPhase {
             let v = pos + r.mul_vec3(p);
             if let Some((h, _)) = hf.sample(v.x, v.z) {
                 let depth = h - v.y;
-                if depth > -self.skin {
+                if depth > -self.skin - self.ws.inflate {
                     self.ws.cand.push(ContactPoint {
                         point: Vec3::new(v.x, h, v.z),
                         depth,
