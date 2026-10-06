@@ -583,13 +583,17 @@ jobs:
       #    顺带证明了 10 万档场景**跨平台逐位可复现**）。
       - name: 规模档门（确定性量精确判；计时在 CI 只报不判）
         run: SCALE_LOG=scale-gate.log SCALE_TIME_REPORT=1 bash scripts/gate_scale.sh
-      # `m1_islands`：**只有"串行/并行末态哈希逐位一致"是机器无关判据**（扩展比随核数/负载漂移，
-      # 按 `SPEC` §5 判据归参考硬件 ⇒ 这里只报不判，见 `OPEN-PROBLEMS.md` T4 的更正）。
-      - name: m1_islands（串并行末态哈希必须逐位一致；扩展比只报）
+      # `m1_islands`：**只判机器无关的那一条** —— 串行/并行末态哈希逐位一致。
+      # ⚠️ 示例**自己**会对"解算扩展 ≥3×"打 verdict 并以非零退出（首次上场实测：4 vCPU runner 上
+      #    2.08×）。但按 `SPEC` §5 那条判据归**参考硬件**（见 `OPEN-PROBLEMS.md` T4 的更正：
+      #    本机 9 跑 2.75–3.75× 单次不可判）⇒ 这里**不看它的退出码**（`gate_all.sh` 里那一步
+      #    也是 `want=report`，同款口径），只看输出里那条机器无关的哈希一致；**缺了那行照样红**
+      #    （崩了/没跑到自然就没有那行）。
+      - name: m1_islands（只判串并行哈希一致；扩展比只报）
         run: |
-          set -o pipefail
-          cargo run --release -q -p vxl-phys --example m1_islands | tee islands.txt
-          grep -q "逐位一致" islands.txt || { echo "::error::m1_islands 串并行末态哈希不一致"; exit 1; }
+          cargo run --release -q -p vxl-phys --example m1_islands > islands.txt 2>&1 || true
+          tail -4 islands.txt
+          grep -q "逐位一致" islands.txt || { echo "::error::m1_islands 未产出「串行/并行末态哈希逐位一致」（崩了或没跑到）"; exit 1; }
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
