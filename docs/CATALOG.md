@@ -61,11 +61,12 @@
 > 本轮改了三行**与代码不符**的状态 —— `vxl-phys-destruction` / `vxl-phys-soft` / `vxl-phys-aero`；
 > 同时把 `wheeled` / `marine` / `mech` 三个 crate 的**头注**从 "M2 落地" 更正为"参数骨架、无消费方"
 > （CATALOG 这三行本来就是 🦴，是 crate 头注写错了）。
+> ✅ **2026-10-06 结案一条**：`vxl-phys-destruction` 按本档写的"待决：接线或合并"选了**接线**（见下表那行）。
 
 | crate | 域 | 现有关键件 | 依赖 | 状态 | 热路径 |
 |---|---|---|---|---|---|
 | `vxl-phys-terrain` | 体素/地形 | `TerrainSet`（高度场账本）+ **`voxel::VoxelVolume`**（占据位图 + 局域 SDF + `CollisionProvider`）+ 贪心提取/球域切割 + **`mesh::TriMesh`**（任意三角网薄壳提供者 + 均匀网格加速）+ **`contacts_point_voxel_solid`**（流体边界终版口径：占据门 + 开放面推进） | core, narrow, broad | ✅（M3 第一块） | 🌤 每 tick（体素/网格查询在外层调用时进 🔥） |
-| `vxl-phys-destruction` | 断裂/碎块形状 | **策略件已在**（264 行）：`DestructionConfig`/`FragmentBudget`/`FractureDepth` + `impact_tiers`；机制侧（Voronoi 预断裂、`extract_boxes`/`spawn_box_debris`/`apply_impact_destruction`）在窄相与门面 ⚠️ **但本 crate 目前无消费方**（不在任何 `Cargo.toml` 的依赖里）⇒ 待决：**接线或合并** | — | ⚠️ **未接线**（2026-10-05 复核；原写 🦴"骨架"） | ❄️ |
+| `vxl-phys-destruction` | 断裂/碎块形状 | **策略件已在**（264 行）：`DestructionConfig`/`FragmentBudget`/`FractureDepth` + `impact_tiers`；机制侧（Voronoi 预断裂、`extract_boxes`/`spawn_box_debris`/`apply_impact_destruction`）在窄相与门面。✅ **已接线（2026-10-06）**：门面按本档处置把它接成 **opt-in 分级碎裂路径** `DestructionExt::apply_impact_destruction_tiered`（`src/world_step/destruction.rs`：冲量 `J = m·approach` → `impulse_level` 档级 → `sites_within_budget` 受 `FragmentBudget` 封顶 → `fracture_voronoi` 分块）；判据 `tests/destruction_tiered.rs`；**默认档（定半径球弹坑）逐位不变** | —（被 `vxl-phys` 消费） | ✅ **已接线**（2026-10-06；原写 ⚠️"未接线"／🦴"骨架"） | ❄️（opt-in，默认档不走） |
 | `vxl-phys-soft` | 软体/布（XPBD） | 布/绳 XPBD（距离/结构/弯曲 + 薄壳质量 + 接触/反作用）、点-点/点-边自碰撞、自摩擦库仑锥、撕裂、塑性、气动（含升力）、粒子↔刚体耦合；判据 = crate 内 18 个测试 | core, aero | ✅（2026-10-05 复核；原写 🦴"参数骨架"） | 🔥 |
 | `vxl-phys-fluid` | 液体（SPH/PBF/FLIP） | **WCSPH 求解器**：poly6 密度（含自身项）/ spiky 对称压力梯度 / Tait γ=7 / Monaghan 人工黏度 + XSPH / 镜像鬼影边界密度；确定性均匀网格 27 邻域；SoA + 半隐式欧拉 4 子步（`FluidSystem`）；**`MediumField` 实现**（2a 采样侧，2026-09-22）：`sample`＝27 邻域 poly6 插值出 密度/流速/占用率（**只读、不改流场**）；`deposit`＝**点式反作用沉积**（2026-10-05 落地：同一 poly6 权重分摊、`Σ m·Δv` 严格守恒；刚体仍走 2b，本通道供软体/布） | core | ✅（0.3 切片 1，CPU 档） | 🔥 每 tick（4 子步 × 27 邻域） |
 | `vxl-phys-wheeled` | 车辆（射线悬挂/轮胎） | 参数骨架 | — | 🦴 | 🌤 |

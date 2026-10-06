@@ -16,6 +16,8 @@ vxl-phys-fluid = { workspace = true }
 vxl-phys-aero = { workspace = true }
 vxl-phys-terrain = { workspace = true }
 vxl-phys-splat = { workspace = true }
+# 破坏域（M3）：只做**策略**（冲量分级 / 碎片预算），机制侧在门面与体素里。
+vxl-phys-destruction = { workspace = true }
 vxl-phys-replay = { workspace = true }
 # 软体域（绳索/T1）：门面只做装配与每 tick 推进，物理在 `vxl-phys-soft` 内。
 vxl-phys-soft = { workspace = true }
