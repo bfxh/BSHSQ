@@ -10,6 +10,10 @@ use super::*;
 #[path = "pair_shaped/capsule.rs"]
 mod capsule;
 
+// **分派级联**同理成子模块（2026-10-06 **设计层处置**：新加形状/域改那里，不必再动本类型）。
+#[path = "pair_shaped/pair_dispatch.rs"]
+pub(crate) mod pair_dispatch;
+
 /// **速度自适应接触带**（`provider` 通道口径；`OPEN-PROBLEMS.md` #6 把它一并带给地形）。
 ///
 /// `band = max(skin, |v_rel|·dt·1.5 + skin)`，`dt` = **固定基础步 1/60**（子步更小 ⇒
@@ -42,89 +46,26 @@ impl DefaultNarrowPhase {
         providers: &dyn vxl_phys_core::interop::ProviderColliders,
         out: &mut Vec<Manifold>,
     ) {
-        // 盒对专用路径开关：每对先复位（非盒对 / 圆柱对一律走通用路径）。
-        self.ws.box_axes_a = None;
-        self.ws.box_axes_b = None;
-
-        // —— 复合体：子形状展开为**子对**并递归本函数 ——
-        //
-        // 放在**最前**（先于地形/提供者分支）⇒ 子形状各自走完整配对路径（含地形）。
-        // 同一体对会**同时**存在多条流形（每个子形状各一条）：`feature` 是暖启动缓存键的
-        // 一部分，不并入子序号会让不同子形状的接触点互相顶替（`0` 是"无特征"哨兵，保持 0）。
-        if let Shape::Compound { compound, .. } = *sa {
-            let Some(kids) = self.kids_take(compound) else {
-                return;
-            };
-            for (ci, kid) in kids.iter().enumerate() {
-                let before = out.len();
-                let cpos = pa + Mat3::from_quat(ra).mul_vec3(kid.offset);
-                let crot = ra * kid.rot;
-                self.process_pair_shaped(
-                    a,
-                    b,
-                    bodies,
-                    &kid.shape,
-                    sb,
-                    cpos,
-                    crot,
-                    pb,
-                    rb,
-                    heightfields,
-                    providers,
-                    out,
-                );
-                tag_child_features(&mut out[before..], ci);
-            }
-            self.kids_put(kids);
-            return;
-        }
-        if let Shape::Compound { compound, .. } = *sb {
-            let Some(kids) = self.kids_take(compound) else {
-                return;
-            };
-            for (ci, kid) in kids.iter().enumerate() {
-                let before = out.len();
-                let cpos = pb + Mat3::from_quat(rb).mul_vec3(kid.offset);
-                let crot = rb * kid.rot;
-                self.process_pair_shaped(
-                    a,
-                    b,
-                    bodies,
-                    sa,
-                    &kid.shape,
-                    pa,
-                    ra,
-                    cpos,
-                    crot,
-                    heightfields,
-                    providers,
-                    out,
-                );
-                tag_child_features(&mut out[before..], ci);
-            }
-            self.kids_put(kids);
-            return;
-        }
-
-        // 提供者参与的对（见 `provider_pair`）。
-        if self.provider_pair(a, b, bodies, sa, sb, pa, ra, pb, rb, providers, out) {
-            return;
-        }
-
-        // **凸体外壳参与的对**（多边形域）：外壳 × {盒|球|外壳} → GJK/EPA。
-        // 与提供者的组合已在上面的 provider 分支处理；与高度场暂不受理。
-        if matches!(*sa, Shape::ConvexHull { .. }) || matches!(*sb, Shape::ConvexHull { .. }) {
-            self.hull_pair(a, b, bodies, sa, sb, pa, ra, pb, rb, heightfields, out);
-            return;
-        }
-
-        // 高度场参与的对（见 `heightfield_pair`）。
-        if self.heightfield_pair(a, b, bodies, sa, sb, pa, ra, pb, rb, heightfields, out) {
-            return;
-        }
-
-        // 非 heightfield 对（见 `pair_non_heightfield` 的各臂 helper）。
-        self.pair_non_heightfield(a, b, bodies, sa, sb, pa, ra, pb, rb, out);
+        // ⚠️ **级联本体不在这里**了（2026-10-06）：它在 `pair_shaped/pair_dispatch.rs`
+        // （模块级自由函数 + `PairArgs` 上下文）—— 那是"新加一个形状 / 新加一个域时**唯一必须改
+        // 的地方**"，搬到自由函数里 ⇒ **改那里不必再动本类型**（`god.gate.json` 那条债务的
+        // **设计层**验收）。本方法从此只是**薄入口**（同 `World::add_heightfield` 委派
+        // `providers::add_heightfield` 的先例）。
+        let mut args = pair_dispatch::PairArgs {
+            a,
+            b,
+            bodies,
+            sa,
+            sb,
+            pa,
+            ra,
+            pb,
+            rb,
+            heightfields,
+            providers,
+            out,
+        };
+        pair_dispatch::process_pair_shaped(self, &mut args);
     }
 
     /// **外部碰撞提供者参与的对**（体素/网格/喷溅场…；ROUTE §2.1 兼容轴）。
