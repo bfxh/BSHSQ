@@ -37,12 +37,12 @@ fn box_sat_fast_matches_vertex_reference() {
         // 快路径（盒对 extents 公式）。
         np.ws.box_a = Some((ha, pa));
         np.ws.box_b = Some((hb, pb));
-        let fast = np.sat(d);
+        let fast = crate::sat::sat(&mut np, d);
         // 通用路径（逐顶点 min/max；轴序、取向、平局规则完全相同，
         // 唯一差异即投影计算方式）。
         np.ws.box_a = None;
         np.ws.box_b = None;
-        let slow = np.sat(d);
+        let slow = crate::sat::sat(&mut np, d);
         match (fast, slow) {
             (None, None) => {}
             (Some((s1, n1, r1)), Some((s2, n2, r2))) => {
@@ -109,9 +109,9 @@ fn box_dedicated_matches_generic_full_chain() {
         np.ws.box_axes_b = None;
         np.ws.box_a = Some((ha, pa));
         np.ws.box_b = Some((hb, pb));
-        let generic = match np.sat(d) {
+        let generic = match crate::sat::sat(&mut np, d) {
             Some((sep, n, src)) if sep <= np.skin => {
-                if np.clip(n, src) {
+                if crate::sat::clip(&mut np, n, src) {
                     Some((sep, n, src, np.ws.cand.clone()))
                 } else {
                     Some((sep, n, src, Vec::new()))
@@ -125,9 +125,9 @@ fn box_dedicated_matches_generic_full_chain() {
         let ab = box_axes(qb);
         np.ws.box_axes_a = Some(aa);
         np.ws.box_axes_b = Some(ab);
-        let dedicated = match np.sat(d) {
+        let dedicated = match crate::sat::sat(&mut np, d) {
             Some((sep, n, src)) if sep <= np.skin => {
-                if np.clip(n, src) {
+                if crate::sat::clip(&mut np, n, src) {
                     Some((sep, n, src, np.ws.cand.clone()))
                 } else {
                     Some((sep, n, src, Vec::new()))

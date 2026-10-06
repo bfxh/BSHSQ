@@ -229,13 +229,13 @@ fn box_pair(
         np.ws.cached_ax_b = (b, fp_b, ax);
         ax
     });
-    if let Some((sep, n, src)) = np.sat(pb - pa) {
+    if let Some((sep, n, src)) = crate::sat::sat(np, pb - pa) {
         // 速度充气视野（见 `predict_dt` 字段注）：`0` ⇒ 逐位同现行。
         np.ws.inflate = np.predict_inflate(a, b, bodies, n);
         if sep > np.skin + np.ws.inflate {
             return;
         }
-        if np.clip(n, src) {
+        if crate::sat::clip(np, n, src) {
             out.push(Manifold {
                 a,
                 b,
@@ -293,13 +293,13 @@ fn poly_pair(
         Shape::Box { half } => Some((*half, pb)),
         _ => None,
     };
-    if let Some((sep, n, src)) = np.sat(pb - pa) {
+    if let Some((sep, n, src)) = crate::sat::sat(np, pb - pa) {
         // 速度充气视野（同盒对路径；见 `predict_dt` 字段注）。
         np.ws.inflate = np.predict_inflate(a, b, bodies, n);
         if sep > np.skin + np.ws.inflate {
             return;
         }
-        if np.clip(n, src) {
+        if crate::sat::clip(np, n, src) {
             out.push(Manifold {
                 a,
                 b,
