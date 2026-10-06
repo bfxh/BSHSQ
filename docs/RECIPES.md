@@ -57,8 +57,9 @@ gh run list --limit 5                       # 分不清"排队"还是"在跑"时
   8/0/其它三档判，别把 8 当红。
 - 卡住先看是排队还是执行：`queued` 久 = 并发额度被占（本仓一轮要占 20 个 job），
   不是代码问题；`in_progress` 久 = 大概率就是 MSVC 那 23 分钟编译。
-- **别拿"等 CI"当免跑本地的理由**：本地一条命令 `bash scripts/gate_all.sh`（3–4 分钟，
-  pre-push 钩子已挂）永远先跑；CI 是复核，不是第一道。
+- **别拿"等 CI"当免跑本地的理由**：本地一条命令 `bash scripts/gate_all.sh`（热态 3–4 分钟）
+  永远先跑；CI 是复核，不是第一道。⚠️ 2026-10-06 更正：`.git/hooks` 里**并没有**装 pre-push
+  钩子（`git config core.hooksPath` 也空）⇒ 这一步**靠自觉**，不会自动发生。
 
 ## 规模档门（2026-09-22 新增；**10 万+10 万档的唯一自动门**）
 
@@ -142,10 +143,10 @@ bash scripts/ab_perf.sh HEAD~1 5 'ns/点' \
 
 ## 行为门（三命令四哈希）
 
-| 场景 | 命令 | 基线（2026-09-15，参与式降点档） |
+| 场景 | 命令 | 基线（2026-09-15 立；两条哈希值 2026-10-06 随 #6/#4 换代刷新） |
 |---|---|---|
-| 门槛 + 压力 | `cargo run --release -p vxl-phys --example m0_gates` | 门槛 `0x6536fa7211a315187180182438237dda`、末态活跃 **5**、PASS；压力 `0x417be20a8e49c9b0436987415ac9961a`（report-only） |
-| 确定性 | `cargo run --release -p vxl-phys --example determinism` | `FINAL_HASH=0x711be572cfe0e7eefb2cf51550fd4dd5`（10 轮逐位一致） |
+| 门槛 + 压力 | `cargo run --release -p vxl-phys --example m0_gates` | 门槛 `0x6536fa7211a315187180182438237dda`、末态活跃 **5**、PASS；压力 `0xc23b81902a74b977c8e74e114cf9737a`（report-only） |
+| 确定性 | `cargo run --release -p vxl-phys --example determinism` | `FINAL_HASH=0x655cdbf40ed7e800b5f46785f94fec1e`（10 轮逐位一致） |
 | T4 碎片雨 | `cargo run --release -p vxl-phys --example m1_islands` | 解算扩展 ≥3×（实测 4.39×）+ 串行/并行末态哈希逐位一致。**别加 `--` 参数**：会被当成第一个位置参数（clusters），4000 会跑到 ticks 上 |
 | **默认档长跑稳定性**（新增 2026-09-20） | `cargo test --release -p vxl-phys --test default_tier_stability` | 两个测试：① 冻结读数 `top_y 2.7285 / Σv² 1.8124 / awake 216 / manifolds 919`（6×6×6、3000 步、默认档，两次连跑逐位一致；**2026-09-21 换代**，旧世代 `2.7223 / 2.1488 / 216 / 835`）；② **金丝雀**——降到 4 扫掠必须明显不同（实测流形 919→455、Σv²→2.2089、清醒→188、top_y→2.7347），否则场景不灵敏、门无效。**为什么要它**：金样配方自带 `16` 迭代 ⇒ 默认档（6 扫掠）的改动**金样门看不见**（`EXPERIMENTS` 记过的覆盖缺口）。改动默认档时更新那四个冻结值并按 ADR 0004 记换代理由；`--nocapture` 可读实际读数 |
 
