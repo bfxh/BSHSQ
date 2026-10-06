@@ -63,238 +63,6 @@ impl DefaultNarrowPhase {
             .map(|h| gjk::fracture_voronoi_hull(h, seeds))
     }
 
-    /// 填充「外壳世界点缓存」（side：0 = 对侧 a、1 = 侧 b）。
-    /// 返回 true = 该形状是外壳且缓存已就绪（点列在 `self.ws.hull_pts[side]`）。
-    pub(crate) fn fill_hull_world(
-        &mut self,
-        side: usize,
-        body: u32,
-        shape: &Shape,
-        pos: Vec3,
-        rot: Quat,
-    ) -> bool {
-        let Shape::ConvexHull { hull, .. } = *shape else {
-            return false;
-        };
-        let fp = rot_fp(rot);
-        if self.ws.cached_hull[side] != (body, fp) {
-            let m = Mat3::from_quat(rot);
-            let out = &mut self.ws.hull_pts[side];
-            out.clear();
-            if let Some(h) = self.hulls.get(hull) {
-                out.extend(h.points.iter().map(|p| pos + m.mul_vec3(*p)));
-            }
-            self.ws.cached_hull[side] = (body, fp);
-            self.probe.hull_fills += 1;
-            self.probe.hull_fill_verts += self.ws.hull_pts[side].len() as u64;
-        }
-        true
-    }
-
-    /// 形状 → 支撑体（**三角网非凸、地形/provider 无凸表示** ⇒ `None`；是语义决定，不是漏写）。
-    pub(crate) fn support_of(
-        &self,
-        shape: &Shape,
-        pos: Vec3,
-        rot: Quat,
-    ) -> Option<gjk::ShapeSupport<'_>> {
-        match *shape {
-            Shape::ConvexHull { hull, .. } => self.hulls.get(hull).map(|h| {
-                gjk::ShapeSupport::Hull(gjk::HullSupport {
-                    hull: h,
-                    pos,
-                    rot: Mat3::from_quat(rot),
-                })
-            }),
-            Shape::Box { half } => Some(gjk::ShapeSupport::Box(gjk::BoxSupport {
-                half,
-                pos,
-                rot: Mat3::from_quat(rot),
-            })),
-            Shape::Sphere { radius } => Some(gjk::ShapeSupport::Sphere(gjk::SphereSupport {
-                radius,
-                pos,
-            })),
-            Shape::Capsule {
-                half_height,
-                radius,
-            } => Some(gjk::ShapeSupport::Capsule(gjk::CapsuleSupport {
-                half_height,
-                radius,
-                pos,
-                rot: Mat3::from_quat(rot),
-            })),
-            // 圆柱/圆锥：**多面化表示**的支撑（顶点有限 ⇒ EPA 良态）。此前缺这两支 ⇒
-            // 「外壳 × 圆柱/锥」这类组合**静默无接触**（见 `TECH-SURVEY.md` A9 ④ 留档）。
-            Shape::Cylinder {
-                half_height,
-                radius,
-            } => Some(gjk::ShapeSupport::Prism(gjk::PrismSupport {
-                half_height,
-                radius,
-                segments: CYLINDER_SEGMENTS,
-                cone: false,
-                pos,
-                rot: Mat3::from_quat(rot),
-            })),
-            Shape::Cone {
-                half_height,
-                radius,
-            } => Some(gjk::ShapeSupport::Prism(gjk::PrismSupport {
-                half_height,
-                radius,
-                segments: CYLINDER_SEGMENTS,
-                cone: true,
-                pos,
-                rot: Mat3::from_quat(rot),
-            })),
-            // **不受理族**（显式列名 ⇒ 新增形状会在此**编译报错**；见本函数文档）。
-            Shape::Compound { .. } | Shape::TriMesh { .. } => None,
-            Shape::HeightField(_) | Shape::Provider(_) => None,
-        }
-    }
-
-    /// **外壳 × {盒|球|外壳}**：GJK/EPA 求穿透 → 用**外壳近接触面顶点**细化成多点流形。
-    ///
-    /// - 法线一次求解（EPA，轴对齐退化时退 6 轴 SAT 解析）；
-    /// - 流形点 = 外壳点云中落在对方支撑面 `plane ± skin` 带内的顶点，
-    ///   逐点深度 `plane − n̂·v`（n̂ = 对方 → 外壳）；取最深 4 点。
-    /// - `feature = 顶点序号 + 1`（点云序稳定 ⇒ 跨帧可续接）。
-    /// - 外壳 × 高度场：**就在本函数**（下方 L1 分支，逐顶点采样）；`pair_shaped.rs` 的 hull
-    ///   分支排在 `heightfield_pair` 之前 ⇒ 那个组合永远先到这里（2026-10-05 更正：原写反了）。
-    #[allow(clippy::too_many_arguments)] // 与 process_pair 同形（两侧位姿 + 形状 + 出参 + 体表）
-    pub(crate) fn hull_pair(
-        &mut self,
-        a: u32,
-        b: u32,
-        bodies: &vxl_phys_core::BodySet,
-        sa: &Shape,
-        sb: &Shape,
-        pa: Vec3,
-        ra: Quat,
-        pb: Vec3,
-        rb: Quat,
-        heightfields: &[HeightField],
-        out: &mut Vec<Manifold>,
-    ) {
-        let a_is_hull = matches!(*sa, Shape::ConvexHull { .. });
-        let (side, body_id, hshape, hpos, hrot) = if a_is_hull {
-            (0usize, a, sa, pa, ra)
-        } else {
-            (1usize, b, sb, pb, rb)
-        };
-        let other_shape = if a_is_hull { sb } else { sa };
-        // 世界点缓存（早于借支撑体：填充需要 &mut self）
-        if !self.fill_hull_world(side, body_id, hshape, hpos, hrot) {
-            return;
-        }
-
-        // —— 对方是高度场（L1）：顶点采样，与盒/圆柱版同构 ——
-        if let Shape::HeightField(hf_id) = *other_shape {
-            if let Some(hf) = heightfields.get(hf_id as usize) {
-                self.hull_pair_heightfield(a, b, a_is_hull, hf, out);
-            }
-            return;
-        }
-
-        // —— 对方是三角网（T2）：外壳顶点 × 网面三角形（解析点-三角；非凸 ⇒ 不进 GJK/EPA，
-        //    `support_of` 对三角网本就返回 None）——实现在 `mesh_pair.rs::hull_vs_mesh`。
-        //    **接触带按相对速度自适应**（与 `provider_pair` 同款口径——实测不加带会让高速
-        //    外壳首次检测就深穿 ⇒ 巨大冲量把薄壳轰出对方的接触带 ⇒ 双双掉穿）。
-        if let Shape::TriMesh { mesh, .. } = *other_shape {
-            let vrel = if a_is_hull {
-                bodies.linvel[a as usize] - bodies.linvel[b as usize]
-            } else {
-                bodies.linvel[b as usize] - bodies.linvel[a as usize]
-            };
-            let band = crate::pair_shaped::velocity_band(self.skin, vrel);
-            let (mesh_body, mesh_pos, mesh_rot) = if a_is_hull { (b, pb, rb) } else { (a, pa, ra) };
-            crate::mesh_pair::hull_vs_mesh(
-                self,
-                a,
-                b,
-                a_is_hull,
-                side,
-                mesh,
-                mesh_body,
-                other_shape,
-                mesh_pos,
-                mesh_rot,
-                band,
-                out,
-            );
-            return;
-        }
-
-        // —— 对方是盒/球/外壳：GJK/EPA 一次法线 + 外壳近面顶点细化 ——
-        let (Some(ua), Some(ub)) = (self.support_of(sa, pa, ra), self.support_of(sb, pb, rb))
-        else {
-            return; // 对方形状不受理
-        };
-        let Some((n_p, _depth, _p)) = gjk::epa(&ua, &ub, 32) else {
-            return; // 未相交（宽相 fat 边距会给出近邻对）
-        };
-        let n = if a_is_hull { n_p } else { -n_p }; // 对方 → 外壳
-        let other: &dyn gjk::Support = if a_is_hull { &ub } else { &ua };
-        let plane = n.dot(other.support(n));
-        let pts = hull_points_in_band(&self.ws.hull_pts[side], plane, n, self.skin);
-        if pts.is_empty() {
-            return;
-        }
-        out.push(Manifold {
-            a,
-            b,
-            normal: -n_p, // 流形约定：a → b
-            points: ContactPoints::from_slice(&pts),
-        });
-    }
-
-    /// **外壳 × 高度场（L1 腿）**：外壳世界点逐顶点 `hf.sample` ⇒ 候选（`depth = h − v.y`、
-    /// 接触点落在地形面、`feature = 顶点序号` 从 0 起），`select_contacts` 截 ≤4；
-    /// 法线取**最深样本处**的地形法线，按 a/b 侧定号（外壳在 a ⇒ `−n_t`）。
-    /// 从 `hull_pair` 原样拆出（2026-10-05，纯搬移）：那段把它撑到 140 行（本 crate 最长函数）。
-    fn hull_pair_heightfield(
-        &mut self,
-        a: u32,
-        b: u32,
-        a_is_hull: bool,
-        hf: &HeightField,
-        out: &mut Vec<Manifold>,
-    ) {
-        let side = usize::from(!a_is_hull);
-        self.ws.cand.clear();
-        let n_pts = self.ws.hull_pts[side].len();
-        for idx in 0..n_pts {
-            let v = self.ws.hull_pts[side][idx];
-            if let Some((h, _)) = hf.sample(v.x, v.z) {
-                let depth = h - v.y;
-                if depth > -self.skin {
-                    self.ws.cand.push(ContactPoint {
-                        point: Vec3::new(v.x, h, v.z),
-                        depth,
-                        feature: idx as u32,
-                    });
-                }
-            }
-        }
-        if self.ws.cand.is_empty() || !crate::prims::select_contacts(self) {
-            return;
-        }
-        let deepest = self.ws.cand[0];
-        let n_t = hf
-            .sample(deepest.point.x, deepest.point.z)
-            .map(|(_, n)| n)
-            .unwrap_or(Vec3::Y);
-        // 法线约定 a→b：外壳在 a（地形在 b）⇒ −n_t；否则 +n_t
-        let normal = if a_is_hull { -n_t } else { n_t };
-        out.push(Manifold {
-            a,
-            b,
-            normal,
-            points: ContactPoints::from_slice(&self.ws.cand),
-        });
-    }
-
     /// **设置速度充气视野的预测时长**（0 = 关闭；见 `predict_dt` 字段注）。
     /// 由 `World` 在每次 `collide` 前设置：检测间隔 = 距下一次窄相的时间。
     pub fn set_predict_dt(&mut self, dt: f32) {
@@ -379,6 +147,237 @@ impl DefaultNarrowPhase {
         self.ws.poly_index.insert(key, idx);
         Some(idx)
     }
+}
+
+/// 填充「外壳世界点缓存」（side：0 = 对侧 a、1 = 侧 b）。
+/// 返回 true = 该形状是外壳且缓存已就绪（点列在 `np.ws.hull_pts[side]`）。
+pub(crate) fn fill_hull_world(
+    np: &mut DefaultNarrowPhase,
+    side: usize,
+    body: u32,
+    shape: &Shape,
+    pos: Vec3,
+    rot: Quat,
+) -> bool {
+    let Shape::ConvexHull { hull, .. } = *shape else {
+        return false;
+    };
+    let fp = rot_fp(rot);
+    if np.ws.cached_hull[side] != (body, fp) {
+        let m = Mat3::from_quat(rot);
+        let out = &mut np.ws.hull_pts[side];
+        out.clear();
+        if let Some(h) = np.hulls.get(hull) {
+            out.extend(h.points.iter().map(|p| pos + m.mul_vec3(*p)));
+        }
+        np.ws.cached_hull[side] = (body, fp);
+        np.probe.hull_fills += 1;
+        np.probe.hull_fill_verts += np.ws.hull_pts[side].len() as u64;
+    }
+    true
+}
+
+/// 形状 → 支撑体（**三角网非凸、地形/provider 无凸表示** ⇒ `None`；是语义决定，不是漏写）。
+pub(crate) fn support_of<'a>(
+    np: &'a DefaultNarrowPhase,
+    shape: &Shape,
+    pos: Vec3,
+    rot: Quat,
+) -> Option<gjk::ShapeSupport<'a>> {
+    match *shape {
+        Shape::ConvexHull { hull, .. } => np.hulls.get(hull).map(|h| {
+            gjk::ShapeSupport::Hull(gjk::HullSupport {
+                hull: h,
+                pos,
+                rot: Mat3::from_quat(rot),
+            })
+        }),
+        Shape::Box { half } => Some(gjk::ShapeSupport::Box(gjk::BoxSupport {
+            half,
+            pos,
+            rot: Mat3::from_quat(rot),
+        })),
+        Shape::Sphere { radius } => Some(gjk::ShapeSupport::Sphere(gjk::SphereSupport {
+            radius,
+            pos,
+        })),
+        Shape::Capsule {
+            half_height,
+            radius,
+        } => Some(gjk::ShapeSupport::Capsule(gjk::CapsuleSupport {
+            half_height,
+            radius,
+            pos,
+            rot: Mat3::from_quat(rot),
+        })),
+        // 圆柱/圆锥：**多面化表示**的支撑（顶点有限 ⇒ EPA 良态）。此前缺这两支 ⇒
+        // 「外壳 × 圆柱/锥」这类组合**静默无接触**（见 `TECH-SURVEY.md` A9 ④ 留档）。
+        Shape::Cylinder {
+            half_height,
+            radius,
+        } => Some(gjk::ShapeSupport::Prism(gjk::PrismSupport {
+            half_height,
+            radius,
+            segments: CYLINDER_SEGMENTS,
+            cone: false,
+            pos,
+            rot: Mat3::from_quat(rot),
+        })),
+        Shape::Cone {
+            half_height,
+            radius,
+        } => Some(gjk::ShapeSupport::Prism(gjk::PrismSupport {
+            half_height,
+            radius,
+            segments: CYLINDER_SEGMENTS,
+            cone: true,
+            pos,
+            rot: Mat3::from_quat(rot),
+        })),
+        // **不受理族**（显式列名 ⇒ 新增形状会在此**编译报错**；见本函数文档）。
+        Shape::Compound { .. } | Shape::TriMesh { .. } => None,
+        Shape::HeightField(_) | Shape::Provider(_) => None,
+    }
+}
+
+/// **外壳 × {盒|球|外壳}**：GJK/EPA 求穿透 → 用**外壳近接触面顶点**细化成多点流形。
+///
+/// - 法线一次求解（EPA，轴对齐退化时退 6 轴 SAT 解析）；
+/// - 流形点 = 外壳点云中落在对方支撑面 `plane ± skin` 带内的顶点，
+///   逐点深度 `plane − n̂·v`（n̂ = 对方 → 外壳）；取最深 4 点。
+/// - `feature = 顶点序号 + 1`（点云序稳定 ⇒ 跨帧可续接）。
+/// - 外壳 × 高度场：**就在本函数**（下方 L1 分支，逐顶点采样）；`pair_shaped.rs` 的 hull
+///   分支排在 `heightfield_pair` 之前 ⇒ 那个组合永远先到这里（2026-10-05 更正：原写反了）。
+#[allow(clippy::too_many_arguments)] // 与 process_pair 同形（两侧位姿 + 形状 + 出参 + 体表）
+pub(crate) fn hull_pair(
+    np: &mut DefaultNarrowPhase,
+    a: u32,
+    b: u32,
+    bodies: &vxl_phys_core::BodySet,
+    sa: &Shape,
+    sb: &Shape,
+    pa: Vec3,
+    ra: Quat,
+    pb: Vec3,
+    rb: Quat,
+    heightfields: &[HeightField],
+    out: &mut Vec<Manifold>,
+) {
+    let a_is_hull = matches!(*sa, Shape::ConvexHull { .. });
+    let (side, body_id, hshape, hpos, hrot) = if a_is_hull {
+        (0usize, a, sa, pa, ra)
+    } else {
+        (1usize, b, sb, pb, rb)
+    };
+    let other_shape = if a_is_hull { sb } else { sa };
+    // 世界点缓存（早于借支撑体：填充需要 &mut DefaultNarrowPhase）
+    if !fill_hull_world(np, side, body_id, hshape, hpos, hrot) {
+        return;
+    }
+
+    // —— 对方是高度场（L1）：顶点采样，与盒/圆柱版同构 ——
+    if let Shape::HeightField(hf_id) = *other_shape {
+        if let Some(hf) = heightfields.get(hf_id as usize) {
+            hull_pair_heightfield(np, a, b, a_is_hull, hf, out);
+        }
+        return;
+    }
+
+    // —— 对方是三角网（T2）：外壳顶点 × 网面三角形（解析点-三角；非凸 ⇒ 不进 GJK/EPA，
+    //    `support_of` 对三角网本就返回 None）——实现在 `mesh_pair.rs::hull_vs_mesh`。
+    //    **接触带按相对速度自适应**（与 `provider_pair` 同款口径——实测不加带会让高速
+    //    外壳首次检测就深穿 ⇒ 巨大冲量把薄壳轰出对方的接触带 ⇒ 双双掉穿）。
+    if let Shape::TriMesh { mesh, .. } = *other_shape {
+        let vrel = if a_is_hull {
+            bodies.linvel[a as usize] - bodies.linvel[b as usize]
+        } else {
+            bodies.linvel[b as usize] - bodies.linvel[a as usize]
+        };
+        let band = crate::pair_shaped::velocity_band(np.skin, vrel);
+        let (mesh_body, mesh_pos, mesh_rot) = if a_is_hull { (b, pb, rb) } else { (a, pa, ra) };
+        crate::mesh_pair::hull_vs_mesh(
+            np,
+            a,
+            b,
+            a_is_hull,
+            side,
+            mesh,
+            mesh_body,
+            other_shape,
+            mesh_pos,
+            mesh_rot,
+            band,
+            out,
+        );
+        return;
+    }
+
+    // —— 对方是盒/球/外壳：GJK/EPA 一次法线 + 外壳近面顶点细化 ——
+    let (Some(ua), Some(ub)) = (support_of(np, sa, pa, ra), support_of(np, sb, pb, rb)) else {
+        return; // 对方形状不受理
+    };
+    let Some((n_p, _depth, _p)) = gjk::epa(&ua, &ub, 32) else {
+        return; // 未相交（宽相 fat 边距会给出近邻对）
+    };
+    let n = if a_is_hull { n_p } else { -n_p }; // 对方 → 外壳
+    let other: &dyn gjk::Support = if a_is_hull { &ub } else { &ua };
+    let plane = n.dot(other.support(n));
+    let pts = hull_points_in_band(&np.ws.hull_pts[side], plane, n, np.skin);
+    if pts.is_empty() {
+        return;
+    }
+    out.push(Manifold {
+        a,
+        b,
+        normal: -n_p, // 流形约定：a → b
+        points: ContactPoints::from_slice(&pts),
+    });
+}
+
+/// **外壳 × 高度场（L1 腿）**：外壳世界点逐顶点 `hf.sample` ⇒ 候选（`depth = h − v.y`、
+/// 接触点落在地形面、`feature = 顶点序号` 从 0 起），`select_contacts` 截 ≤4；
+/// 法线取**最深样本处**的地形法线，按 a/b 侧定号（外壳在 a ⇒ `−n_t`）。
+/// 从 `hull_pair` 原样拆出（2026-10-05，纯搬移）：那段把它撑到 140 行（本 crate 最长函数）。
+fn hull_pair_heightfield(
+    np: &mut DefaultNarrowPhase,
+    a: u32,
+    b: u32,
+    a_is_hull: bool,
+    hf: &HeightField,
+    out: &mut Vec<Manifold>,
+) {
+    let side = usize::from(!a_is_hull);
+    np.ws.cand.clear();
+    let n_pts = np.ws.hull_pts[side].len();
+    for idx in 0..n_pts {
+        let v = np.ws.hull_pts[side][idx];
+        if let Some((h, _)) = hf.sample(v.x, v.z) {
+            let depth = h - v.y;
+            if depth > -np.skin {
+                np.ws.cand.push(ContactPoint {
+                    point: Vec3::new(v.x, h, v.z),
+                    depth,
+                    feature: idx as u32,
+                });
+            }
+        }
+    }
+    if np.ws.cand.is_empty() || !crate::prims::select_contacts(np) {
+        return;
+    }
+    let deepest = np.ws.cand[0];
+    let n_t = hf
+        .sample(deepest.point.x, deepest.point.z)
+        .map(|(_, n)| n)
+        .unwrap_or(Vec3::Y);
+    // 法线约定 a→b：外壳在 a（地形在 b）⇒ −n_t；否则 +n_t
+    let normal = if a_is_hull { -n_t } else { n_t };
+    out.push(Manifold {
+        a,
+        b,
+        normal,
+        points: ContactPoints::from_slice(&np.ws.cand),
+    });
 }
 
 /// **外壳点云 → 「落在对方支撑面 `plane ± skin` 带内」的流形点**：逐顶点深度

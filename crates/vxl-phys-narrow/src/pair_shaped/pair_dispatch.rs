@@ -166,7 +166,8 @@ fn handle_provider_pair(np: &mut DefaultNarrowPhase, args: &mut PairArgs<'_>) {
 }
 
 fn handle_hull_pair(np: &mut DefaultNarrowPhase, args: &mut PairArgs<'_>) {
-    np.hull_pair(
+    crate::support::hull_pair(
+        np,
         args.a,
         args.b,
         args.bodies,

@@ -121,7 +121,7 @@ fn hull_provider_contacts(
     buf: &mut Vec<vxl_phys_core::interop::InteropContact>,
 ) -> bool {
     let side = if pr_is_a { 1 } else { 0 };
-    if !np.fill_hull_world(side, body, body_shape, bpos, brot) {
+    if !crate::support::fill_hull_world(np, side, body, body_shape, bpos, brot) {
         return true;
     }
     let mut supported = false;
