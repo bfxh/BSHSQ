@@ -149,7 +149,8 @@ fn handle_compound_b(np: &mut DefaultNarrowPhase, args: &mut PairArgs<'_>) {
 }
 
 fn handle_provider_pair(np: &mut DefaultNarrowPhase, args: &mut PairArgs<'_>) {
-    np.provider_pair(
+    super::provider_pair(
+        np,
         args.a,
         args.b,
         args.bodies,
@@ -181,7 +182,8 @@ fn handle_hull_pair(np: &mut DefaultNarrowPhase, args: &mut PairArgs<'_>) {
 }
 
 fn handle_heightfield_pair(np: &mut DefaultNarrowPhase, args: &mut PairArgs<'_>) {
-    np.heightfield_pair(
+    super::heightfield_pair(
+        np,
         args.a,
         args.b,
         args.bodies,
