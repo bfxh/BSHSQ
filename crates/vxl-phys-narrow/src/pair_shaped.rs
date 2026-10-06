@@ -281,13 +281,13 @@ impl DefaultNarrowPhase {
             let vrel = bodies.linvel[b as usize] - bodies.linvel[a as usize];
             self.ws.inflate = velocity_band(self.skin, vrel) - self.skin;
             let ok = match *body_shape {
-                Shape::Sphere { radius } => self.sphere_heightfield(bpos, radius, hf),
+                Shape::Sphere { radius } => crate::hf::sphere_heightfield(self, bpos, radius, hf),
                 Shape::Box { .. } | Shape::Cylinder { .. } | Shape::Cone { .. } => {
                     let idx = match self.poly_for(body_shape) {
                         Some(i) => i,
                         None => return true,
                     };
-                    self.poly_heightfield(idx, bpos, brot, hf)
+                    crate::hf::poly_heightfield(self, idx, bpos, brot, hf)
                 }
                 // 三角网 × 高度场：**逐顶点采样**（`mesh_pair.rs::mesh_heightfield`；法线与 sign
                 // 由本函数的"最深样本地形法线"那段形状无关地处理）。
@@ -302,7 +302,8 @@ impl DefaultNarrowPhase {
                     radius,
                 } => {
                     let axis = Mat3::from_quat(brot).mul_vec3(Vec3::Y);
-                    self.capsule_heightfield(
+                    crate::hf::capsule_heightfield(
+                        self,
                         bpos - axis * half_height,
                         bpos + axis * half_height,
                         radius,

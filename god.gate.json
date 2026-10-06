@@ -11,7 +11,7 @@
     "才是复杂度；字段数超阈只登记不拆』——**这句话本身没错，错在它掩盖的事实**：原门只按文件量",
     "max(字段+方法)合计数，既分不清两轴、也看不见跨文件拆 impl 的类型总量，于是把三个『字段多 +",
     "方法也多』的类型当成纯数据记录豁免掉了。实测（门现在自己量的，方法数按**跨文件累计**）：",
-    "  · DefaultNarrowPhase 字段 34 / 方法 62 / 11 个文件 —— 不是数据记录，是形状×形状的接触分派矩阵",
+    "  · DefaultNarrowPhase 字段 9 / 方法 59 / 11 个文件 —— 不是数据记录，是形状×形状的接触分派矩阵（2026-10-06 起：三个高度场采样已搬成自由函数，62 → 59）",
     "  · FluidSystem 字段 26 / 方法 43 / 6 个文件 —— SoA 集合 + 整条 SPH 管线同体",
     "  · Packet 字段 32 / 方法 25 / 3 个文件 —— 常驻缓冲 + GPU 驱动会话（run_/read_/poll_wait）",
     "判据改为**两轴双超 ⇒ 上帝对象**，并给出反例证明它有分辨力：World（字段 23 / 方法 76）、",
@@ -19,7 +19,7 @@
     "纯数据记录（PhysConfig 31 字段、Bvh8 4 字段 / 31 方法这类）也各自只超一轴，同样不拦。"
   ],
   "god_pairs": {
-    "crates/vxl-phys-narrow::DefaultNarrowPhase": "已登记债务（非豁免）：握着 HullStore/CompoundStore/MeshStore 三个仓库 + scratch + 配置 + 诊断计数，方法 62 个是形状×形状分派矩阵（box_pair / capsule_ab|ba / hull_pair / *_heightfield / hull_vs_mesh / *_provider_contacts…），每加一个形状或域都要动它 —— 与 ROUTE §2.1『跨域只走四接口』同源的问题。处置：把只读仓库的 *_pair/*_contacts 挪成模块自由函数（pair_shaped.rs / mesh_pair.rs / heightfield.rs 已按文件切好），方法数只准减。",
+    "crates/vxl-phys-narrow::DefaultNarrowPhase": "已登记债务（非豁免）：握着 HullStore/CompoundStore/MeshStore 三个仓库 + scratch + 配置 + 诊断计数，方法数是形状×形状分派矩阵（box_pair / capsule_ab|ba / hull_pair / *_heightfield / hull_vs_mesh / *_provider_contacts…），每加一个形状或域都要动它 —— 与 ROUTE §2.1『跨域只走四接口』同源的问题。处置：把只读仓库的 *_pair/*_contacts 挪成模块自由函数（pair_shaped.rs / mesh_pair.rs / heightfield.rs 已按文件切好），方法数只准减。✅ 2026-10-06 第一片已付：三个高度场采样（sphere/poly/capsule_heightfield）搬成 hf.rs 的模块自由函数 ⇒ 62 → 59。",
     "crates/vxl-phys-fluid::FluidSystem": "已登记债务（非豁免）：SoA 数组集合本身合理（§5 确定性要求有序数组），但同一相位并列三个变体（density_pass / density_pass_parallel / density_boundary_pass；force_pass / _parallel / _serial）= 数据与整条管线同体。处置：变体收敛成一个带枚举参数的入口，方法数只准减。",
     "crates/vxl-phys-gpu::Packet": "已登记债务（非豁免）：常驻缓冲清单 + 驱动会话（run_/run_stages/run_deferred/read_*/poll_wait/measure_readback_ms）混在一个类型。处置：把会话侧（run/read/poll）拆到独立的 submission 类型，缓冲清单留原处 —— 字段数本就不是复杂度。",
     "crates/vxl-phys::World": "已登记债务（非豁免）：SPEC §1 就把它定义为门面（默认管线组装），抽查证实方法多为转发（add_mesh = build_grid + providers.push_mesh + bodies.push_static）。风险是趋势性的：M3–M7 每加一域就往同一类型添 add_*/*_pass，76 个方法会奔 150。处置：域侧 API 拆成扩展 trait（impl FluidExt for World 等），门面只留管线组装；方法数只准减。",
