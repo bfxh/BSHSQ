@@ -449,6 +449,6 @@ impl DefaultNarrowPhase {
         self.probe.cand_pts += self.ws.cand.len() as u64;
 
         // 去重 + 取最深 ≤4 点（确定性排序见 select_contacts）。
-        self.select_contacts(self.min_point_sep)
+        crate::prims::select_contacts(self)
     }
 }

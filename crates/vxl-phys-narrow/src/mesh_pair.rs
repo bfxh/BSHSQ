@@ -155,7 +155,7 @@ pub(crate) fn mesh_pair(
             });
         }
     }
-    if np.ws.cand.is_empty() || !np.select_contacts(np.min_point_sep) {
+    if np.ws.cand.is_empty() || !crate::prims::select_contacts(np) {
         return;
     }
     out.push(Manifold {
@@ -197,7 +197,7 @@ pub(crate) fn mesh_heightfield(
     if np.ws.cand.is_empty() {
         return false;
     }
-    np.select_contacts(np.min_point_sep)
+    crate::prims::select_contacts(np)
 }
 
 /// **外壳 × 三角网**（T2 第一片）：**外壳顶点** × **网面三角形**（解析点-三角）。
@@ -284,7 +284,7 @@ pub(crate) fn hull_vs_mesh(
             }
         }
     }
-    if np.ws.cand.is_empty() || !np.select_contacts(np.min_point_sep) {
+    if np.ws.cand.is_empty() || !crate::prims::select_contacts(np) {
         return;
     }
     out.push(Manifold {

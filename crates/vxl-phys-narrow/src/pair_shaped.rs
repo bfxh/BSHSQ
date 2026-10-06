@@ -144,7 +144,9 @@ impl DefaultNarrowPhase {
         rb: Quat,
         out: &mut Vec<Manifold>,
     ) {
-        if let Some((n, depth, point)) = self.sphere_convex_ab(pa, radius, convex, pb, rb) {
+        if let Some((n, depth, point)) =
+            crate::prims::sphere_convex_ab(self, pa, radius, convex, pb, rb)
+        {
             out.push(Manifold {
                 a,
                 b,
@@ -172,7 +174,9 @@ impl DefaultNarrowPhase {
         radius: f32,
         out: &mut Vec<Manifold>,
     ) {
-        if let Some((n_ba, depth, point)) = self.sphere_convex_ab(pb, radius, convex, pa, ra) {
+        if let Some((n_ba, depth, point)) =
+            crate::prims::sphere_convex_ab(self, pb, radius, convex, pa, ra)
+        {
             out.push(Manifold {
                 a,
                 b,
