@@ -96,8 +96,8 @@ impl DefaultNarrowPhase {
                 )
             }
             // 三角网 vs 提供者：**逐顶点**点查询（与外壳臂同构；非凸 ⇒ 不走 GJK/EPA）。
-            Shape::TriMesh { .. } => self.mesh_provider_contacts(
-                body_shape, body, bpos, brot, id, pr_is_a, band, providers, buf,
+            Shape::TriMesh { .. } => crate::mesh_pair::mesh_provider_contacts(
+                self, body_shape, body, bpos, brot, id, pr_is_a, band, providers, buf,
             ),
             Shape::Compound { .. } | Shape::HeightField(_) | Shape::Provider(_) => false,
         }
