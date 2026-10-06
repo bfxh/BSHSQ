@@ -1,19 +1,30 @@
-//! **形状对的分派级联**（2026-10-06 从 `DefaultNarrowPhase::process_pair_shaped` 搬出来的
-//! 模块级自由函数 + 一个上下文结构）。
+//! **形状对的分派**：一张**有序规则表** + 上下文结构（2026-10-06 从
+//! `DefaultNarrowPhase::process_pair_shaped` 里搬出来并数据化）。
 //!
-//! **为什么搬**（god 债务的**设计层**处置，见 `god.gate.json`）：这个级联是"**新加一个形状、
-//! 或新加一个域时唯一必须改的地方**"——放在 `impl DefaultNarrowPhase` 里，等于每来一个新形状/
-//! 新域都要去动那个已经 59 个方法的类型。搬到模块级之后**改这里不动类型**，验收写在那条债务里：
+//! **为什么**（god 债务的**设计层**处置，见 `god.gate.json`）：分派曾经是长在 `impl
+//! DefaultNarrowPhase` 里的一段 `if` 链 —— 每加一个形状/域都要去编辑那个 59 方法的类型。
+//! 现在：**顺序 = 规则表的数据**，加一个域 = 往 [`RULES`] **追加一条规则**（谓词 + 处理器），
+//! `impl` 块与 `process_pair_shaped` 本体都**不用动**。验收句就是债务里那句
 //! "新加一个形状或域**不必再动本类型**"。
 //!
-//! **[`PairArgs`] 为什么存在**（两条硬约束逼出来的）：① `args-gate` —— **新文件零基线**，
-//! 函数形参 >7 直接红，12 个位置参数搬不过来；② 更重要的是：处理器将来要统一签名（分派表的前提），
-//! 上下文必须是**一个可传递的对象**。复合体递归时**新建子上下文**而不是改父的字段：借用的生命
-//! 周期绑在结构上，原地改字段会把 `&'a Shape` 收窄，compiler 直接拒。
+//! ⚠️ **顺序即语义**：规则**从上到下、先匹配先赢**。这张表的顺序与原 `if` 链逐条对应，
+//! 每条的谓词 = 原那条 `if`/`return true` 的成立条件：
+//! 1. `compound_a`（a 侧复合体）→ 展开子对并递归（`kids_take` 失败也**已处理**，与原码一致）；
+//! 2. `compound_b` 同上（镜像）；
+//! 3. `provider`（任一侧是 `Shape::Provider`）→ `provider_pair`（无提供者时它本会返回
+//!    `false` 落空，故谓词与它**等价**）；
+//! 4. `convex_hull`（任一侧是外壳）→ `hull_pair`（原码命中后无条件 `return`）；
+//! 5. `heightfield`（任一侧是高度场）→ `heightfield_pair`（同 3 的等价性论证）；
+//! 6. `generic`（**无条件**、必须排在最后）→ `pair_non_heightfield`。
 //!
-//! ⚠️ **纯搬移、语义未改**：段序（复合体 → 提供者 → 外壳 → 高度场 → 通用）、每段的 `return`
-//! 语义、复合体递归与 `tag_child_features` 打标**一字未动**。判据 = 既有测试 +
-//! `determinism` / `m0_gates` 两条冻结哈希逐位不变。
+//! 改顺序 = 改语义；本文件的判据就是 `determinism` / `m0_gates` 两条冻结哈希逐位不变 +
+//! `vxl-phys-narrow` 全部测试（含 `hf_provider_dispatch_parity` 三档对拍与
+//! `vxl-phys` 的 `compound_warm`）。
+//!
+//! **[`PairArgs`] 为什么存在**：① `args-gate` 对**新文件零基线**，函数形参 >7 直接红
+//! （12 个位置参数搬不过来）；② 处理器要**统一签名**，上下文必须是可传递的对象。
+//! 复合体递归**新建子上下文**而不是改父的字段：借用生命周期绑在结构上，原地改字段会把
+//! `&'a Shape` 收窄，compiler 直接拒。
 
 use crate::heightfield::HeightField;
 use crate::{tag_child_features, DefaultNarrowPhase, Manifold};
@@ -37,24 +48,108 @@ pub(crate) struct PairArgs<'a> {
     pub(crate) out: &'a mut Vec<Manifold>,
 }
 
-/// **配对主入口**（只做分派；复合体展开见两个 `expand_compound_*`）。
+/// **一条分派规则**。`name` 只用于诊断/文档；真正的语义是 [`RULES`] 的**顺序**。
+pub(crate) struct Rule {
+    pub(crate) name: &'static str,
+    pub(crate) matches: fn(&PairArgs<'_>) -> bool,
+    pub(crate) handle: fn(&mut DefaultNarrowPhase, &mut PairArgs<'_>),
+}
+
+/// **分派规则表**（从上到下、先匹配先赢；顺序与旧 `if` 链逐条对应，见文件头）。
+/// **加一个域 = 在 `generic` 之前追加一条**（谓词 + 处理器），别动别的。
+pub(crate) static RULES: &[Rule] = &[
+    Rule {
+        name: "compound_a",
+        matches: is_compound_a,
+        handle: handle_compound_a,
+    },
+    Rule {
+        name: "compound_b",
+        matches: is_compound_b,
+        handle: handle_compound_b,
+    },
+    Rule {
+        name: "provider",
+        matches: is_provider_pair,
+        handle: handle_provider_pair,
+    },
+    Rule {
+        name: "convex_hull",
+        matches: is_hull_pair,
+        handle: handle_hull_pair,
+    },
+    Rule {
+        name: "heightfield",
+        matches: is_heightfield_pair,
+        handle: handle_heightfield_pair,
+    },
+    Rule {
+        name: "generic",
+        matches: is_generic_pair,
+        handle: handle_generic_pair,
+    },
+];
+
+/// **配对主入口**：复位每对 scratch → 按 [`RULES`] 找第一条命中的规则 → 交给它。
 pub(crate) fn process_pair_shaped(np: &mut DefaultNarrowPhase, args: &mut PairArgs<'_>) {
     // 盒对专用路径开关：每对先复位（非盒对 / 圆柱对一律走通用路径）。
     np.ws.box_axes_a = None;
     np.ws.box_axes_b = None;
-
-    // 复合体放**最前**（先于地形/提供者分支）⇒ 子形状各自走完整配对路径（含地形）。
-    if let Shape::Compound { compound, .. } = *args.sa {
-        expand_compound_a(np, args, compound);
-        return;
+    // **兜底必须在最后**：它是无条件的 ⇒ 任何追加在它**之后**的规则都会被静默吞掉
+    // （"加形状改哪"这一刀最容易踩的坑）。debug 档（CI 的 test-debug job）每对检一次。
+    debug_assert!(
+        RULES.last().is_some_and(|r| r.name == "generic"),
+        "分派规则表的最后一条必须是无条件兜底 generic；新规则请追加在它之前"
+    );
+    for rule in RULES {
+        if (rule.matches)(args) {
+            (rule.handle)(np, args);
+            return;
+        }
     }
-    if let Shape::Compound { compound, .. } = *args.sb {
-        expand_compound_b(np, args, compound);
-        return;
-    }
+}
 
-    // 提供者参与的对（见 `provider_pair`）。
-    if np.provider_pair(
+fn is_compound_a(a: &PairArgs<'_>) -> bool {
+    matches!(*a.sa, Shape::Compound { .. })
+}
+
+fn is_compound_b(a: &PairArgs<'_>) -> bool {
+    matches!(*a.sb, Shape::Compound { .. })
+}
+
+fn is_provider_pair(a: &PairArgs<'_>) -> bool {
+    matches!(*a.sa, Shape::Provider(_)) || matches!(*a.sb, Shape::Provider(_))
+}
+
+fn is_hull_pair(a: &PairArgs<'_>) -> bool {
+    matches!(*a.sa, Shape::ConvexHull { .. }) || matches!(*a.sb, Shape::ConvexHull { .. })
+}
+
+fn is_heightfield_pair(a: &PairArgs<'_>) -> bool {
+    matches!(*a.sa, Shape::HeightField(_)) || matches!(*a.sb, Shape::HeightField(_))
+}
+
+/// 兜底：**无条件**（必须排在 [`RULES`] 最后）。
+fn is_generic_pair(_: &PairArgs<'_>) -> bool {
+    true
+}
+
+fn handle_compound_a(np: &mut DefaultNarrowPhase, args: &mut PairArgs<'_>) {
+    let Shape::Compound { compound, .. } = *args.sa else {
+        return;
+    };
+    expand_compound_a(np, args, compound);
+}
+
+fn handle_compound_b(np: &mut DefaultNarrowPhase, args: &mut PairArgs<'_>) {
+    let Shape::Compound { compound, .. } = *args.sb else {
+        return;
+    };
+    expand_compound_b(np, args, compound);
+}
+
+fn handle_provider_pair(np: &mut DefaultNarrowPhase, args: &mut PairArgs<'_>) {
+    np.provider_pair(
         args.a,
         args.b,
         args.bodies,
@@ -66,32 +161,11 @@ pub(crate) fn process_pair_shaped(np: &mut DefaultNarrowPhase, args: &mut PairAr
         args.rb,
         args.providers,
         args.out,
-    ) {
-        return;
-    }
+    );
+}
 
-    // **凸体外壳参与的对**（多边形域）：外壳 × {盒|球|外壳} → GJK/EPA。
-    // 与提供者的组合已在上面的 provider 分支处理；与高度场暂不受理。
-    if matches!(*args.sa, Shape::ConvexHull { .. }) || matches!(*args.sb, Shape::ConvexHull { .. })
-    {
-        np.hull_pair(
-            args.a,
-            args.b,
-            args.bodies,
-            args.sa,
-            args.sb,
-            args.pa,
-            args.ra,
-            args.pb,
-            args.rb,
-            args.heightfields,
-            args.out,
-        );
-        return;
-    }
-
-    // 高度场参与的对（见 `heightfield_pair`）。
-    if np.heightfield_pair(
+fn handle_hull_pair(np: &mut DefaultNarrowPhase, args: &mut PairArgs<'_>) {
+    np.hull_pair(
         args.a,
         args.b,
         args.bodies,
@@ -103,11 +177,26 @@ pub(crate) fn process_pair_shaped(np: &mut DefaultNarrowPhase, args: &mut PairAr
         args.rb,
         args.heightfields,
         args.out,
-    ) {
-        return;
-    }
+    );
+}
 
-    // 非 heightfield 对（见 `pair_non_heightfield` 的各臂 helper）。
+fn handle_heightfield_pair(np: &mut DefaultNarrowPhase, args: &mut PairArgs<'_>) {
+    np.heightfield_pair(
+        args.a,
+        args.b,
+        args.bodies,
+        args.sa,
+        args.sb,
+        args.pa,
+        args.ra,
+        args.pb,
+        args.rb,
+        args.heightfields,
+        args.out,
+    );
+}
+
+fn handle_generic_pair(np: &mut DefaultNarrowPhase, args: &mut PairArgs<'_>) {
     np.pair_non_heightfield(
         args.a,
         args.b,
