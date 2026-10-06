@@ -10,6 +10,20 @@ use super::*;
 #[path = "pair_shaped/capsule.rs"]
 mod capsule;
 
+/// **速度自适应接触带**（`provider` 通道口径；`OPEN-PROBLEMS.md` #6 把它一并带给地形）。
+///
+/// `band = max(skin, |v_rel|·dt·1.5 + skin)`，`dt` = **固定基础步 1/60**（子步更小 ⇒
+/// 该带偏保守、安全）。由来（2026-09-15 实测修复）：固定 `skin`（0.02 m）小于每 tick
+/// 位移（8 m/s ⇒ 0.13 m）时，体**跨过皮肤带** ⇒ 进入体内才建接触，此时接近速度已≈0
+/// ⇒ 冲击判据不触发、且无 spec 减速（实测：8 m/s 弹体无声停在墙前 0.04 m、零破坏）。
+///
+/// 三处共用：`provider_pair`、`support.rs::hull_vs_mesh`、以及**直连高度场**
+/// （`heightfield_pair` 把结果存进 `ws.inflate`，高度场族采样读 `skin + inflate`）。
+/// 放**模块级**而非 `DefaultNarrowPhase` 的方法：类型账对它的方法数已登记为「只准减」。
+pub(crate) fn velocity_band(skin: f32, vrel: Vec3) -> f32 {
+    skin.max(vrel.length() * (1.0 / 60.0) * 1.5 + skin)
+}
+
 impl DefaultNarrowPhase {
     /// **配对主入口**（形状 + 世界位姿已给定）：复合体在此按子形状展开并**递归**本函数。
     #[allow(clippy::too_many_arguments)] // 两侧形状 + 位姿 + 上下文 + 出参
@@ -105,7 +119,7 @@ impl DefaultNarrowPhase {
         }
 
         // 高度场参与的对（见 `heightfield_pair`）。
-        if self.heightfield_pair(a, b, sa, sb, pa, ra, pb, rb, heightfields, out) {
+        if self.heightfield_pair(a, b, bodies, sa, sb, pa, ra, pb, rb, heightfields, out) {
             return;
         }
 
@@ -169,9 +183,7 @@ impl DefaultNarrowPhase {
             // 被倾斜的地板法线吸收、撞墙事件不登记）。加一个 skin 把刀锋推开，
             // 使「带内即建（预测）接触」在速度上连续；预测接触由求解器按
             // distance/dt 限接近速度，不会造成假制动。
-            let band = self
-                .skin
-                .max(vrel.length() * (1.0 / 60.0) * 1.5 + self.skin);
+            let band = velocity_band(self.skin, vrel);
             // 体形状 → 候选接触：**分发与采样在 `provider.rs`**（本文件受尺寸棘轮，
             // 只准减不许胖 ⇒ 会继续长的采样代码不放这里）。受理面见该文件。
             let ok = self.provider_shape_contacts(
@@ -228,6 +240,7 @@ impl DefaultNarrowPhase {
         &mut self,
         a: u32,
         b: u32,
+        bodies: &vxl_phys_core::BodySet,
         sa: &Shape,
         sb: &Shape,
         pa: Vec3,
@@ -258,6 +271,15 @@ impl DefaultNarrowPhase {
                 Some(h) => h,
                 None => return true,
             };
+            // **速度自适应接触带**（`OPEN-PROBLEMS.md` #6）：直连高度场路径原先**恒用**
+            // 固定 `self.skin`，而 provider 通道早已按 `velocity_band` 把带加宽
+            // （`heightfield.rs` 的 `CollisionProvider` 实现只是把这个带当 `skin` 参数
+            // 收下 ⇒ 两条路对同一对应当给出同一条带）。这里补上同一条口径。
+            //
+            // 存进 `ws.inflate`（本对 scratch：`collide` 每帧先清零、各路径各自置位）
+            // ⇒ 高度场族三个采样函数统一读 `self.skin + self.ws.inflate`。
+            let vrel = bodies.linvel[b as usize] - bodies.linvel[a as usize];
+            self.ws.inflate = velocity_band(self.skin, vrel) - self.skin;
             let ok = match *body_shape {
                 Shape::Sphere { radius } => self.sphere_heightfield(bpos, radius, hf),
                 Shape::Box { .. } | Shape::Cylinder { .. } | Shape::Cone { .. } => {

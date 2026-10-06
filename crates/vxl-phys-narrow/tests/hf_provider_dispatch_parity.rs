@@ -1,18 +1,22 @@
-//! **对拍：高度场「旁路」vs「provider 通道」的流形装配**（M2「真把派发切过去」的前置测量）。
+//! **对拍：高度场「旁路」vs「provider 通道」的流形装配**（M2 余项 `#6` 的回归快照）。
 //!
 //! - 旁路 = `Shape::HeightField(id)` 走 `heightfield_pair`（候选直取 + 最深样本地形法线）；
 //! - provider 通道 = `Shape::Provider(id)` 走 `provider_pair`（`pick_dominant_normal` +
-//!   `four_corner_points`），查询转发给**域 trait**（= 迁移后门面会做的事，本文件用测试替身实现）。
+//!   `four_corner_points`），查询转发给**域 trait**（门面 `Providers` 就是这么做的，
+//!   本文件用一个测试替身实现）。
 //!
-//! **实测结论（2026-10-05，本文件就是判据）**：
-//! 1. 只要接触集合由 `skin` 决定，两条路**逐位一致**（点/深度/特征/法线）——`assert` 钉住；
-//! 2. 差异**只出现在**"运动中的体在 `skin` 之外、但在自适应接触带之内"：`provider_pair` 的带
-//!    = `max(skin, |v_rel|·dt·1.5 + skin)`（2026-09-15 修的"跨过皮肤带"问题），
-//!    `heightfield_pair` 恒用 `skin` ⇒ 前者产**预期接触**、后者不产。
+//! **实测结论（2026-10-05 首测；2026-10-06 `#6` 落地后复测）**：
+//! 1. 两条路在**接触档逐位一致**（点/深度/特征/法线）——`assert` 钉住；
+//! 2. 首测时差异**只出现在**"运动中的体在 `skin` 之外、但在自适应接触带之内"：provider 通道的带
+//!    = `max(skin, |v_rel|·dt·1.5 + skin)`（2026-09-15 修的"跨过皮肤带"问题），而直连
+//!    `heightfield_pair` 恒用 `skin` ⇒ 前者产**预期接触**、后者不产；
+//! 3. **`#6` 落地后这条分歧已闭合**：直连路径改走同一条 `phase::velocity_band`
+//!    （`heightfield_pair` 把它存进 `ws.inflate`，高度场族采样统一读 `skin + inflate`）
+//!    ⇒ 三档（静止 / 运动·接触 / 运动·**带内缝外**）**两条路全部逐位一致**，本文件即其回归网。
 //!
-//! ⇒ **"把高度场派发切到 provider 通道"不是逐位中性的**：它等于把那条自适应带也带给地形，
-//! 会改动 `determinism`/`m0_gates` 的哈希（两个场景的地面就是 flat 高度场）⇒ 属**换代决策**，
-//! 不是机械搬运。这条断言就是给那次决策留的"现状快照"：真要切，先改这里。
+//! ⇒ 把那条自适应带带给地形**不是逐位中性的**：它会改动 `determinism`/`m0_gates` 的哈希
+//! （两个场景的地面就是 flat 高度场）⇒ 属**换代决策**（已记在 `OPEN-PROBLEMS.md` #6，
+//! 两条新哈希同处留档），不是机械搬运。这条断言就是那次换代的"现状快照"。
 //!
 //! ⚠️ 本文件不许出现 `unwrap` / `expect` / `.clone()`（新文件零基线）。
 
@@ -91,23 +95,24 @@ fn bits(v: Vec3) -> (u32, u32, u32) {
 }
 
 #[test]
-fn box_on_flat_field_two_routes_parity_and_band_divergence() {
+fn box_on_flat_field_two_routes_parity_with_band() {
     let hf = flat();
     let half = Vec3::splat(0.5);
     let hfbox = HfProviders(&hf);
     // 三档：① 静止接触（底面 −0.1）② 运动接触（同位置、12 m/s 下落）
-    //       ③ 运动**未**接触（缝 0.2；skin 0.02 够不着，但 provider 的自适应带 0.32 够得着）
+    //       ③ 运动·**带内缝外**（缝 0.2；skin 0.02 够不着，但自适应带 0.32 够得着）
+    // 末列 = 本档应当是**预期接触**（负深度）而非真实穿透。
     let cases = [
-        ("① 静止·接触", 0.4, Vec3::ZERO, true),
-        ("② 运动·接触", 0.4, Vec3::new(0.0, -12.0, 0.0), true),
+        ("① 静止·接触", 0.4, Vec3::ZERO, false),
+        ("② 运动·接触", 0.4, Vec3::new(0.0, -12.0, 0.0), false),
         (
-            "③ 运动·未接触（缝 0.2）",
+            "③ 运动·带内（缝 0.2）",
             0.7,
             Vec3::new(0.0, -12.0, 0.0),
-            false,
+            true,
         ),
     ];
-    for (tag, y, vel, expect_parity) in cases {
+    for (tag, y, vel, speculative) in cases {
         let pos = Vec3::new(0.25, y, 0.25);
         // 旁路：地形在 a 侧 ⇒ 法线 = +地形法线
         let a = run(
@@ -131,25 +136,21 @@ fn box_on_flat_field_two_routes_parity_and_band_divergence() {
         for (i, (pt, d, f)) in p.1.iter().enumerate() {
             println!("     prov[{i}] p={pt:?} depth={d:.6} f={f}");
         }
-        if expect_parity {
-            // 接触档：两条路**逐位一致**（本文件的核心判据）
-            assert_eq!(a.1.len(), p.1.len(), "{tag}：点数须一致");
-            assert_eq!(bits(a.0), bits(p.0), "{tag}：法线须逐位一致");
-            for (i, (x, y)) in a.1.iter().zip(p.1.iter()).enumerate() {
-                assert_eq!(bits(x.0), bits(y.0), "{tag}：第 {i} 点须逐位一致");
-                assert_eq!(x.1.to_bits(), y.1.to_bits(), "{tag}：第 {i} 点深度");
-                assert_eq!(x.2, y.2, "{tag}：第 {i} 点特征");
-            }
-        } else {
-            // 带外档：**口径差异就在这里**（provider 的带随相对速度加宽 ⇒ 产预期接触）。
-            assert!(a.1.is_empty(), "{tag}：旁路恒用 skin ⇒ 不该有接触");
+        // 两条路**逐位一致**（本文件的核心判据；#6 之后连自适应带也一致）。
+        assert_eq!(a.1.len(), p.1.len(), "{tag}：点数须一致");
+        assert_eq!(bits(a.0), bits(p.0), "{tag}：法线须逐位一致");
+        for (i, (x, y)) in a.1.iter().zip(p.1.iter()).enumerate() {
+            assert_eq!(bits(x.0), bits(y.0), "{tag}：第 {i} 点须逐位一致");
+            assert_eq!(x.1.to_bits(), y.1.to_bits(), "{tag}：第 {i} 点深度");
+            assert_eq!(x.2, y.2, "{tag}：第 {i} 点特征");
+        }
+        if speculative {
+            // 带内缝外档：**带必须够到**（两条路都得产预期接触）。若这里红了 ⇒ 带口径已被
+            // 改动（或直连路径的带又掉了）⇒ 须同步改本文件与 `OPEN-PROBLEMS.md` #6。
+            assert!(!a.1.is_empty(), "{tag}：自适应带应够到（直连路径也已带带）");
             assert!(
-                !p.1.is_empty(),
-                "{tag}：provider 的自适应带应够到（若这里红了，说明带口径已变 ⇒ 须改本文件与 ROUTE）"
-            );
-            assert!(
-                p.1.iter().all(|(_, d, _)| *d < 0.0),
-                "{tag}：带外接触应全是预期接触（负深度）"
+                a.1.iter().all(|(_, d, _)| *d < 0.0),
+                "{tag}：带内接触应全是预期接触（负深度）"
             );
         }
     }
