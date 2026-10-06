@@ -129,12 +129,16 @@
 >   `vxl_phys_fluid::fluid_access::from_positions` 按给定位置建流体（质量仍按静止晶格
 >   `ρ0/Σ_lattice W` 标定 ⇒ 与晶格块同口径），判据 `crates/vxl-phys/tests/scan_startup.rs`
 >   （粒子数 = 扫描点数、逐值落在扫描点上、装进 `World` 推进健康）；
-> - **② 表示层 `StateBridge`** —— 🔶 **第一个真实现落地（2026-10-05）**：此前该 trait 全仓**零实现**
->   （`import_positions` 的默认实现就是 `false`）。现在 `FluidSystem` 实现它：
+> - **② 表示层 `StateBridge`** —— ✅ **两个真实现（流体 2026-10-05 / 布片 2026-10-06）**：此前该 trait
+>   全仓**零实现**（`import_positions` 的默认实现就是 `false`）。**流体**：
+>   `FluidSystem` 实现它：
 >   `export_positions` 按索引序只写**流体段**（2b 边界粒子不算流体状态）、
 >   `import_positions` 长度必须**恰好**相符（否则拒绝且一字不动），成功后**同时清速度**。
 >   判据 `crates/vxl-phys-fluid/tests/state_bridge_roundtrip.rs`（长度不符拒绝且逐位不动 /
->   导入后位置逐值相等且速度归零 / **往返逐位幂等**）。⇒ "扫描起步"只差**splat→粒子的转换**那一步；
+>   导入后位置逐值相等且速度归零 / **往返逐位幂等**）。**布片**：`ClothSheet` 同口径实现
+>   （`kind()` = `Mesh`；导入时**连 XPBD 的 `prev` 一起对齐**——只清速度不齐 `prev` 会让下一
+>   `step` 读出巨大隐式速度），判据 `crates/vxl-phys-soft/tests/cloth_state_bridge.rs`（同一套 5 条
+>   + 一条 `prev` 对齐）。⇒ "扫描起步"只差**splat→粒子的转换**那一步；
 > - **提供者对偶（provider×provider）** 与 **高度场 × 提供者** —— 已登记为**不受理**，
 >   现状由 `crates/vxl-phys/tests/provider_pair_gaps.rs` **钉住**（做对偶解法那天那两条会红 ⇒ 翻面）；
 >   影响目前为零（都是静态 Marker ⇒ 求解器本就不产约束）。

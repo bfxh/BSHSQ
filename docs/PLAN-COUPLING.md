@@ -163,7 +163,7 @@ GPU 档同口径走 `reduce.wgsl`（一个体一个 workgroup、段内升序、�
 | D5 | **无审计**：动量账/能量账不成体系（`pressure_work` 定义了但零消费者） | `interop.rs:252` |
 | D6 | **无滞后登记**（每条路径的往返拍数） | C3 |
 | D7 | **介质无状态**：喷溅场无速度/质量槽、无 `advance`/`dt` ⇒ 结构上不可能双向（不只是"没接线"） | `splat/lib.rs:42-53`、全目录零 `advance` |
-| D8 | **`StateBridge` 零实现**且只搬位置（`Vec<Vec3>`）⇒"转换中的物理/交接策略"没有落点 | `interop.rs:256-275`；`PLAN-triangle-first-class.md:83-84` |
+| D8 | ~~**`StateBridge` 零实现**~~ **——已有两个真实现（2026-10-06 更新）**：流体 `FluidSystem`（2026-10-05）与布片 `ClothSheet`（2026-10-06，`cloth_access.rs`），都只搬位置（`Vec<Vec3>`）⇒ **"转换中的物理/交接策略"仍然没有落点**（本表要的是这个，不是"有没有实现"） | `interop.rs:256-275`；`PLAN-triangle-first-class.md:83-84` |
 
 ---
 

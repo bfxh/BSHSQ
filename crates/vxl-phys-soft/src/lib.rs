@@ -9,6 +9,7 @@
 #![forbid(unsafe_code)]
 
 pub mod cloth;
+pub mod cloth_access;
 pub mod cloth_aero;
 mod cloth_coupling;
 mod cloth_self_collision;
@@ -17,7 +18,6 @@ pub mod cloth_tear;
 pub mod params;
 pub mod rigid;
 pub mod rope;
-
 pub use params::{ClothConstraints, SelfCollision, Stiffness, TearStrain};
 pub use rigid::{RigidProxy, RigidReaction};
 pub use rope::Rope;
