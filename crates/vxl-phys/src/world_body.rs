@@ -126,7 +126,7 @@ impl World {
         density: f32,
     ) -> usize {
         // 先在只读扫描里收集「挖点」（按冲击记录序），再逐个挖 —— 保持确定性。
-        let mut digs: Vec<(Vec3, f32, Vec3, f32)> = Vec::new();
+        let mut digs: Vec<(Vec3, f32, Vec3)> = Vec::new();
         for rec in &self.impacts {
             if rec.provider != id || !self.bodies.is_dynamic(rec.body as usize) {
                 continue;
@@ -138,18 +138,13 @@ impl World {
                 continue;
             }
             let v = rec.velocity;
-            let other = rec.body;
             let sp = approach;
             // 接触点 = 记录时的流形点均值（确定性；已在 record_impacts 算好）
             let c = rec.point;
-            // 冲击体沿冲击方向的半径（保守：包围球半径）——挖域从它之外开始
-            let reach = self.bodies.shape[other as usize]
-                .bounding_sphere_radius()
-                .min(2.0);
-            digs.push((c, sp, v, reach));
+            digs.push((c, sp, v));
         }
         let mut total = 0usize;
-        for (c, sp, v, reach) in digs {
+        for (c, sp, v) in digs {
             // 挖出半径随**实际冲击速度**增长（钳到 0.25..0.9 m）
             let r = (0.2 + 0.06 * sp).clamp(0.25, 0.9);
             let dir = if v.length_squared() > 1e-9 {
@@ -157,10 +152,11 @@ impl World {
             } else {
                 Vec3::ZERO
             };
-            // **弹坑 = 球域**（任意形状切割第一步）：球心 = 接触点 + 冲击方向 ×
-            // 1.05r ⇒ 坑的**近缘正好落在接触点**、整体在材料里（薄墙会被打穿，
-            // 物理如此）；与冲击体只在接近点相切、不重叠。
-            let _ = reach;
+            // **弹坑 = 球域**（任意形状切割第一步）：球心 = 接触点 + 冲击方向 × 1.05r
+            // ⇒ 坑的近缘落在接触点**外侧 0.05r**、整体在材料里（薄墙会被打穿——物理如此），
+            // 与冲击体**不重叠**⇒ 不需要再按冲击体的包围球半径外推。
+            // （2026-10-06 删掉的那段 `reach` 正是死在这里：算完没用，注释还宣称了一个
+            //   没实现的行为。）
             let center = c + dir * (r * 1.05);
             // 碎块**静止生成**（初速留给调用方用 `spawn_box_debris_vel` 显式给；
             // 引擎不凭空造动量——「继承半速」实测是能量源，已否）。
