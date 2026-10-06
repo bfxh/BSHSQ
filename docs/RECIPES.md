@@ -60,6 +60,10 @@ gh run list --limit 5                       # 分不清"排队"还是"在跑"时
 - **别拿"等 CI"当免跑本地的理由**：本地一条命令 `bash scripts/gate_all.sh`（热态 3–4 分钟）
   永远先跑；CI 是复核，不是第一道。⚠️ 2026-10-06 更正：`.git/hooks` 里**并没有**装 pre-push
   钩子（`git config core.hooksPath` 也空）⇒ 这一步**靠自觉**，不会自动发生。
+- **`GPU_TESTS=1` 才跑 GPU 用例**（2026-10-06 加）：`vxl-phys-gpu` 的**适配器初始化在本机偶发
+  "自旋不返回"**（实测 14 个测试二进制跑到第 14 个卡死、CPU 100%、零断言失败；`timeout` 掐掉后
+  再单跑同一个仍会卡），**CI 侧无适配器本来就跳过** ⇒ 默认跳过（口径与 CI 对齐），要跑就
+  `GPU_TESTS=1 bash scripts/gate_all.sh`（带 `timeout 300` + 重试 ≤3）。详见 issue #30。
 
 ## 规模档门（2026-09-22 新增；**10 万+10 万档的唯一自动门**）
 
