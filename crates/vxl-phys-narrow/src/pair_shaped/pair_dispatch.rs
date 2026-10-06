@@ -218,7 +218,7 @@ fn handle_generic_pair(np: &mut DefaultNarrowPhase, args: &mut PairArgs<'_>) {
 /// **a 侧复合体展开**：逐子形状建**子上下文**并递归；每个子形状的流形用 `tag_child_features`
 /// 打上子序号（`feature` 是暖启动缓存键的一部分，不并会让不同子形状的接触点互相顶替）。
 fn expand_compound_a(np: &mut DefaultNarrowPhase, args: &mut PairArgs<'_>, compound: u32) {
-    let Some(kids) = np.kids_take(compound) else {
+    let Some(kids) = crate::support::kids_take(np, compound) else {
         return;
     };
     for (ci, kid) in kids.iter().enumerate() {
@@ -242,12 +242,12 @@ fn expand_compound_a(np: &mut DefaultNarrowPhase, args: &mut PairArgs<'_>, compo
         process_pair_shaped(np, &mut child);
         tag_child_features(&mut args.out[before..], ci);
     }
-    np.kids_put(kids);
+    crate::support::kids_put(np, kids);
 }
 
 /// **b 侧复合体展开**：与 [`expand_compound_a`] 镜像（理由见那份注）。
 fn expand_compound_b(np: &mut DefaultNarrowPhase, args: &mut PairArgs<'_>, compound: u32) {
-    let Some(kids) = np.kids_take(compound) else {
+    let Some(kids) = crate::support::kids_take(np, compound) else {
         return;
     };
     for (ci, kid) in kids.iter().enumerate() {
@@ -271,5 +271,5 @@ fn expand_compound_b(np: &mut DefaultNarrowPhase, args: &mut PairArgs<'_>, compo
         process_pair_shaped(np, &mut child);
         tag_child_features(&mut args.out[before..], ci);
     }
-    np.kids_put(kids);
+    crate::support::kids_put(np, kids);
 }

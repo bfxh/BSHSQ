@@ -150,7 +150,7 @@ impl vxl_phys_core::interop::CollisionProvider for HeightField {
         out: &mut Vec<InteropContact>,
     ) -> bool {
         let mut np = DefaultNarrowPhase::new(skin);
-        let Some(idx) = np.poly_for(&Shape::Box { half }) else {
+        let Some(idx) = crate::support::poly_for(&mut np, &Shape::Box { half }) else {
             return false;
         };
         if !crate::hf::poly_heightfield(&mut np, idx, pos, rot, self) {

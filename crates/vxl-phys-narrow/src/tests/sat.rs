@@ -15,8 +15,8 @@ fn box_sat_fast_matches_vertex_reference() {
     let mut np = DefaultNarrowPhase::new(0.01);
     let ha = Vec3::new(0.5, 0.3, 0.7);
     let hb = Vec3::new(0.4, 0.6, 0.2);
-    let ia = np.poly_for(&Shape::Box { half: ha }).unwrap_or(usize::MAX);
-    let ib = np.poly_for(&Shape::Box { half: hb }).unwrap_or(usize::MAX);
+    let ia = crate::support::poly_for(&mut np, &Shape::Box { half: ha }).unwrap_or(usize::MAX);
+    let ib = crate::support::poly_for(&mut np, &Shape::Box { half: hb }).unwrap_or(usize::MAX);
     assert!(ia != usize::MAX && ib != usize::MAX, "盒多面体未注册");
     let mut rng: u32 = 0x1234_5678;
     let mut next = move || {
@@ -71,8 +71,8 @@ fn box_dedicated_matches_generic_full_chain() {
     let mut np = DefaultNarrowPhase::new(0.02);
     let ha = Vec3::new(0.5, 0.3, 0.7);
     let hb = Vec3::new(0.4, 0.6, 0.2);
-    let ia = np.poly_for(&Shape::Box { half: ha }).unwrap_or(usize::MAX);
-    let ib = np.poly_for(&Shape::Box { half: hb }).unwrap_or(usize::MAX);
+    let ia = crate::support::poly_for(&mut np, &Shape::Box { half: ha }).unwrap_or(usize::MAX);
+    let ib = crate::support::poly_for(&mut np, &Shape::Box { half: hb }).unwrap_or(usize::MAX);
     assert!(ia != usize::MAX && ib != usize::MAX, "盒多面体未注册");
     let mut rng: u32 = 0x51ED_2701;
     let mut next = move || {

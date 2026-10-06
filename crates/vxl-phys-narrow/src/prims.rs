@@ -12,7 +12,7 @@ pub(crate) fn sphere_convex_ab(
     cpos: Vec3,
     crot: Quat,
 ) -> Option<(Vec3, f32, Vec3)> {
-    let idx = np.poly_for(convex)?;
+    let idx = crate::support::poly_for(np, convex)?;
     np.ws.poly_b.fill(&np.ws.polys[idx], cpos, crot);
     let (closest, d2, inside, in_n) = closest_point_on_poly(&np.ws.poly_b, center);
     if inside {
@@ -57,7 +57,7 @@ pub(crate) fn capsule_axis_reach(
     opos: Vec3,
     orot: Quat,
 ) -> Option<(Vec3, Vec3)> {
-    let idx = np.poly_for(other)?;
+    let idx = crate::support::poly_for(np, other)?;
     np.ws.poly_b.fill(&np.ws.polys[idx], opos, orot);
     let seg = s1 - s0;
     let seg_len2 = seg.length_squared();
