@@ -36,6 +36,31 @@ bash scripts/vocab_scan.sh . > /tmp/vocab.log 2>&1; echo "vocab=$?"
 同风格补挂，门禁链现在真的五项全绿。凡是"门禁全绿"的结论都必须**逐项贴退出码**，
 不能只看 test。
 
+## 等 CI（推送之后；**别用 Start-Sleep 盲等**，2026-10-04 立此条）
+
+**实测口径**（run 37207498589，合 main 那次全量）：整轮 wall-clock **26 分 14 秒**，其中
+关键路径是 matrix 的 `Test（工作区）` **一步的编译** —— cargo 自报 `Finished release in
+23m 05s`（MSVC 行；GCC 9m 33s / Clang 11m 58s），而 384 个用例的**执行是秒级**；其余 18 个
+job 全在 7 分钟内收口。⇒ 等 CI 的正确姿势是**事件驱动**，不是按分钟切片睡觉：
+`Start-Sleep 720` 一跳 12 分钟，CI 早就收口了人还在睡，26 分钟能等到 40 分钟。
+
+```bash
+cd "/d/KF/BSHSQ"
+gh pr checks <PR号> --watch                 # 收口即返回（默认 10s 刷新；-i 可调）
+gh run watch <run-id> --exit-status         # 无 PR 时（workflow_dispatch / main 推送）
+gh run list --limit 5                       # 分不清"排队"还是"在跑"时先看 status
+```
+
+- **只等 PR 那一条 run**：分支推送已不再触发全量（`on.push` 收窄到 main，理由见 ci.yml
+  成本注释 ⑤），同一 commit 双份 20 个 job 的时代结束了。
+- 非 watch 的 `gh pr checks` 在仍有 pending 时**退出码 8**（不是失败）——写进脚本时要按
+  8/0/其它三档判，别把 8 当红。
+- 卡住先看是排队还是执行：`queued` 久 = 并发额度被占（本仓一轮要占 20 个 job），
+  不是代码问题；`in_progress` 久 = 大概率就是 MSVC 那 23 分钟编译。
+- **别拿"等 CI"当免跑本地的理由**：本地一条命令 `bash scripts/gate_all.sh`（热态 3–4 分钟）
+  永远先跑；CI 是复核，不是第一道。⚠️ 2026-10-06 更正：`.git/hooks` 里**并没有**装 pre-push
+  钩子（`git config core.hooksPath` 也空）⇒ 这一步**靠自觉**，不会自动发生。
+
 ## 规模档门（2026-09-22 新增；**10 万+10 万档的唯一自动门**）
 
 ```bash
@@ -118,10 +143,10 @@ bash scripts/ab_perf.sh HEAD~1 5 'ns/点' \
 
 ## 行为门（三命令四哈希）
 
-| 场景 | 命令 | 基线（2026-09-15，参与式降点档） |
+| 场景 | 命令 | 基线（2026-09-15 立；两条哈希值 2026-10-06 随 #6/#4 换代刷新） |
 |---|---|---|
-| 门槛 + 压力 | `cargo run --release -p vxl-phys --example m0_gates` | 门槛 `0x6536fa7211a315187180182438237dda`、末态活跃 **5**、PASS；压力 `0x417be20a8e49c9b0436987415ac9961a`（report-only） |
-| 确定性 | `cargo run --release -p vxl-phys --example determinism` | `FINAL_HASH=0x711be572cfe0e7eefb2cf51550fd4dd5`（10 轮逐位一致） |
+| 门槛 + 压力 | `cargo run --release -p vxl-phys --example m0_gates` | 门槛 `0x6536fa7211a315187180182438237dda`、末态活跃 **5**、PASS；压力 `0xc23b81902a74b977c8e74e114cf9737a`（report-only） |
+| 确定性 | `cargo run --release -p vxl-phys --example determinism` | `FINAL_HASH=0x655cdbf40ed7e800b5f46785f94fec1e`（10 轮逐位一致） |
 | T4 碎片雨 | `cargo run --release -p vxl-phys --example m1_islands` | 解算扩展 ≥3×（实测 4.39×）+ 串行/并行末态哈希逐位一致。**别加 `--` 参数**：会被当成第一个位置参数（clusters），4000 会跑到 ticks 上 |
 | **默认档长跑稳定性**（新增 2026-09-20） | `cargo test --release -p vxl-phys --test default_tier_stability` | 两个测试：① 冻结读数 `top_y 2.7285 / Σv² 1.8124 / awake 216 / manifolds 919`（6×6×6、3000 步、默认档，两次连跑逐位一致；**2026-09-21 换代**，旧世代 `2.7223 / 2.1488 / 216 / 835`）；② **金丝雀**——降到 4 扫掠必须明显不同（实测流形 919→455、Σv²→2.2089、清醒→188、top_y→2.7347），否则场景不灵敏、门无效。**为什么要它**：金样配方自带 `16` 迭代 ⇒ 默认档（6 扫掠）的改动**金样门看不见**（`EXPERIMENTS` 记过的覆盖缺口）。改动默认档时更新那四个冻结值并按 ADR 0004 记换代理由；`--nocapture` 可读实际读数 |
 
