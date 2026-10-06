@@ -33,10 +33,10 @@ pub(crate) fn capsule_ab(
     out: &mut Vec<Manifold>,
 ) {
     let axis = Mat3::from_quat(ra).mul_vec3(Vec3::Y);
-    // 凸体对方走**解析最近点**（`EXPERIMENTS.md` R.2）；对方不是多面体（胶囊/球）
-    // 时退回 GJK 距离老路。两条路都给出对方**表面点** `p_other`。
+    // 凸体对方走**解析最近点**（`EXPERIMENTS.md` R.2）；对方不是多面体（胶囊/球）时退回 GJK 距离老路，两条路都给出对方**表面点** `p_other`。
     let (n_raw, p_other) = if np.poly_for(sb).is_some() {
-        let Some((p_sample, surf)) = np.capsule_axis_reach(
+        let Some((p_sample, surf)) = crate::prims::capsule_axis_reach(
+            np,
             pa - axis * half_height,
             pa + axis * half_height,
             radius,
@@ -56,7 +56,7 @@ pub(crate) fn capsule_ab(
         };
         // 借用作用域：`support_of` 借 `np.hulls` ⇒ 先把结论算成局部值。
         let reach = match np.support_of(sb, pb, rb) {
-            Some(other) => DefaultNarrowPhase::capsule_reach(&cap, &other),
+            Some(other) => crate::prims::capsule_reach(&cap, &other),
             None => None,
         };
         let Some((_n, _dist, p_cap, p_other)) = reach else {
@@ -103,7 +103,7 @@ pub(crate) fn capsule_ab(
     }
     np.ws.cand.clear();
     np.ws.cand.extend_from_slice(&local);
-    if !np.select_contacts(np.min_point_sep) {
+    if !crate::prims::select_contacts(np) {
         return;
     }
     out.push(Manifold {
@@ -132,7 +132,8 @@ pub(crate) fn capsule_ba(
     let axis = Mat3::from_quat(rb).mul_vec3(Vec3::Y);
     // 同臂 1：凸体对方走解析最近点，非多面体（胶囊/球）退回 GJK 老路。
     let (n_raw, p_other) = if np.poly_for(sa).is_some() {
-        let Some((p_sample, surf)) = np.capsule_axis_reach(
+        let Some((p_sample, surf)) = crate::prims::capsule_axis_reach(
+            np,
             pb - axis * half_height,
             pb + axis * half_height,
             radius,
@@ -151,7 +152,7 @@ pub(crate) fn capsule_ba(
             rot: Mat3::from_quat(rb),
         };
         let reach = match np.support_of(sa, pa, ra) {
-            Some(other) => DefaultNarrowPhase::capsule_reach(&cap, &other),
+            Some(other) => crate::prims::capsule_reach(&cap, &other),
             None => None,
         };
         let Some((_n, _dist, p_cap, p_other)) = reach else {
@@ -194,7 +195,7 @@ pub(crate) fn capsule_ba(
     }
     np.ws.cand.clear();
     np.ws.cand.extend_from_slice(&local);
-    if !np.select_contacts(np.min_point_sep) {
+    if !crate::prims::select_contacts(np) {
         return;
     }
     out.push(Manifold {

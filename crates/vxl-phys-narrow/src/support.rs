@@ -277,7 +277,7 @@ impl DefaultNarrowPhase {
                 }
             }
         }
-        if self.ws.cand.is_empty() || !self.select_contacts(self.min_point_sep) {
+        if self.ws.cand.is_empty() || !crate::prims::select_contacts(self) {
             return;
         }
         let deepest = self.ws.cand[0];

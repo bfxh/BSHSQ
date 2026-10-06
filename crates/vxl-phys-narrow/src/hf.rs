@@ -52,7 +52,7 @@ pub(crate) fn sphere_heightfield(
     if np.ws.cand.is_empty() {
         return false;
     }
-    np.select_contacts(np.min_point_sep)
+    crate::prims::select_contacts(np)
 }
 
 /// 多面体顶点-高度场：逐顶点采样（skin 预期接触），最深 ≤4。
@@ -81,7 +81,7 @@ pub(crate) fn poly_heightfield(
     if np.ws.cand.is_empty() {
         return false;
     }
-    np.select_contacts(np.min_point_sep)
+    crate::prims::select_contacts(np)
 }
 
 /// 胶囊 × 高度场：**沿中心线取 N 个样本**，每个样本按半径 r 的球处理
@@ -115,7 +115,7 @@ pub(crate) fn capsule_heightfield(
     if np.ws.cand.is_empty() {
         return false;
     }
-    np.select_contacts(np.min_point_sep)
+    crate::prims::select_contacts(np)
 }
 
 // ⚠️ **本文件曾有一份 `hull_heightfield`，2026-10-05 删除（死代码）**：
