@@ -8,6 +8,8 @@
 //!    同一大曲线下把预算收到 `B1K`（1024）⇒ site 被压回 1024 以内 ⇒ 碎块变少。
 //!    （体素取 **0.1 细档**是为了让弹坑里的格数 ≫ site 数：0.5 档下弹坑只有 ~343 格，
 //!    site 数根本咬不住，预算这条判据就成了摆设。）
+//! ④ `DestructionConfig::depth` **不是装饰**：`Two` / `Three` 的多轮细分尚未实现 ⇒ 显式
+//!    断言拒绝，**不静默降级成一轮**（多轮需要碎片自身的体素表示，属单独一片）。
 //!
 //! 放**集成测试**而非 `src/tests.rs` 内联模块：后者受 `god.gate.json` 行数棘轮管（只准减），
 //! 新文件只判阈值——这是仓内加测试的既定通道（`tests/debris_mass.rs` 头注同款说明）。
@@ -15,7 +17,7 @@
 use vxl_phys::core::Quat;
 use vxl_phys::{DestructionExt, PhysConfig, Shape, Vec3, World};
 use vxl_phys_destruction::impact_tiers::TierCurve;
-use vxl_phys_destruction::{DestructionConfig, FragmentBudget};
+use vxl_phys_destruction::{DestructionConfig, FractureDepth, FragmentBudget};
 
 /// 场景：0.1 细档体素（地板 + 一面墙），一发 12 m/s 的盒弹打上去。
 fn scene() -> World {
@@ -99,4 +101,19 @@ fn tiered_curve_and_budget_reach_the_strategy() {
         capped < big,
         "收预算应把碎块压下来（B100K {big} → B1K {capped}）"
     );
+}
+
+/// `depth` 不是装饰：多轮细分未实现 ⇒ 入口显式拒绝，不静默按一轮处理。
+/// （多轮落地后，这条应改成"`Two` 真的比 `One` 产出更多碎块"的正向判据。）
+#[test]
+#[should_panic(expected = "尚未实现")]
+fn tiered_multiround_depth_is_rejected_not_silently_downgraded() {
+    let mut w = scene();
+    let cfg = DestructionConfig {
+        budget: FragmentBudget::B1K,
+        depth: FractureDepth::Two,
+        ..DestructionConfig::default()
+    };
+    // 断言在函数入口（先于冲击扫描）⇒ 不需要先 `step`。
+    w.apply_impact_destruction_tiered(0, &cfg, small_curve(), 1000.0);
 }
