@@ -553,4 +553,4 @@ fn cone_surface(q: Vec3, half_height: f32, radius: f32) -> (Vec3, f32, Vec3) {
 // 能直接看见父模块的私有 `point_triangle`；crate 级新文件则要把它提成 `pub(crate)` 并给
 // `narrow/lib.rs` 加 `mod` 声明，而那个文件只剩 1 行预算（48 行 / 基线 49）⇒ 加声明就顶棘轮。
 #[path = "mesh_mesh.rs"]
-mod mesh_mesh;
+pub(crate) mod mesh_mesh;
