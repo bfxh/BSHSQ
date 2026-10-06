@@ -77,7 +77,7 @@ mod tests {
         assert_tree_invariants(&t);
         // 叶子 a 原地生长（远小于 4× 周长比 ⇒ 走就地生长分支）。
         let bigger = aabb_at(0.6, 0.0, 0.6);
-        let (nl, changed) = t.move_proxy_scaled(a, bigger, 0.02);
+        let (nl, changed) = t.move_proxy_scaled(a, bigger, bigger.grown(0.02));
         assert!(changed, "盒变化必须报 changed");
         assert_tree_invariants(&t);
         let _ = (b, nl);
@@ -94,11 +94,8 @@ mod tests {
         }
         // 逐叶位移（会走 fix_upwards ⇒ 可能触发 balance 旋转）。
         for k in 0..3u32 {
-            let (_, changed) = t.move_proxy_scaled(
-                leaves[k as usize],
-                aabb_at(k as f32 * 10.0 + 2.0, 1.0, 0.5),
-                0.02,
-            );
+            let e = aabb_at(k as f32 * 10.0 + 2.0, 1.0, 0.5);
+            let (_, changed) = t.move_proxy_scaled(leaves[k as usize], e, e.grown(0.02));
             assert!(changed);
             assert_tree_invariants(&t);
         }

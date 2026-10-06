@@ -100,7 +100,7 @@
 | crate | 模块 | 分类 | 热路径要点 |
 |---|---|---|---|
 | `broad` | `bvh.rs` | 生产树 | `move_proxy_scaled`（就地生长 + 提前退出 refit `fix_upwards_grow`，见 M1-PLAN §9） |
-| `broad` | `lib.rs` | 缓存/查询 | 查询缓存（fat 盒）＋ 候选过滤；边距 `fat_margin_for`（K=6，M1-PLAN §10） |
+| `broad` | `lib.rs` | 缓存/查询 | 查询缓存（fat 盒）＋ 候选过滤；边距 `fat_box_for`（**各轴独立**，K=6，M1-PLAN §10 / issue #4） |
 | `broad` | `wide.rs` / `bvh8.rs` | **研究资产**（未接线，ADR 0001） | 保留 B 树插入/全叶同深/三树形对拍 |
 | `narrow` | `lib.rs` 分派 | 形状对路由 | 盒对 SAT 快路径 → 通用凸体路径 → 高度场特化 → **provider 分支** |
 | `narrow` | `heightfield.rs` | 高度场原语 + provider 实现 | 双线性采样 + 解析法线 |
