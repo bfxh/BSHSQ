@@ -37,10 +37,14 @@
 #      ⇒ 均值 **−27%**；本机 8B 规模档据此首次把宽相均值压到 10 ms 以下）。
 #      **计时冻结值不跟着改**（软门口径：留 2026-09-22 的参考，免得把机器状态固化进判据）。
 #
-# **分相位验收量（只报不判，2026-10-04 加）**：M1 判据里的「宽相 ≤15 ms（P2）／窄相 ≤25 ms（P4）／
-# 解算（P3 瞬态）」此前**都没有标准读数出口**——只有 `m1_scale` 的逐 tick 行，窗口与统计量每次靠
-# 人手拼。这里在**沉降期窗口**（前 `活跃 tick 数` 个 tick；场景是"雨落+沉降"、活跃期是从 tick 1
-# 起的连续前缀，`flips=0` 保证其后不再唤醒）上给 **宽相 / 窄相 / 解算** 三行，各带 均 / p95 / max。
+# **分相位验收量（只报不判，2026-10-04 加；2026-10-07 补稳态窗口）**：M1 判据里的
+# 「宽相 ≤15 ms（P2）／窄相 ≤25 ms（P4）／解算（P3 瞬态）」此前**都没有标准读数出口**——只有
+# `m1_scale` 的逐 tick 行，窗口与统计量每次靠人手拼。这里给**两个窗口**、各 **宽相 / 窄相 / 解算**
+# 三行（均 / p95 / max）：
+#   ① **沉降期窗口** = 前 `活跃 tick 数` 个 tick（场景是"雨落+沉降"、活跃期是从 tick 1 起的连续
+#      前缀，`flips=0` 保证其后不再唤醒）——这是**坍塌相**，`OPEN-PROBLEMS.md` #1 定为**瞬态档**；
+#   ② **稳态窗口** = 其后直到末 tick —— 口径 #1 明写「性能门取沉降后稳态窗口」，此前脚本**没有
+#      这个出口**（只有全期均/最差）⇒ 2026-10-07 补上；仍**只报不判**（判据归参考硬件）。
 # ⚠️ **不判**：`SPEC.md` §5 写死「性能门只在参考硬件（§3 = i5-13490F）上判定」，本脚本跑的
 # 机器未必是参考硬件 ⇒ 报数供参考机器复核，**别拿本机的绝对值判通过/不通过**。
 
@@ -159,26 +163,44 @@ case "$verdict_time" in
 esac
 
 # —— **分相位**验收量（P2 宽相峰 / P3 解算 / P4 窄相的被测量；**只报不判**，理由见脚本头）——
-# 窗口 = 沉降期（前 `active` 个 tick 的逐 tick 列）；统计量给三个，因为"峰"在**单点 max** 上不可
-# 复现（同码多跑会飘）——p95 才是可判的那个，max 一并印出来供对照。
+# 两个窗口都给：**沉降期**（前 `active` tick = 坍塌相，瞬态档）与**稳态尾窗**（其后到末 tick =
+# 口径 #1 说的"性能门窗口"，此前没有出口）。统计量给三个，因为"峰"在**单点 max** 上不可复现
+# （同码多跑会飘）——p95 才是可判的那个，max 一并印出来供对照。
 # ⚠️ 宽相列（`$2`）里还含 AABB/树/查询三个分项 ⇒ 用 `(AABB` 前的那个数（宽相合计）当锚，别整段抓。
-phase_report() { # phase_report <名字> <字段号> <抽取模式>
+phase_window() { # phase_window <settling|steady>：输出该窗口的逐 tick 行
+    case "$1" in
+        settling) grep '^tick' "$log" | head -n "${active:-0}" ;;
+        steady)   grep '^tick' "$log" | tail -n "+$(( ${active:-0} + 1 ))" ;;
+    esac
+}
+phase_report() { # phase_report <名字> <字段号> <抽取模式> <窗口>
     local vals
-    vals=$(grep '^tick' "$log" | awk -F'|' 'NF>=8 {print $'"$2"'}' \
-        | grep -oE "$3" | grep -oE '[0-9]+\.?[0-9]*' | head -n "${active:-0}" | sort -g)
+    vals=$(phase_window "$4" | awk -F'|' 'NF>=8 {print $'"$2"'}' \
+        | grep -oE "$3" | grep -oE '[0-9]+\.?[0-9]*' | sort -g)
     if [ -z "$vals" ]; then
-        echo "  ⚠️ 解析不到「$1」列（输出格式变了？）" >&2
+        echo "  ⚠️ 解析不到「$1」列（窗口=$4；输出格式变了？）" >&2
         return
     fi
-    printf '  %-12s 均 %s ｜ p95 %s ｜ max %s\n' "$1" \
+    printf '  %-8s 均 %s ｜ p95 %s ｜ max %s\n' "$1" \
         "$(printf '%s\n' "$vals" | awk '{t+=$1} END{printf "%.2f", t/NR}')" \
         "$(printf '%s\n' "$vals" | awk '{v[NR]=$1} END{i=int(NR*0.95); if(i<1)i=1; print v[i]}')" \
         "$(printf '%s\n' "$vals" | tail -1)"
 }
-echo "—— 分相位（只报不判；窗口 = 沉降期前 ${active:-0} tick）"
-phase_report 宽相 2 '[0-9.]+ \(AABB'
-phase_report 窄相 3 '[0-9.]+'
-phase_report 解算 4 '[0-9.]+'
+total_ticks=$(grep -c '^tick' "$log" || true)
+steady_n=$(( total_ticks - ${active:-0} ))
+echo "—— 分相位（只报不判）：沉降期前 ${active:-0} tick ｜ 稳态尾窗 ${steady_n} tick"
+echo "  [沉降期（坍塌相；瞬态档，OPEN-PROBLEMS #1）]"
+phase_report 宽相 2 '[0-9.]+ \(AABB' settling
+phase_report 窄相 3 '[0-9.]+' settling
+phase_report 解算 4 '[0-9.]+' settling
+echo "  [稳态窗口（口径 #1：性能门取此窗；判据归参考硬件）]"
+if [ "$steady_n" -gt 0 ]; then
+    phase_report 宽相 2 '[0-9.]+ \(AABB' steady
+    phase_report 窄相 3 '[0-9.]+' steady
+    phase_report 解算 4 '[0-9.]+' steady
+else
+    echo "  ⚠️ 稳态窗口为空（活跃期覆盖到末 tick，如全程不睡的档）——该场景没有稳态可分"
+fi
 
   if [ "$fail" -eq 0 ]; then
     case "$verdict_time" in
