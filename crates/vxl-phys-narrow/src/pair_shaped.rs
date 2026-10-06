@@ -67,250 +67,245 @@ impl DefaultNarrowPhase {
         };
         pair_dispatch::process_pair_shaped(self, &mut args);
     }
+}
 
-    /// 非 heightfield 对的形状分发（各臂见对应 helper）。
-    #[allow(clippy::too_many_arguments)]
-    fn pair_non_heightfield(
-        &mut self,
-        a: u32,
-        b: u32,
-        bodies: &vxl_phys_core::BodySet,
-        sa: &Shape,
-        sb: &Shape,
-        pa: Vec3,
-        ra: Quat,
-        pb: Vec3,
-        rb: Quat,
-        out: &mut Vec<Manifold>,
-    ) {
-        // 三角网 × 其它：**逐顶点采样**（非凸 ⇒ 不进 GJK/EPA；实现在 `mesh_pair.rs`，
-        // 受理面 = 盒/球/胶囊/圆柱/锥 + **另一个三角网**（T2 续，双面口径），其余如实不受理）。
-        if matches!(*sa, Shape::TriMesh { .. }) || matches!(*sb, Shape::TriMesh { .. }) {
-            crate::mesh_pair::mesh_mesh::mesh_dispatch(self, a, b, sa, sb, pa, ra, pb, rb, out);
+/// 非 heightfield 对的形状分发（各臂见对应 helper）。
+#[allow(clippy::too_many_arguments)]
+fn pair_non_heightfield(
+    np: &mut DefaultNarrowPhase,
+    a: u32,
+    b: u32,
+    bodies: &vxl_phys_core::BodySet,
+    sa: &Shape,
+    sb: &Shape,
+    pa: Vec3,
+    ra: Quat,
+    pb: Vec3,
+    rb: Quat,
+    out: &mut Vec<Manifold>,
+) {
+    // 三角网 × 其它：**逐顶点采样**（非凸 ⇒ 不进 GJK/EPA；实现在 `mesh_pair.rs`，
+    // 受理面 = 盒/球/胶囊/圆柱/锥 + **另一个三角网**（T2 续，双面口径），其余如实不受理）。
+    if matches!(*sa, Shape::TriMesh { .. }) || matches!(*sb, Shape::TriMesh { .. }) {
+        crate::mesh_pair::mesh_mesh::mesh_dispatch(np, a, b, sa, sb, pa, ra, pb, rb, out);
+        return;
+    }
+    match (*sa, *sb) {
+        (Shape::Sphere { radius: ra_ }, Shape::Sphere { radius: rb_ }) => {
+            sphere_sphere(a, b, pa, ra_, pb, rb_, out);
+        }
+        (Shape::Sphere { radius }, convex) => {
+            sphere_convex_pair(np, a, b, pa, radius, &convex, pb, rb, out);
+        }
+        (convex, Shape::Sphere { radius }) => {
+            // 球在 b：convex = a。用球-凸路径后翻转法线。
+            convex_sphere_pair(np, a, b, pa, ra, &convex, pb, radius, out);
+        }
+        (Shape::Box { half: ha }, Shape::Box { half: hb }) => {
+            box_pair(np, a, b, bodies, pa, ra, pb, rb, ha, hb, out);
+        }
+        (
+            Shape::Box { .. } | Shape::Cylinder { .. } | Shape::Cone { .. },
+            Shape::Box { .. } | Shape::Cylinder { .. } | Shape::Cone { .. },
+        ) => {
+            poly_pair(np, a, b, bodies, sa, sb, pa, ra, pb, rb, out);
+        }
+        (
+            Shape::Capsule {
+                half_height,
+                radius,
+            },
+            _,
+        ) => {
+            capsule::capsule_ab(np, a, b, pa, ra, pb, rb, sb, half_height, radius, out);
+        }
+        (
+            _,
+            Shape::Capsule {
+                half_height,
+                radius,
+            },
+        ) => {
+            capsule::capsule_ba(np, a, b, pa, ra, pb, rb, sa, half_height, radius, out);
+        }
+        _ => {}
+    }
+}
+
+/// （球, 凸体）：用球-凸路径，法线为 a→b。
+#[allow(clippy::too_many_arguments)]
+fn sphere_convex_pair(
+    np: &mut DefaultNarrowPhase,
+    a: u32,
+    b: u32,
+    pa: Vec3,
+    radius: f32,
+    convex: &Shape,
+    pb: Vec3,
+    rb: Quat,
+    out: &mut Vec<Manifold>,
+) {
+    if let Some((n, depth, point)) = crate::prims::sphere_convex_ab(np, pa, radius, convex, pb, rb)
+    {
+        out.push(Manifold {
+            a,
+            b,
+            normal: n,
+            points: [ContactPoint {
+                point,
+                depth,
+                feature: 0,
+            }]
+            .into(),
+        });
+    }
+}
+
+/// （凸体, 球）：球在 b，用球-凸路径后**翻转法线**。
+#[allow(clippy::too_many_arguments)]
+fn convex_sphere_pair(
+    np: &mut DefaultNarrowPhase,
+    a: u32,
+    b: u32,
+    pa: Vec3,
+    ra: Quat,
+    convex: &Shape,
+    pb: Vec3,
+    radius: f32,
+    out: &mut Vec<Manifold>,
+) {
+    if let Some((n_ba, depth, point)) =
+        crate::prims::sphere_convex_ab(np, pb, radius, convex, pa, ra)
+    {
+        out.push(Manifold {
+            a,
+            b,
+            normal: -n_ba,
+            points: [ContactPoint {
+                point,
+                depth,
+                feature: 0,
+            }]
+            .into(),
+        });
+    }
+}
+
+/// （盒, 盒）：T3 盒对专用路径（轴缓存 → SAT → clip）。
+#[allow(clippy::too_many_arguments)]
+fn box_pair(
+    np: &mut DefaultNarrowPhase,
+    a: u32,
+    b: u32,
+    bodies: &vxl_phys_core::BodySet,
+    pa: Vec3,
+    ra: Quat,
+    pb: Vec3,
+    rb: Quat,
+    ha: Vec3,
+    hb: Vec3,
+    out: &mut Vec<Manifold>,
+) {
+    // ===== T3 盒对专用路径 =====
+    // 轴由 (rot, half) 直生（每体 3 次旋转），供 SAT/clip 直接消费。
+    // 【实验】不再调用分离预筛：其 15 轴是 SAT 21 轴的子集（面轴 ± 同解），
+    // 预筛不拒的对必然要再做一遍同样的 15 轴测试 ⇒ 对真接触对是纯重复。
+    np.ws.box_a = Some((ha, pa));
+    np.ws.box_b = Some((hb, pb));
+    // 体轴缓存（T3）：同体连续出现 ⇒ 每体每帧只算一次 3 次旋转。
+    let fp_a = rot_fp(ra);
+    np.ws.box_axes_a = Some(if np.ws.cached_ax_a.0 == a && np.ws.cached_ax_a.1 == fp_a {
+        np.ws.cached_ax_a.2
+    } else {
+        let ax = box_axes(ra);
+        np.ws.cached_ax_a = (a, fp_a, ax);
+        ax
+    });
+    let fp_b = rot_fp(rb);
+    np.ws.box_axes_b = Some(if np.ws.cached_ax_b.0 == b && np.ws.cached_ax_b.1 == fp_b {
+        np.ws.cached_ax_b.2
+    } else {
+        let ax = box_axes(rb);
+        np.ws.cached_ax_b = (b, fp_b, ax);
+        ax
+    });
+    if let Some((sep, n, src)) = np.sat(pb - pa) {
+        // 速度充气视野（见 `predict_dt` 字段注）：`0` ⇒ 逐位同现行。
+        np.ws.inflate = np.predict_inflate(a, b, bodies, n);
+        if sep > np.skin + np.ws.inflate {
             return;
         }
-        match (*sa, *sb) {
-            (Shape::Sphere { radius: ra_ }, Shape::Sphere { radius: rb_ }) => {
-                sphere_sphere(a, b, pa, ra_, pb, rb_, out);
-            }
-            (Shape::Sphere { radius }, convex) => {
-                self.sphere_convex_pair(a, b, pa, radius, &convex, pb, rb, out);
-            }
-            (convex, Shape::Sphere { radius }) => {
-                // 球在 b：convex = a。用球-凸路径后翻转法线。
-                self.convex_sphere_pair(a, b, pa, ra, &convex, pb, radius, out);
-            }
-            (Shape::Box { half: ha }, Shape::Box { half: hb }) => {
-                self.box_pair(a, b, bodies, pa, ra, pb, rb, ha, hb, out);
-            }
-            (
-                Shape::Box { .. } | Shape::Cylinder { .. } | Shape::Cone { .. },
-                Shape::Box { .. } | Shape::Cylinder { .. } | Shape::Cone { .. },
-            ) => {
-                self.poly_pair(a, b, bodies, sa, sb, pa, ra, pb, rb, out);
-            }
-            (
-                Shape::Capsule {
-                    half_height,
-                    radius,
-                },
-                _,
-            ) => {
-                capsule::capsule_ab(self, a, b, pa, ra, pb, rb, sb, half_height, radius, out);
-            }
-            (
-                _,
-                Shape::Capsule {
-                    half_height,
-                    radius,
-                },
-            ) => {
-                capsule::capsule_ba(self, a, b, pa, ra, pb, rb, sa, half_height, radius, out);
-            }
-            _ => {}
-        }
-    }
-
-    /// （球, 凸体）：用球-凸路径，法线为 a→b。
-    #[allow(clippy::too_many_arguments)]
-    fn sphere_convex_pair(
-        &mut self,
-        a: u32,
-        b: u32,
-        pa: Vec3,
-        radius: f32,
-        convex: &Shape,
-        pb: Vec3,
-        rb: Quat,
-        out: &mut Vec<Manifold>,
-    ) {
-        if let Some((n, depth, point)) =
-            crate::prims::sphere_convex_ab(self, pa, radius, convex, pb, rb)
-        {
+        if np.clip(n, src) {
             out.push(Manifold {
                 a,
                 b,
                 normal: n,
-                points: [ContactPoint {
-                    point,
-                    depth,
-                    feature: 0,
-                }]
-                .into(),
+                points: ContactPoints::from_slice(&np.ws.cand),
             });
         }
     }
+}
 
-    /// （凸体, 球）：球在 b，用球-凸路径后**翻转法线**。
-    #[allow(clippy::too_many_arguments)]
-    fn convex_sphere_pair(
-        &mut self,
-        a: u32,
-        b: u32,
-        pa: Vec3,
-        ra: Quat,
-        convex: &Shape,
-        pb: Vec3,
-        radius: f32,
-        out: &mut Vec<Manifold>,
-    ) {
-        if let Some((n_ba, depth, point)) =
-            crate::prims::sphere_convex_ab(self, pb, radius, convex, pa, ra)
-        {
+/// （盒|圆柱|圆锥, 盒|圆柱|圆锥）：通用路径（多面体填充 + 逐顶点/通用 SAT）。
+#[allow(clippy::too_many_arguments)]
+fn poly_pair(
+    np: &mut DefaultNarrowPhase,
+    a: u32,
+    b: u32,
+    bodies: &vxl_phys_core::BodySet,
+    sa: &Shape,
+    sb: &Shape,
+    pa: Vec3,
+    ra: Quat,
+    pb: Vec3,
+    rb: Quat,
+    out: &mut Vec<Manifold>,
+) {
+    // 圆柱/圆锥参与的对：走通用路径（多面体填充 + 逐顶点/通用 SAT）。
+    let ia = match np.poly_for(sa) {
+        Some(i) => i,
+        None => return,
+    };
+    let ib = match np.poly_for(sb) {
+        Some(i) => i,
+        None => return,
+    };
+    // 世界多面体填充缓存（T3）：键 = (体号, 多面体序号)；pair 按
+    // (a,b) 排序 ⇒ 同一体连续命中，每体每帧只填一次（纯函数）。
+    if np.ws.cached_a != (a, ia as u64) {
+        np.ws.poly_a.fill(&np.ws.polys[ia], pa, ra);
+        np.ws.cached_a = (a, ia as u64);
+        np.probe.poly_fills += 1;
+        np.probe.poly_fill_verts += np.ws.poly_a.verts.len() as u64;
+    }
+    if np.ws.cached_b != (b, ib as u64) {
+        np.ws.poly_b.fill(&np.ws.polys[ib], pb, rb);
+        np.ws.cached_b = (b, ib as u64);
+        np.probe.poly_fills += 1;
+        np.probe.poly_fill_verts += np.ws.poly_b.verts.len() as u64;
+    }
+    // 盒对 SAT 快路径参数（圆柱 → None，走通用逐顶点路径）。
+    np.ws.box_a = match sa {
+        Shape::Box { half } => Some((*half, pa)),
+        _ => None,
+    };
+    np.ws.box_b = match sb {
+        Shape::Box { half } => Some((*half, pb)),
+        _ => None,
+    };
+    if let Some((sep, n, src)) = np.sat(pb - pa) {
+        // 速度充气视野（同盒对路径；见 `predict_dt` 字段注）。
+        np.ws.inflate = np.predict_inflate(a, b, bodies, n);
+        if sep > np.skin + np.ws.inflate {
+            return;
+        }
+        if np.clip(n, src) {
             out.push(Manifold {
                 a,
                 b,
-                normal: -n_ba,
-                points: [ContactPoint {
-                    point,
-                    depth,
-                    feature: 0,
-                }]
-                .into(),
+                normal: n,
+                points: ContactPoints::from_slice(&np.ws.cand),
             });
-        }
-    }
-
-    /// （盒, 盒）：T3 盒对专用路径（轴缓存 → SAT → clip）。
-    #[allow(clippy::too_many_arguments)]
-    fn box_pair(
-        &mut self,
-        a: u32,
-        b: u32,
-        bodies: &vxl_phys_core::BodySet,
-        pa: Vec3,
-        ra: Quat,
-        pb: Vec3,
-        rb: Quat,
-        ha: Vec3,
-        hb: Vec3,
-        out: &mut Vec<Manifold>,
-    ) {
-        // ===== T3 盒对专用路径 =====
-        // 轴由 (rot, half) 直生（每体 3 次旋转），供 SAT/clip 直接消费。
-        // 【实验】不再调用分离预筛：其 15 轴是 SAT 21 轴的子集（面轴 ± 同解），
-        // 预筛不拒的对必然要再做一遍同样的 15 轴测试 ⇒ 对真接触对是纯重复。
-        self.ws.box_a = Some((ha, pa));
-        self.ws.box_b = Some((hb, pb));
-        // 体轴缓存（T3）：同体连续出现 ⇒ 每体每帧只算一次 3 次旋转。
-        let fp_a = rot_fp(ra);
-        self.ws.box_axes_a = Some(
-            if self.ws.cached_ax_a.0 == a && self.ws.cached_ax_a.1 == fp_a {
-                self.ws.cached_ax_a.2
-            } else {
-                let ax = box_axes(ra);
-                self.ws.cached_ax_a = (a, fp_a, ax);
-                ax
-            },
-        );
-        let fp_b = rot_fp(rb);
-        self.ws.box_axes_b = Some(
-            if self.ws.cached_ax_b.0 == b && self.ws.cached_ax_b.1 == fp_b {
-                self.ws.cached_ax_b.2
-            } else {
-                let ax = box_axes(rb);
-                self.ws.cached_ax_b = (b, fp_b, ax);
-                ax
-            },
-        );
-        if let Some((sep, n, src)) = self.sat(pb - pa) {
-            // 速度充气视野（见 `predict_dt` 字段注）：`0` ⇒ 逐位同现行。
-            self.ws.inflate = self.predict_inflate(a, b, bodies, n);
-            if sep > self.skin + self.ws.inflate {
-                return;
-            }
-            if self.clip(n, src) {
-                out.push(Manifold {
-                    a,
-                    b,
-                    normal: n,
-                    points: ContactPoints::from_slice(&self.ws.cand),
-                });
-            }
-        }
-    }
-
-    /// （盒|圆柱|圆锥, 盒|圆柱|圆锥）：通用路径（多面体填充 + 逐顶点/通用 SAT）。
-    #[allow(clippy::too_many_arguments)]
-    fn poly_pair(
-        &mut self,
-        a: u32,
-        b: u32,
-        bodies: &vxl_phys_core::BodySet,
-        sa: &Shape,
-        sb: &Shape,
-        pa: Vec3,
-        ra: Quat,
-        pb: Vec3,
-        rb: Quat,
-        out: &mut Vec<Manifold>,
-    ) {
-        // 圆柱/圆锥参与的对：走通用路径（多面体填充 + 逐顶点/通用 SAT）。
-        let ia = match self.poly_for(sa) {
-            Some(i) => i,
-            None => return,
-        };
-        let ib = match self.poly_for(sb) {
-            Some(i) => i,
-            None => return,
-        };
-        // 世界多面体填充缓存（T3）：键 = (体号, 多面体序号)；pair 按
-        // (a,b) 排序 ⇒ 同一体连续命中，每体每帧只填一次（纯函数）。
-        if self.ws.cached_a != (a, ia as u64) {
-            self.ws.poly_a.fill(&self.ws.polys[ia], pa, ra);
-            self.ws.cached_a = (a, ia as u64);
-            self.probe.poly_fills += 1;
-            self.probe.poly_fill_verts += self.ws.poly_a.verts.len() as u64;
-        }
-        if self.ws.cached_b != (b, ib as u64) {
-            self.ws.poly_b.fill(&self.ws.polys[ib], pb, rb);
-            self.ws.cached_b = (b, ib as u64);
-            self.probe.poly_fills += 1;
-            self.probe.poly_fill_verts += self.ws.poly_b.verts.len() as u64;
-        }
-        // 盒对 SAT 快路径参数（圆柱 → None，走通用逐顶点路径）。
-        self.ws.box_a = match sa {
-            Shape::Box { half } => Some((*half, pa)),
-            _ => None,
-        };
-        self.ws.box_b = match sb {
-            Shape::Box { half } => Some((*half, pb)),
-            _ => None,
-        };
-        if let Some((sep, n, src)) = self.sat(pb - pa) {
-            // 速度充气视野（同盒对路径；见 `predict_dt` 字段注）。
-            self.ws.inflate = self.predict_inflate(a, b, bodies, n);
-            if sep > self.skin + self.ws.inflate {
-                return;
-            }
-            if self.clip(n, src) {
-                out.push(Manifold {
-                    a,
-                    b,
-                    normal: n,
-                    points: ContactPoints::from_slice(&self.ws.cand),
-                });
-            }
         }
     }
 }

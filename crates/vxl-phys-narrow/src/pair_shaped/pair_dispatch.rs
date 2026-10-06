@@ -199,7 +199,8 @@ fn handle_heightfield_pair(np: &mut DefaultNarrowPhase, args: &mut PairArgs<'_>)
 }
 
 fn handle_generic_pair(np: &mut DefaultNarrowPhase, args: &mut PairArgs<'_>) {
-    np.pair_non_heightfield(
+    super::pair_non_heightfield(
+        np,
         args.a,
         args.b,
         args.bodies,
