@@ -38,7 +38,6 @@ impl GridBroadPhase {
 
     pub(crate) fn insert(
         cells: &mut HashMap<CellKey, Vec<u32>>,
-        aabb: &Aabb,
         cell_min: CellKey,
         cell_max: CellKey,
         id: u32,
@@ -56,7 +55,6 @@ impl GridBroadPhase {
             }
             x += 1;
         }
-        let _ = aabb;
     }
 }
 
@@ -99,7 +97,7 @@ impl BroadPhase for GridBroadPhase {
                 self.cell_of(self.aabbs[i].min),
                 self.cell_of(self.aabbs[i].max),
             );
-            Self::insert(&mut self.cells_static, &self.aabbs[i], cmin, cmax, i as u32);
+            Self::insert(&mut self.cells_static, cmin, cmax, i as u32);
         }
         // 动态：先全部插入（dyn-dyn 去重靠 j > i），再统一查询。
         for i in 0..n {
@@ -110,13 +108,7 @@ impl BroadPhase for GridBroadPhase {
                 self.cell_of(self.aabbs[i].min),
                 self.cell_of(self.aabbs[i].max),
             );
-            Self::insert(
-                &mut self.cells_dynamic,
-                &self.aabbs[i],
-                cmin,
-                cmax,
-                i as u32,
-            );
+            Self::insert(&mut self.cells_dynamic, cmin, cmax, i as u32);
         }
         // 查询。
         for i in 0..n {
