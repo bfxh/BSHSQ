@@ -5,10 +5,8 @@
 //! ⇒ `canon` 放弃规范化 ⇒ 格内原子占位序残留 ⇒ 混沌放大。修复（§25.3，换代级）：`Packet::build`
 //! 的盒按**全量**粒子现算。
 //!
-//! 控制组 [`pure_fluid_same_device_rerun_is_bitwise_identical`]（**判红**）：纯流体同设备两遍必须逐位
-//! 相同——把机制钉在"回读或计时器没坏"上；
-//! 判据 [`mixed_scene_same_device_rerun_is_bitwise_identical`]（2026-09-30 从"只打印"升级）：
-//! 混合场景同设备两遍必须**逐位相同** ⇒ §25.3 常驻受守。
+//! 控制组 [`pure_fluid_same_device_rerun_is_bitwise_identical`]（**判红**）：纯流体同设备两遍必须逐位相同——把机制钉在"回读或计时器没坏"上；
+//! 判据 [`mixed_scene_same_device_rerun_is_bitwise_identical`]（2026-09-30 从"只打印"升级）：混合场景同设备两遍必须**逐位相同** ⇒ §25.3 常驻受守。
 //!
 //! 格序档对拍（§26.3 开放 2b 后）由 `two_class_sorted_bitwise.rs` 承担（含档读点）；本文件专守可复现性。
 //! CI 无适配器 ⇒ 与其它 GPU 探针同口径跳过（不构成 CI 门禁；跑它的是本地全量门禁的 `cargo test`）。
@@ -16,6 +14,7 @@
 use vxl_phys_core::{Quat, Shape, Vec3};
 use vxl_phys_fluid::{BodyPose, FluidConfig, FluidSystem};
 use vxl_phys_gpu::pipeline::{Packet, PacketCfg};
+mod common;
 
 const N: usize = 16;
 const SPACING: f32 = 0.05;
@@ -144,6 +143,7 @@ fn rerun_diff(floor: bool) -> (usize, usize, usize) {
 }
 
 fn have_adapter() -> bool {
+    common::init_logger(); // `RUST_LOG` 非空时把 wgpu 启动日志转到 stderr（issue #30）
     if vxl_phys_gpu::probe::adapters().is_empty() {
         println!("（本机无可用适配器 ⇒ 跳过；与其它 GPU 探针同口径）");
         return false;
@@ -166,8 +166,7 @@ fn pure_fluid_same_device_rerun_is_bitwise_identical() {
     );
 }
 
-/// **报告**（不判红）：混合场景的不可复现规模——如实打印，等 `PLAN-gpu.md` §23.4。
-/// **判据**（2026-09-30 从"只打印"升级）：修复前真不可复现 ⇒ 写不出来；§25.3 之后前提成立。
+/// **报告**（不判红）：混合场景的不可复现规模——如实打印，等 `PLAN-gpu.md` §23.4；**判据**（2026-09-30 从"只打印"升级）：修复前真不可复现 ⇒ 写不出来；§25.3 之后前提成立。
 #[test]
 fn mixed_scene_same_device_rerun_is_bitwise_identical() {
     if !have_adapter() {

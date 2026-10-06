@@ -13,6 +13,10 @@
       }
     },
     "vxl-phys-gpu": {
+      "log": {
+        "why": "**只进 dev**（issue #30 的「抓启动期栈」）：CI 早就设了 `RUST_LOG=wgpu_core=info,wgpu_hal=info`，但**测试二进制没人初始化 logger** ⇒ wgpu 的适配器枚举/设备请求日志一行都出不来，现场只剩 `0xc0000005`（或挂住不返回）。`log` 本就是 `wgpu-core` 的依赖（lock 内既有同一版本 0.4.34 ⇒ 不新增 crate、发布面不变），这里只是把 dev 侧接上 `tests/common/mod.rs` 的最小 stderr logger。**确定性契约零影响**：只在测试二进制里读 `RUST_LOG`、写 stderr；不进任何发布构建、不参与断言与哈希（该环境变量只在 CI 那条 GPU 抖动步里设）。",
+        "version": "0.4.34"
+      },
       "wgpu": {
         "why": "GPU 档（SPEC §8 / M4）的统一入口：Vulkan/Metal/DX12/WebGPU 由它在运行时自选 ⇒ **不绑单一厂商**，与骨架硬性要求一致（另需 CPU 回退且结果一致）。它是**本仓最大的一次依赖扩张**（+101 个传递 crate、冷构建 debug ≈31 s、需 nightly 的 rust-gpu 是另一条工具链问题），因此理由必须写实：① 只给 `vxl-phys-gpu` 用（引擎其它 crate 不依赖它 ⇒ CPU 档的依赖面不变）；② 首个里程碑（密度+力相位）要拿它与 CPU 对拍（同数学/同场景/同哈希口径），**在拿到加速比与一致性读数之前不扩面**；③ 版本钉死（`30`；2026-10-03 由 27.0.1 迁移至此，起因 = wgpu 30 的 API 断裂：push constants 机制移除（新机制 = immediate data；本仓 7 处全为空区间 ⇒ 原位换 `immediate_size: 0`，无卡上立即数，行为不变）、`get_mapped_range` 改返回 `Result`（统一收口 `mapped.rs` 的 `mapped_view`，失败语义与 27 的内部 panic 等价）、`bind_group_layouts` 项改 `Option`、`enumerate_adapters` 改异步（用仓内既有 `block_on` 收口）），靠本基线的 ratchet 与 `cargo-deny` 双守。",
         "version": "30.0.1"
