@@ -55,7 +55,7 @@ pub(crate) fn capsule_ab(
             rot: Mat3::from_quat(ra),
         };
         // 借用作用域：`support_of` 借 `np.hulls` ⇒ 先把结论算成局部值。
-        let reach = match np.support_of(sb, pb, rb) {
+        let reach = match crate::support::support_of(np, sb, pb, rb) {
             Some(other) => crate::prims::capsule_reach(&cap, &other),
             None => None,
         };
@@ -151,7 +151,7 @@ pub(crate) fn capsule_ba(
             pos: pb,
             rot: Mat3::from_quat(rb),
         };
-        let reach = match np.support_of(sa, pa, ra) {
+        let reach = match crate::support::support_of(np, sa, pa, ra) {
             Some(other) => crate::prims::capsule_reach(&cap, &other),
             None => None,
         };
