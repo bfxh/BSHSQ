@@ -170,26 +170,26 @@ impl DynamicBvh {
 
     /// 移动代理（固定边距版；见 `move_proxy_scaled`）。
     pub fn move_proxy(&mut self, leaf: u32, aabb: Aabb) -> u32 {
-        self.move_proxy_scaled(leaf, aabb, self.fat_margin).0
+        self.move_proxy_scaled(leaf, aabb, aabb.grown(self.fat_margin))
+            .0
     }
 
-    /// 移动代理（速度自适应边距版）：叶子已存的 fat 盒包含新精确盒 → 零结构
-    /// 操作；逃出旧 fat 盒时首选**就地生长 refit**（T2 树风暴治理：叶盒取
-    /// 旧 fat ∪ 新 fat、沿祖先 refit，无节点手术），仅当叶盒过度疏松
-    /// （周长 > 4× 目标 fat 周长）才 remove + 以 `margin` 重插收紧。
-    /// 返回（可能变化的叶子索引, 盒是否变化——查询缓存失效信号）。
-    ///
-    /// 动机（M1 宽相提速）：固定 0.02 边距下，下落体每帧位移 > 边距 → 每帧
-    /// remove+insert（10 万体规模 = 每帧数万次结构操作，实测树更新 45~70ms）。
-    /// 边距随「本帧位移·k」放大后，快速体可在其 fat 盒内连续多帧不动树；
-    /// 再叠加就地生长，逃逸路径也基本零手术（实测树 p95 56→? 见 M1-PLAN）。
-    /// 确定性：margin 只由（速度, dt）决定，纯函数，时序无关。
-    pub fn move_proxy_scaled(&mut self, leaf: u32, aabb: Aabb, margin: f32) -> (u32, bool) {
+    /// 移动代理（调用方给定 fat 盒版）：叶子已存的 fat 盒包含新精确盒 → 零结构
+    /// 操作；逃出旧 fat 盒时首选**就地生长 refit**（T2 树风暴治理：叶盒取旧 fat ∪
+    /// 新 fat、沿祖先 refit），仅当叶盒过度疏松（周长 > 4× 目标周长）才 remove +
+    /// 以 `fat_box` 重插收紧。返回（可能变化的叶索引, 盒是否变化——缓存失效信号）。
+    /// 参数是**盒**而非标量边距（2026-10-06，issue #4）：边距可以**各轴独立**
+    /// （见 `fat_box_for`），标量放不下；`fat_box` 须 ⊇ `aabb`（完备性不变式）；
+    /// 确定性：`fat_box` 只由（精确盒, 速度, dt）决定，纯函数，时序无关。
+    /// 动机（M1）：固定 0.02 边距下下落体每帧位移 > 边距 ⇒ 每帧 remove+insert
+    /// （10 万体规模 = 每帧数万次结构操作，实测树更新 45~70ms）；边距随「本帧
+    /// 位移·k」放大后，快速体可在 fat 盒内连续多帧不动树，逃逸也基本零手术。
+    pub fn move_proxy_scaled(&mut self, leaf: u32, aabb: Aabb, fat_box: Aabb) -> (u32, bool) {
         let fat = self.nodes[leaf as usize].aabb;
         if fat.contains(&aabb) {
             return (leaf, false);
         }
-        let target = aabb.grown(margin);
+        let target = fat_box;
         let grown = union_aabb(&fat, &target);
         if perimeter(&grown) <= 4.0 * perimeter(&target) {
             self.nodes[leaf as usize].aabb = grown;
@@ -201,7 +201,7 @@ impl DynamicBvh {
         } else {
             let body = self.nodes[leaf as usize].body;
             self.remove(leaf);
-            (self.insert_fat(body, aabb, margin), true)
+            (self.insert_fat(body, fat_box, 0.0), true)
         }
     }
 

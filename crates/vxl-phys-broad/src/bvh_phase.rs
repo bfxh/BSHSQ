@@ -91,26 +91,26 @@ impl BvhBroadPhase {
         }
     }
 
-    /// 速度自适应 fat 边距（M1 宽相提速的核心开关之一）：
-    /// `base + |v_lin|·dt·1.5`，上钳 0.5m。旧档上限 0.25 在查询缓存 + 就地
-    /// 生长到位后放宽（T2 第十四段）：代价结构已变——宽 fat 盒只增**候选数**
-    /// 不再增**遍历数**（缓存命中时零遍历），快体（少）的多占候选换逃逸率降。
-    /// 确定性：只由（速度, dt）决定；同一状态 → 同一边距 → 同一树形。
-    #[inline]
-    /// 速度自适应边距（`base + v·dt·K`，上限 0.5）。
+    /// **速度自适应 fat 盒**（M1 宽相提速的核心开关之一）：轴 `k` 边距 = `base + |v_k|·dt·K`，
+    /// **各轴独立**、上钳 0.5m/轴。旧档上限 0.25 在查询缓存 + 就地生长到位后放宽（T2 第十四段）：
+    /// 宽 fat 盒只增**候选数**不再增**遍历数**（缓存命中时零遍历）⇒ 快体多占候选换逃逸率降。
     ///
-    /// **K 的标定（2026-09-14 第三段实测，8B 同窗口）**：查询相位拆段计时发现
-    /// 成本**几乎全在「逃逸重查」**（refresh 均 8.08ms）而精确过滤只有 1.22ms
-    /// （3.8ns/条，与隔离档一致）⇒ 杠杆是**逃逸频率**，不是过滤局部性
-    /// （修正此前的 32ns/条归因；W2/W7「边距不是杠杆」的结论也据此修正为
-    /// 「收窄边距有害、放大才是方向」）。K 扫描：1.5（旧值）→ 14.67/43.02（K=6，
-    /// 取此档）/ 14.94/48.97（K=12，峰反涨——快体大盒把候选推高）。
-    /// `K=6` 实测 broad 均 17.03→**14.67**、峰 43.50→43.02、树 均 2.65→**1.77**；
-    /// **逐位中性**（配对仍精确过滤 ⇒ 物理不变；`m0_gates` 哈希不变、twin_match ✓）。
-    pub(crate) fn fat_margin_for(&self, v: Vec3) -> f32 {
-        let base = (self.skin * 2.0).max(0.02);
-        let speed = v.length();
-        (base + speed * self.dt * 6.0).min(0.5)
+    /// **2026-10-06 由「各向同性」改「各轴独立」**（issue #4 剩下的方向）：旧式用 `|v|`（L2）
+    /// 同时撑大三个轴 ⇒ 纯 x 向快体在 y/z 白拿同样边距——只贡献候选、不贡献覆盖。改各轴取
+    /// **该轴自己的位移预算**后每轴都能撑 K 个 tick（与原式沿运动轴**等价**），y/z 不再被白撑
+    /// ⇒ 候选数↓、逃逸率不变。确定性：只由（速度, dt）决定 ⇒ 同状态同盒同树形。
+    ///
+    /// **K 的标定（2026-09-14，8B）**：查询拆段实测成本几乎全在「逃逸重查」（8.08ms）而精确过滤
+    /// 只有 1.22ms（3.8ns/条）⇒ 杠杆是**逃逸频率**（修正此前的 32ns/条归因；W2/W7「边距不是杠杆」
+    /// 也据此改判为「收窄有害、放大才是方向」）。K 扫描 1.5→6→12 后取 **K=6**（broad 均
+    /// 17.03→**14.67**、峰 43.50→43.02、树 均 2.65→**1.77**；K=12 峰反涨）；**逐位中性**（配对仍
+    /// 精确过滤 ⇒ 物理不变；`m0_gates` 哈希不变）。完整负结果见 issue #4。
+    #[inline]
+    #[rustfmt::skip] // rustfmt 会把 `Vec3::new`/结构体字面量撑成 11 行 ⇒ 行数棘轮付不起（本仓已有先例）
+    pub(crate) fn fat_box_for(&self, exact: &Aabb, v: Vec3) -> Aabb {
+        let b = Vec3::splat((self.skin * 2.0).max(0.02));
+        let m = (v.abs() * (self.dt * 6.0) + b).min(Vec3::splat(0.5));
+        Aabb { min: exact.min - m, max: exact.max + m }
     }
 
     /// 树高（诊断/负载审计：健康树 ≈ 1.4·log2(n)）。
@@ -203,10 +203,10 @@ impl BvhBroadPhase {
                     self.cache_fat.resize(n, Aabb::EMPTY);
                 } else if bodies.is_dynamic(i) && bodies.awake[i] {
                     // M1：速度自适应边距——快速体在其 fat 盒内连续多帧零结构操作。
-                    let m = self.fat_margin_for(bodies.linvel[i]);
+                    let fat = self.fat_box_for(&self.aabbs[i], bodies.linvel[i]);
                     let (nl, changed) =
                         self.tree
-                            .move_proxy_scaled(self.leaves[i], self.aabbs[i], m);
+                            .move_proxy_scaled(self.leaves[i], self.aabbs[i], fat);
                     if changed {
                         // 代理盒变化（就地生长或重插）→ 查询缓存失效（T2）。
                         self.leaves[i] = nl;
@@ -265,8 +265,7 @@ impl BvhBroadPhase {
                                 reused.1 += this.cand_len[iu] as usize;
                                 continue;
                             }
-                            let m = this.fat_margin_for(bodies_ref.linvel[iu]);
-                            let fat = exact.grown(m);
+                            let fat = this.fat_box_for(&exact, bodies_ref.linvel[iu]);
                             this.tree.query(&fat, &mut tmp);
                             let base = arena.len() as u32;
                             arena.extend_from_slice(&tmp);

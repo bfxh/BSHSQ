@@ -2,8 +2,8 @@
 //! `GridBroadPhase`（M0 的精确宽相，为"大世界"保留的那份）。
 //!
 //! **为什么参考选 `GridBroadPhase` 而不是默认的 `BvhBroadPhase`**：后者的配对集合**不是当前 AABB
-//! 的纯函数**——它用速度相关的 **fat margin**（`fat_margin_for(linvel)`）、只纳入**清醒**的动体、
-//! 且树状态**跨 tick 增量**（`bvh_phase.rs`：`fat_margin_for` / `bodies.awake[i]` / 增量维护）
+//! 的纯函数**——它用速度相关的 **fat 盒**（`fat_box_for(aabb, linvel)`）、只纳入**清醒**的动体、
+//! 且树状态**跨 tick 增量**（`bvh_phase.rs`：`fat_box_for` / `bodies.awake[i]` / 增量维护）
 //! ⇒ 与它逐位对齐等于把"历史 + 睡眠 + 树"一起搬上卡。`GridBroadPhase` 的配对集合是纯函数
 //! （"全部相交的 AABB 对，静态-静态除外"）⇒ 这才是**与加速结构无关**的物理量，可以做硬判据。
 //!

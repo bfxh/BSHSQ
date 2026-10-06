@@ -1151,7 +1151,7 @@ tick 9: +0.00022 | tick 10: +0.00014 | tick 11: +0.00066 | tick 12: +0.00085 | t
 bind group + 一趟提交 + 一次回读）+ 探针 `gpu_broad_probe`（参考 = **CPU 的 `GridBroadPhase`**）。
 
 **参考为什么不是默认的 `BvhBroadPhase`**：后者的配对集合**不是当前 AABB 的纯函数**——它用**速度相关**
-的 fat margin（`fat_margin_for(linvel)`）、只纳入**清醒**动体、树状态**跨 tick 增量**（`bvh_phase.rs`）
+的 fat 盒（`fat_box_for(aabb, linvel)`）、只纳入**清醒**动体、树状态**跨 tick 增量**（`bvh_phase.rs`）
 ⇒ 与它逐位对齐等于把"历史 + 睡眠 + 树"一起搬上卡。`GridBroadPhase` 的配对集合是纯函数
 （"全部相交的 AABB 对，静态-静态除外"）⇒ 这才是**与加速结构无关**的物理量，才配得上硬判据。
 
