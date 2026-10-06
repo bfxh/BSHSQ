@@ -3,6 +3,7 @@ resolver = "2"
 # 依赖 DAG（docs/SPEC.md §1，禁止环）：
 #   core <- broad / narrow / integrate / solver / field / replay
 #   narrow <- terrain <- vxl-phys(门面)；soft <- vxl-phys(门面)（软体域：绳索/T1）
+#   destruction <- vxl-phys(门面)（M3：只做策略——冲量分级 / 碎片预算）
 members = [
     "crates/vxl-phys-core",
     "crates/vxl-phys-broad",
@@ -49,6 +50,7 @@ vxl-phys-terrain = { version = "0.1.0", path = "crates/vxl-phys-terrain" }
 # 钉版本 + 基线登记理由见 scripts/deps-baseline.json。
 wgpu = "30"
 vxl-phys-splat = { version = "0.1.0", path = "crates/vxl-phys-splat" }
+vxl-phys-destruction = { version = "0.1.0", path = "crates/vxl-phys-destruction" }
 vxl-phys-replay = { version = "0.1.0", path = "crates/vxl-phys-replay" }
 # 门面（DAG 顶）：此前只有外部使用者；GPU 档的接线探针要建 `World` ⇒ 作为内部依赖登记。
 vxl-phys = { version = "0.1.0", path = "crates/vxl-phys" }

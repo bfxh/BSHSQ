@@ -52,7 +52,7 @@
 | 体素 → **多边形** 的转换 | **零**：`marching/isosurface/dual_contour/remesh/voxeliz/polygoniz` 全仓零命中。现有的跨表示只有两条：**体素 → 轴对齐盒碎块**（新建刚体，不是网格：`extract_boxes`/`spawn_box_debris`）与**网格 → 静态 provider**（`TriMesh`，无体素化） | `crates/vxl-phys-terrain/src/voxel/voxel_volume.rs:204,232`；`crates/vxl-phys/src/world_body.rs:24,55,74,107`；`crates/vxl-phys-terrain/src/mesh.rs:26,322` |
 | **"转换途中的物理"** | **零**：`morph/transition/blend/prev_shape/legacy/materialize/handover` 全仓零命中。既有的"交接"都是**域间让位（二选一、不叠加）**：2a/2b 流体让位、GPU 档跑不通整趟回退 CPU | `crates/vxl-phys/src/world_struct.rs:36`；`world_step.rs:198`；`world_step/narrow_tier.rs:92,181` |
 | **"要不要附上前几何形态的效果"** | **零**。`StateBridge`（表示转换接口）**声明了但无实现**，只在注释里被提到 | `crates/vxl-phys-core/src/interop.rs:257`；`crates/vxl-phys-splat/src/lib.rs:6` |
-| **"能被大量东西挤爆"** | **没有全局容量/超载/降级机制**。只有局部上限（CCD 段数、限速、流体格预算粗化）与**唯一一个"丢约束"机制**（参与式降点：第 3 轮起跳过"至今零冲量的浅缝点"，深穿透绝不跳）。"压力累积/拥挤度量"只有唤醒门 `wake_gate_k`（语义是唤醒规则，不是容量保护）。`FragmentBudget{B1K..B1M}` 是枚举、**无消费者** | `crates/vxl-phys-solver/src/island.rs:26-54,80-83`；`crates/vxl-phys-core/src/config.rs:166`；`crates/vxl-phys-destruction/src/lib.rs:16` |
+| **"能被大量东西挤爆"** | **没有全局容量/超载/降级机制**。只有局部上限（CCD 段数、限速、流体格预算粗化）与**唯一一个"丢约束"机制**（参与式降点：第 3 轮起跳过"至今零冲量的浅缝点"，深穿透绝不跳）。"压力累积/拥挤度量"只有唤醒门 `wake_gate_k`（语义是唤醒规则，不是容量保护）。`FragmentBudget{B1K..B1M}` **已于 2026-10-06 接上门面**（opt-in 分级碎裂，`crates/vxl-phys/src/world_step/destruction.rs`），但那是**每条事件**的 site 上限 ⇒ **全局容量/超载机制仍然没有** | `crates/vxl-phys-solver/src/island.rs:26-54,80-83`；`crates/vxl-phys-core/src/config.rs:166`；`crates/vxl-phys-destruction/src/lib.rs:16` |
 
 ⇒ **顺带**：路线图里已经有一张"作用体×受体"矩阵，把**体素×软体=支撑/穿刺**、**软体×液体=湿布（双向）**、
 **软体×风=面元气动**都写下了（`docs/ROUTE.md:80-84`）——**"转换途中的物理"不在那张矩阵里**，属新增维度。
@@ -93,7 +93,7 @@
 
 | 档 | 条目 | 为什么 / 落到哪 |
 |---|---|---|
-| **吸收** | ① **冲量分级 Voronoi site 数**（`coreSites = clamp(10+level*3,12,36)` 等）+ 按冲量重碎裂 | 本仓已有 `fracture_voronoi`/`FragmentBudget`（无消费者）⇒ 这是把预算接上消费者的现成经验值；与 PhysX 无关 |
+| **吸收** | ① **冲量分级 Voronoi site 数**（`coreSites = clamp(10+level*3,12,36)` 等）+ 按冲量重碎裂 | 本仓已有 `fracture_voronoi`/`FragmentBudget`，且 **2026-10-06 已接上门面的 opt-in 分级碎裂**（`world_step/destruction.rs`）⇒ 这是把预算接上消费者的现成经验值；与 PhysX 无关 |
 | **吸收** | ② **刚体几何 → 半空间平面集**（球/胶囊离散成 112 平面 + 端盖；凸包取多边形平面）当接触提供者 | 本仓 provider 通道已开（`contacts_point`）⇒ "点 vs 平面集"比采样体素 SDF 便宜，且盒/凸包/胶囊覆盖 90% 场景 |
 | **吸收** | ③ **预判式碎裂调度**（`impactTime = d/v` + 弹道项 ⇒ 提前 N 帧启动准备） | 把"生成碎裂网格/cook"的毫秒级尖峰挪出撞击帧；纯逻辑零依赖（注意它的 `4.905f` 硬编码重力、需参数化） |
 | **有界** | ④ **稀疏体素 raymarch 而非多边形化**；零拷贝 GPU 缓冲（`cuGraphics*` 模式 ↔ wgpu external buffer） | 对**烟/雾/体积介质**可当渲染档（本仓体素已上卡）；但**不要**为它引入第二套图形 API |

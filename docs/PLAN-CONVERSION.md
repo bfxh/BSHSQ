@@ -65,8 +65,12 @@
   消费者 `terrain/src/mesh.rs:105/:218`、`splat/src/lib.rs:129`）；求解器**参与式降点**
   （`island.rs:52` `point_reduce_after()`，默认 3：第 3 轮起跳过"至今零冲量"的浅缝点，**深穿透绝不跳**）。
 - `FragmentBudget { B1K, B10K, B100K, B1M }`（`destruction/src/lib.rs:14`）＋ 分档映射
-  `budget_cap:86` / `sites_within_budget:97`（`impact_tiers.rs`）：**有分档函数，无引擎侧消费者**
-  （调用点只在 destruction 自身测试）。
+  `budget_cap:86` / `sites_within_budget:97`（`impact_tiers.rs`）：**2026-10-06 已接线** ——
+  门面 `DestructionExt::apply_impact_destruction_tiered`（`crates/vxl-phys/src/world_step/destruction.rs`，
+  opt-in）按冲量 `J = m·approach` 分档取 site 数、经 `sites_within_budget` 受预算封顶后再走
+  `fracture_voronoi`；判据 `crates/vxl-phys/tests/destruction_tiered.rs`（两条端到端断言：
+  曲线放大 ⇒ 碎块变多、同曲线收预算 ⇒ 碎块变少）。
+  ⚠️ 它仍是**每条事件**的 site 上限，**不是全局容量机制** —— 本计划 §1.4 要的"全局降级"仍未建。
 - 拥挤/压力度量：只有唤醒门 `wake_gate_k`（`core/config.rs:166`，默认 0，语义是唤醒规则、**不是**容量保护）。
 - 「挤爆」两义（survey §2-T2 ⚠️，本计划沿用）：**物理被压塌/碎裂**（M3）vs **求解器超载降级**（容量机制）——
   本计划只做后者。

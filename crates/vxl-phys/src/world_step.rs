@@ -4,6 +4,7 @@ use super::*;
 mod aero;
 pub(crate) mod conversion;
 pub(crate) mod coupling;
+pub(crate) mod destruction;
 pub(crate) mod fluid_stepper;
 mod medium;
 pub(crate) mod narrow_tier;
@@ -355,9 +356,7 @@ impl World {
     }
 }
 
-/// 2) 速度积分（含计时累加）。从 `substep` 抽出——那里是全文件最长函数。
-///
-/// ⚠️ **自由函数而不是方法**：`World` 的方法数顶在 god 门类型账（76，只准减）。
+/// 2) 速度积分（含计时累加）。从 `substep` 抽出（那里是全文件最长函数）；⚠️ **自由函数而不是方法**——`World` 的方法数顶在 god 门类型账（76，只准减）。
 fn integrate_velocity_pass(w: &mut World, dt: f32) {
     let t0 = vxl_phys_core::probe::start();
     let maxl = w.config.max_linear_velocity;

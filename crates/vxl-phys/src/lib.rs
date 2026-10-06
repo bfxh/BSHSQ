@@ -44,7 +44,7 @@ mod world_soft;
 mod world_step;
 mod world_struct;
 pub(crate) use self::props::*;
-pub use self::world_step::conversion::VoxelConversionExt;
+pub use self::world_step::{conversion::VoxelConversionExt, destruction::DestructionExt};
 pub use self::{arenas::*, impact::*, providers::*, types::*, world_soft::*, world_struct::*};
 // ↑ 子模块顶层条目再导出（impl-only 模块不入 glob，避免 unused）
 
