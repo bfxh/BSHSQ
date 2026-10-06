@@ -16,287 +16,283 @@
 //! `crates/vxl-phys/tests/shape_support_matrix.rs` 的缺口金丝雀钉住现状）。
 use super::*;
 
-impl DefaultNarrowPhase {
-    /// 填充**三角网的世界点缓存**（side：0 = 对侧 a、1 = 侧 b）。返回 `true` = 该形状是三角网
-    /// 且缓存已就绪（顶点列在 `self.ws.hull_pts[side]`）。
-    ///
-    /// **与 `fill_hull_world` 共用 `hull_pts` 缓冲**（不新增字段 ⇒ 不碰 god 门成员棘轮）：
-    /// 一个体的 `shape` 只有一种 ⇒ 同一体不可能同时以两种来源填同一槽；键含
-    /// `(体号, 姿态指纹)` ⇒ 同体同帧多对只做一次 O(n) 世界变换（与外壳同机制）。
-    pub(crate) fn fill_mesh_world(
-        &mut self,
-        side: usize,
-        body: u32,
-        shape: &Shape,
-        pos: Vec3,
-        rot: Quat,
-    ) -> bool {
-        let Shape::TriMesh { mesh, .. } = *shape else {
-            return false;
-        };
-        let fp = rot_fp(rot);
-        if self.ws.cached_hull[side] != (body, fp) {
-            let m = Mat3::from_quat(rot);
-            let out = &mut self.ws.hull_pts[side];
-            out.clear();
-            for p in self.meshes.points(mesh) {
-                out.push(pos + m.mul_vec3(*p));
-            }
-            self.ws.cached_hull[side] = (body, fp);
+/// 填充**三角网的世界点缓存**（side：0 = 对侧 a、1 = 侧 b）。返回 `true` = 该形状是三角网
+/// 且缓存已就绪（顶点列在 `ws.hull_pts[side]`）。
+///
+/// **与 `fill_hull_world` 共用 `hull_pts` 缓冲**（不新增字段 ⇒ 不碰 god 门成员棘轮）：
+/// 一个体的 `shape` 只有一种 ⇒ 同一体不可能同时以两种来源填同一槽；键含
+/// `(体号, 姿态指纹)` ⇒ 同体同帧多对只做一次 O(n) 世界变换（与外壳同机制）。
+pub(crate) fn fill_mesh_world(
+    np: &mut DefaultNarrowPhase,
+    side: usize,
+    body: u32,
+    shape: &Shape,
+    pos: Vec3,
+    rot: Quat,
+) -> bool {
+    let Shape::TriMesh { mesh, .. } = *shape else {
+        return false;
+    };
+    let fp = rot_fp(rot);
+    if np.ws.cached_hull[side] != (body, fp) {
+        let m = Mat3::from_quat(rot);
+        let out = &mut np.ws.hull_pts[side];
+        out.clear();
+        for p in np.meshes.points(mesh) {
+            out.push(pos + m.mul_vec3(*p));
         }
-        true
+        np.ws.cached_hull[side] = (body, fp);
     }
+    true
+}
 
-    /// **三角网 vs 提供者**（体素 / 三角网 / 平面集 / 喷溅）：**逐顶点**点查询。
-    ///
-    /// 与 `hull_provider_contacts` 同构（只换点源）：提供者的 `contacts_point` 给
-    /// `(表面点, 外法线, 穿透深度)` ⇒ 压进 `buf`，由 `provider_pair` 做**主导面选择 + 取点**
-    /// （那条路的 `feature % 16` 约定对顶点采样不适用，但其"无面心组 ⇒ 用全部组"的兜底覆盖了
-    /// 这种情形 ⇒ 不产流形的风险由 `shape_support_matrix` 的落定判据守）。
-    ///
-    /// 返回值语义与外壳臂一致：`true` = **本通路受理**（含"网无顶点/全部不在带内"）。
-    #[allow(clippy::too_many_arguments)] // 形状/位姿/提供者/出参 + 带符号朝向（与外壳臂同形）
-    pub(crate) fn mesh_provider_contacts(
-        &mut self,
-        body_shape: &Shape,
-        body: u32,
-        bpos: Vec3,
-        brot: Quat,
-        id: u32,
-        pr_is_a: bool,
-        band: f32,
-        providers: &dyn vxl_phys_core::interop::ProviderColliders,
-        buf: &mut Vec<vxl_phys_core::interop::InteropContact>,
-    ) -> bool {
-        let side = if pr_is_a { 1 } else { 0 };
-        if !self.fill_mesh_world(side, body, body_shape, bpos, brot) {
-            return true;
-        }
-        let mut supported = false;
-        for k in 0..self.ws.hull_pts[side].len() {
-            supported |= providers.contacts_point(id, self.ws.hull_pts[side][k], band, buf);
-        }
-        supported
+/// **三角网 vs 提供者**（体素 / 三角网 / 平面集 / 喷溅）：**逐顶点**点查询。
+///
+/// 与 `hull_provider_contacts` 同构（只换点源）：提供者的 `contacts_point` 给
+/// `(表面点, 外法线, 穿透深度)` ⇒ 压进 `buf`，由 `provider_pair` 做**主导面选择 + 取点**
+/// （那条路的 `feature % 16` 约定对顶点采样不适用，但其"无面心组 ⇒ 用全部组"的兜底覆盖了
+/// 这种情形 ⇒ 不产流形的风险由 `shape_support_matrix` 的落定判据守）。
+///
+/// 返回值语义与外壳臂一致：`true` = **本通路受理**（含"网无顶点/全部不在带内"）。
+#[allow(clippy::too_many_arguments)] // 形状/位姿/提供者/出参 + 带符号朝向（与外壳臂同形）
+pub(crate) fn mesh_provider_contacts(
+    np: &mut DefaultNarrowPhase,
+    body_shape: &Shape,
+    body: u32,
+    bpos: Vec3,
+    brot: Quat,
+    id: u32,
+    pr_is_a: bool,
+    band: f32,
+    providers: &dyn vxl_phys_core::interop::ProviderColliders,
+    buf: &mut Vec<vxl_phys_core::interop::InteropContact>,
+) -> bool {
+    let side = if pr_is_a { 1 } else { 0 };
+    if !fill_mesh_world(np, side, body, body_shape, bpos, brot) {
+        return true;
     }
+    let mut supported = false;
+    for k in 0..np.ws.hull_pts[side].len() {
+        supported |= providers.contacts_point(id, np.ws.hull_pts[side][k], band, buf);
+    }
+    supported
+}
 
-    /// **三角网 × 凸体**（受理 **盒 / 球 / 胶囊 / 圆柱 / 锥**；T1b-2 起分片扩到五族）：
-    /// 逐顶点**解析**最近点采样。
-    ///
-    /// **外壳 / 另一个三角网如实不受理**（要面数据 ⇒ T2 领地）；**复合体无需此处受理**——
-    /// 它在 `process_pair_shaped` 最前部就展开成子对，子形状各走本函数。逐条登记在
-    /// `docs/SURVEY-SHAPE-SUPPORT-MATRIX.md`（**不是静默**：由矩阵判据钉住现状）。
-    ///
-    /// **法线口径**（本片唯一容易搞反的地方，从求解器定义反推）：求解器把 `+n·λ` 给 b、`−n·λ` 给 a，
-    /// 而 `n_o` = "把顶点推出去"的方向（对方在该点的外法线）⇒
-    /// **三角网在 a 侧 ⇒ `n(a→b) = −n_o`；在 b 侧 ⇒ `n(a→b) = +n_o`**。
-    ///
-    /// **取点**：两遍——先取**最深候选所属的法线**作主导面（并列取先出现者 ⇒ 确定性；点-盒的角点
-    /// 会同时落在两张面上），再过 `select_contacts` 去重；一条流形最多 4 点（槽数所致）。
-    #[allow(clippy::too_many_arguments)] // 两侧体号/形状/位姿 + 出参（与 `process_pair` 同形）
-    pub(crate) fn mesh_pair(
-        &mut self,
-        a: u32,
-        b: u32,
-        sa: &Shape,
-        sb: &Shape,
-        pa: Vec3,
-        ra: Quat,
-        pb: Vec3,
-        rb: Quat,
-        out: &mut Vec<Manifold>,
+/// **三角网 × 凸体**（受理 **盒 / 球 / 胶囊 / 圆柱 / 锥**；T1b-2 起分片扩到五族）：
+/// 逐顶点**解析**最近点采样。
+///
+/// **外壳 / 另一个三角网如实不受理**（要面数据 ⇒ T2 领地）；**复合体无需此处受理**——
+/// 它在 `process_pair_shaped` 最前部就展开成子对，子形状各走本函数。逐条登记在
+/// `docs/SURVEY-SHAPE-SUPPORT-MATRIX.md`（**不是静默**：由矩阵判据钉住现状）。
+///
+/// **法线口径**（本片唯一容易搞反的地方，从求解器定义反推）：求解器把 `+n·λ` 给 b、`−n·λ` 给 a，
+/// 而 `n_o` = "把顶点推出去"的方向（对方在该点的外法线）⇒
+/// **三角网在 a 侧 ⇒ `n(a→b) = −n_o`；在 b 侧 ⇒ `n(a→b) = +n_o`**。
+///
+/// **取点**：两遍——先取**最深候选所属的法线**作主导面（并列取先出现者 ⇒ 确定性；点-盒的角点
+/// 会同时落在两张面上），再过 `select_contacts` 去重；一条流形最多 4 点（槽数所致）。
+#[allow(clippy::too_many_arguments)] // 两侧体号/形状/位姿 + 出参（与 `process_pair` 同形）
+pub(crate) fn mesh_pair(
+    np: &mut DefaultNarrowPhase,
+    a: u32,
+    b: u32,
+    sa: &Shape,
+    sb: &Shape,
+    pa: Vec3,
+    ra: Quat,
+    pb: Vec3,
+    rb: Quat,
+    out: &mut Vec<Manifold>,
+) {
+    let mesh_is_a = matches!(*sa, Shape::TriMesh { .. });
+    let (mesh_shape, mpos, mrot, opos, orot, oshape) = if mesh_is_a {
+        (sa, pa, ra, pb, rb, sb)
+    } else {
+        (sb, pb, rb, pa, ra, sa)
+    };
+    // 受理面：盒 / 球 / 胶囊 / 圆柱 / 锥（其余 = 不受理 ⇒ 本对不产接触）
+    if !matches!(
+        *oshape,
+        Shape::Box { .. }
+            | Shape::Sphere { .. }
+            | Shape::Capsule { .. }
+            | Shape::Cylinder { .. }
+            | Shape::Cone { .. }
     ) {
-        let mesh_is_a = matches!(*sa, Shape::TriMesh { .. });
-        let (mesh_shape, mpos, mrot, opos, orot, oshape) = if mesh_is_a {
-            (sa, pa, ra, pb, rb, sb)
-        } else {
-            (sb, pb, rb, pa, ra, sa)
+        return;
+    }
+    let side = if mesh_is_a { 0 } else { 1 };
+    let body = if mesh_is_a { a } else { b };
+    if !fill_mesh_world(np, side, body, mesh_shape, mpos, mrot) {
+        return;
+    }
+    let n_pts = np.ws.hull_pts[side].len();
+    // ① 主导面 = 最深候选的法线
+    let mut dom: Option<(Vec3, f32)> = None;
+    for k in 0..n_pts {
+        let Some((n_o, depth, _)) = point_shape(np.ws.hull_pts[side][k], oshape, opos, orot) else {
+            continue;
         };
-        // 受理面：盒 / 球 / 胶囊 / 圆柱 / 锥（其余 = 不受理 ⇒ 本对不产接触）
-        if !matches!(
-            *oshape,
-            Shape::Box { .. }
-                | Shape::Sphere { .. }
-                | Shape::Capsule { .. }
-                | Shape::Cylinder { .. }
-                | Shape::Cone { .. }
-        ) {
-            return;
+        if depth > -np.skin && dom.is_none_or(|(_, d)| depth > d) {
+            dom = Some((n_o, depth));
         }
-        let side = if mesh_is_a { 0 } else { 1 };
-        let body = if mesh_is_a { a } else { b };
-        if !self.fill_mesh_world(side, body, mesh_shape, mpos, mrot) {
-            return;
-        }
-        let n_pts = self.ws.hull_pts[side].len();
-        // ① 主导面 = 最深候选的法线
-        let mut dom: Option<(Vec3, f32)> = None;
-        for k in 0..n_pts {
-            let Some((n_o, depth, _)) = point_shape(self.ws.hull_pts[side][k], oshape, opos, orot)
-            else {
-                continue;
-            };
-            if depth > -self.skin && dom.is_none_or(|(_, d)| depth > d) {
-                dom = Some((n_o, depth));
-            }
-        }
-        let Some((n_dom, _)) = dom else {
-            return;
+    }
+    let Some((n_dom, _)) = dom else {
+        return;
+    };
+    // ② 同面候选（点-盒角点可能同时落在两张面上 ⇒ 只留主导面，免得多法线混进同一流形）
+    np.ws.cand.clear();
+    for k in 0..n_pts {
+        let Some((n_o, depth, hit)) = point_shape(np.ws.hull_pts[side][k], oshape, opos, orot)
+        else {
+            continue;
         };
-        // ② 同面候选（点-盒角点可能同时落在两张面上 ⇒ 只留主导面，免得多法线混进同一流形）
-        self.ws.cand.clear();
-        for k in 0..n_pts {
-            let Some((n_o, depth, hit)) =
-                point_shape(self.ws.hull_pts[side][k], oshape, opos, orot)
-            else {
-                continue;
-            };
-            if depth > -self.skin && n_o.dot(n_dom) > 0.9 {
-                self.ws.cand.push(ContactPoint {
-                    point: hit,
+        if depth > -np.skin && n_o.dot(n_dom) > 0.9 {
+            np.ws.cand.push(ContactPoint {
+                point: hit,
+                depth,
+                feature: k as u32 + 1, // 顶点序稳定 ⇒ 跨帧可续接 warm
+            });
+        }
+    }
+    if np.ws.cand.is_empty() || !np.select_contacts(np.min_point_sep) {
+        return;
+    }
+    out.push(Manifold {
+        a,
+        b,
+        normal: if mesh_is_a { -n_dom } else { n_dom },
+        points: ContactPoints::from_slice(&np.ws.cand),
+    });
+}
+
+/// **三角网 × 高度场**：逐顶点采样（与外壳的地形腿 `hull_pair` 的 L1 分支**同构**）。
+///
+/// 逐个**顶点**取世界点 → `hf.sample(x, z)` ⇒ `depth = h − v.y`（正 = 顶点在地形之下 = 穿透），
+/// 接触点落在地形面上（`(x, h, z)`）；法线与 sign 由调用方 `heightfield_pair` 按 a/b 侧决定
+/// （那里是**形状无关**的：取最深样本的地形法线）⇒ 本函数只负责**填 `np.ws.cand`**。
+pub(crate) fn mesh_heightfield(
+    np: &mut DefaultNarrowPhase,
+    mesh: u32,
+    pos: Vec3,
+    rot: Quat,
+    hf: &HeightField,
+) -> bool {
+    np.ws.cand.clear();
+    let r = Mat3::from_quat(rot);
+    let pts = np.meshes.points(mesh);
+    for (idx, &p) in pts.iter().enumerate() {
+        let v = pos + r.mul_vec3(p);
+        if let Some((h, _)) = hf.sample(v.x, v.z) {
+            let depth = h - v.y;
+            if depth > -np.skin - np.ws.inflate {
+                np.ws.cand.push(ContactPoint {
+                    point: Vec3::new(v.x, h, v.z),
                     depth,
-                    feature: k as u32 + 1, // 顶点序稳定 ⇒ 跨帧可续接 warm
+                    feature: idx as u32 + 1,
                 });
             }
         }
-        if self.ws.cand.is_empty() || !self.select_contacts(self.min_point_sep) {
-            return;
-        }
-        out.push(Manifold {
-            a,
-            b,
-            normal: if mesh_is_a { -n_dom } else { n_dom },
-            points: ContactPoints::from_slice(&self.ws.cand),
-        });
     }
+    if np.ws.cand.is_empty() {
+        return false;
+    }
+    np.select_contacts(np.min_point_sep)
+}
 
-    /// **三角网 × 高度场**：逐顶点采样（与外壳的地形腿 `hull_pair` 的 L1 分支**同构**）。
-    ///
-    /// 逐个**顶点**取世界点 → `hf.sample(x, z)` ⇒ `depth = h − v.y`（正 = 顶点在地形之下 = 穿透），
-    /// 接触点落在地形面上（`(x, h, z)`）；法线与 sign 由调用方 `heightfield_pair` 按 a/b 侧决定
-    /// （那里是**形状无关**的：取最深样本的地形法线）⇒ 本函数只负责**填 `self.ws.cand`**。
-    pub(crate) fn mesh_heightfield(
-        &mut self,
-        mesh: u32,
-        pos: Vec3,
-        rot: Quat,
-        hf: &HeightField,
-    ) -> bool {
-        self.ws.cand.clear();
-        let r = Mat3::from_quat(rot);
-        let pts = self.meshes.points(mesh);
-        for (idx, &p) in pts.iter().enumerate() {
-            let v = pos + r.mul_vec3(p);
-            if let Some((h, _)) = hf.sample(v.x, v.z) {
-                let depth = h - v.y;
-                if depth > -self.skin - self.ws.inflate {
-                    self.ws.cand.push(ContactPoint {
-                        point: Vec3::new(v.x, h, v.z),
-                        depth,
-                        feature: idx as u32 + 1,
-                    });
-                }
-            }
-        }
-        if self.ws.cand.is_empty() {
-            return false;
-        }
-        self.select_contacts(self.min_point_sep)
+/// **外壳 × 三角网**（T2 第一片）：**外壳顶点** × **网面三角形**（解析点-三角）。
+///
+/// 分发在 `support.rs::hull_pair`（外壳对在那里被截走，进不了 `pair_non_heightfield`）；
+/// 外壳世界点已由调用方填好（`hull_pts[hull_side]`），本函数再填**网顶点**世界缓存
+/// （`fill_mesh_world`，另一侧槽 ⇒ 不冲突）。采样方向只有一路：**外壳顶点查网面**
+/// ——外壳是凸的点云、没有"面"可供反向查询（点-凸最近点要走 GJK 距离，另立片）；
+/// 反作用由求解器经同一条流形回给两体 ⇒ 双向耦合不丢。
+///
+/// **法线口径**：取**网面三角的环绕法线**（`plate` 类网格 = +Y 朝上）——顶点从环绕侧压入
+/// ⇒ `depth > 0`、`n_o` = 环绕法线（把外壳顶点推出去）⇒ 流形 a→b 按外壳在哪侧定号
+/// （与 `mesh_pair` 同款）。⚠️ **单面**语义：从反面压入也算穿透、沿同一法线推出
+/// （薄壳无厚度，"哪面朝外"由环绕序决定；双面/厚度口径属 T3 自碰撞那片）。
+///
+/// **成本**：暴力 O(V_壳 × T_网)（石块 8 点 × 8 三角 = 64 对/帧，探针档无压力）；
+/// 大网大壳要空间加速（与 T3 自碰撞的空间哈希同族，另立片）。
+#[allow(clippy::too_many_arguments)] // 两侧体号/形状/位姿 + 接触带 + 出参（与 `process_pair` 同形）
+pub(crate) fn hull_vs_mesh(
+    np: &mut DefaultNarrowPhase,
+    a: u32,
+    b: u32,
+    hull_is_a: bool,
+    hull_side: usize,
+    mesh: u32,
+    mesh_body: u32,
+    mesh_shape: &Shape,
+    mesh_pos: Vec3,
+    mesh_rot: Quat,
+    band: f32,
+    out: &mut Vec<Manifold>,
+) {
+    let mesh_side = 1 - hull_side;
+    if !fill_mesh_world(np, mesh_side, mesh_body, mesh_shape, mesh_pos, mesh_rot) {
+        return;
     }
-
-    /// **外壳 × 三角网**（T2 第一片）：**外壳顶点** × **网面三角形**（解析点-三角）。
-    ///
-    /// 分发在 `support.rs::hull_pair`（外壳对在那里被截走，进不了 `pair_non_heightfield`）；
-    /// 外壳世界点已由调用方填好（`hull_pts[hull_side]`），本函数再填**网顶点**世界缓存
-    /// （`fill_mesh_world`，另一侧槽 ⇒ 不冲突）。采样方向只有一路：**外壳顶点查网面**
-    /// ——外壳是凸的点云、没有"面"可供反向查询（点-凸最近点要走 GJK 距离，另立片）；
-    /// 反作用由求解器经同一条流形回给两体 ⇒ 双向耦合不丢。
-    ///
-    /// **法线口径**：取**网面三角的环绕法线**（`plate` 类网格 = +Y 朝上）——顶点从环绕侧压入
-    /// ⇒ `depth > 0`、`n_o` = 环绕法线（把外壳顶点推出去）⇒ 流形 a→b 按外壳在哪侧定号
-    /// （与 `mesh_pair` 同款）。⚠️ **单面**语义：从反面压入也算穿透、沿同一法线推出
-    /// （薄壳无厚度，"哪面朝外"由环绕序决定；双面/厚度口径属 T3 自碰撞那片）。
-    ///
-    /// **成本**：暴力 O(V_壳 × T_网)（石块 8 点 × 8 三角 = 64 对/帧，探针档无压力）；
-    /// 大网大壳要空间加速（与 T3 自碰撞的空间哈希同族，另立片）。
-    #[allow(clippy::too_many_arguments)] // 两侧体号/形状/位姿 + 接触带 + 出参（与 `process_pair` 同形）
-    pub(crate) fn hull_vs_mesh(
-        &mut self,
-        a: u32,
-        b: u32,
-        hull_is_a: bool,
-        hull_side: usize,
-        mesh: u32,
-        mesh_body: u32,
-        mesh_shape: &Shape,
-        mesh_pos: Vec3,
-        mesh_rot: Quat,
-        band: f32,
-        out: &mut Vec<Manifold>,
-    ) {
-        let mesh_side = 1 - hull_side;
-        if !self.fill_mesh_world(mesh_side, mesh_body, mesh_shape, mesh_pos, mesh_rot) {
-            return;
-        }
-        let n_hull = self.ws.hull_pts[hull_side].len();
-        let n_tris = self.meshes.tris(mesh).len();
-        if n_hull == 0 || n_tris == 0 {
-            return;
-        }
-        // ① 主导面 = 最深候选的法线（平面薄网上全部三角同法线 ⇒ 实际只有一组）
-        let mut dom: Option<(Vec3, f32)> = None;
-        for hi in 0..n_hull {
-            let p = self.ws.hull_pts[hull_side][hi];
-            for ti in 0..n_tris {
-                let tri = self.meshes.tris(mesh)[ti];
-                let (w0, w1, w2) = (
-                    self.ws.hull_pts[mesh_side][tri[0] as usize],
-                    self.ws.hull_pts[mesh_side][tri[1] as usize],
-                    self.ws.hull_pts[mesh_side][tri[2] as usize],
-                );
-                let Some((n_o, depth, _)) = point_triangle(p, w0, w1, w2) else {
-                    continue;
-                };
-                if depth > -band && dom.is_none_or(|(_, d)| depth > d) {
-                    dom = Some((n_o, depth));
-                }
-            }
-        }
-        let Some((n_dom, _)) = dom else {
-            return;
-        };
-        // ② 同面候选（顶点可能落在网格对角线等共享边上 ⇒ 邻三角法线相同，取其一即可）
-        self.ws.cand.clear();
-        for hi in 0..n_hull {
-            let p = self.ws.hull_pts[hull_side][hi];
-            for ti in 0..n_tris {
-                let tri = self.meshes.tris(mesh)[ti];
-                let (w0, w1, w2) = (
-                    self.ws.hull_pts[mesh_side][tri[0] as usize],
-                    self.ws.hull_pts[mesh_side][tri[1] as usize],
-                    self.ws.hull_pts[mesh_side][tri[2] as usize],
-                );
-                let Some((n_o, depth, hit)) = point_triangle(p, w0, w1, w2) else {
-                    continue;
-                };
-                if depth > -band && n_o.dot(n_dom) > 0.9 {
-                    self.ws.cand.push(ContactPoint {
-                        point: hit,
-                        depth,
-                        feature: hi as u32 + 1, // 外壳顶点序稳定 ⇒ 跨帧可续接 warm
-                    });
-                }
-            }
-        }
-        if self.ws.cand.is_empty() || !self.select_contacts(self.min_point_sep) {
-            return;
-        }
-        out.push(Manifold {
-            a,
-            b,
-            normal: if hull_is_a { -n_dom } else { n_dom },
-            points: ContactPoints::from_slice(&self.ws.cand),
-        });
+    let n_hull = np.ws.hull_pts[hull_side].len();
+    let n_tris = np.meshes.tris(mesh).len();
+    if n_hull == 0 || n_tris == 0 {
+        return;
     }
+    // ① 主导面 = 最深候选的法线（平面薄网上全部三角同法线 ⇒ 实际只有一组）
+    let mut dom: Option<(Vec3, f32)> = None;
+    for hi in 0..n_hull {
+        let p = np.ws.hull_pts[hull_side][hi];
+        for ti in 0..n_tris {
+            let tri = np.meshes.tris(mesh)[ti];
+            let (w0, w1, w2) = (
+                np.ws.hull_pts[mesh_side][tri[0] as usize],
+                np.ws.hull_pts[mesh_side][tri[1] as usize],
+                np.ws.hull_pts[mesh_side][tri[2] as usize],
+            );
+            let Some((n_o, depth, _)) = point_triangle(p, w0, w1, w2) else {
+                continue;
+            };
+            if depth > -band && dom.is_none_or(|(_, d)| depth > d) {
+                dom = Some((n_o, depth));
+            }
+        }
+    }
+    let Some((n_dom, _)) = dom else {
+        return;
+    };
+    // ② 同面候选（顶点可能落在网格对角线等共享边上 ⇒ 邻三角法线相同，取其一即可）
+    np.ws.cand.clear();
+    for hi in 0..n_hull {
+        let p = np.ws.hull_pts[hull_side][hi];
+        for ti in 0..n_tris {
+            let tri = np.meshes.tris(mesh)[ti];
+            let (w0, w1, w2) = (
+                np.ws.hull_pts[mesh_side][tri[0] as usize],
+                np.ws.hull_pts[mesh_side][tri[1] as usize],
+                np.ws.hull_pts[mesh_side][tri[2] as usize],
+            );
+            let Some((n_o, depth, hit)) = point_triangle(p, w0, w1, w2) else {
+                continue;
+            };
+            if depth > -band && n_o.dot(n_dom) > 0.9 {
+                np.ws.cand.push(ContactPoint {
+                    point: hit,
+                    depth,
+                    feature: hi as u32 + 1, // 外壳顶点序稳定 ⇒ 跨帧可续接 warm
+                });
+            }
+        }
+    }
+    if np.ws.cand.is_empty() || !np.select_contacts(np.min_point_sep) {
+        return;
+    }
+    out.push(Manifold {
+        a,
+        b,
+        normal: if hull_is_a { -n_dom } else { n_dom },
+        points: ContactPoints::from_slice(&np.ws.cand),
+    });
 }
 
 /// **点 × 三角**的解析最近点（Ericson《Real-Time Collision Detection》`ClosestPtPointTriangle`）：

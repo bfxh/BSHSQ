@@ -38,16 +38,15 @@ impl DefaultNarrowPhase {
             self.mesh_vs_mesh(a, b, sa, sb, pa, ra, pb, rb, out);
             return;
         }
-        self.mesh_pair(a, b, sa, sb, pa, ra, pb, rb, out);
+        crate::mesh_pair::mesh_pair(self, a, b, sa, sb, pa, ra, pb, rb, out);
     }
 
     /// **三角网 × 三角网**（T2 续）：**双面口径** —— 采样**双向**（A 顶点 × B 三角 且
-    /// B 顶点 × A 三角；只做一向时"另一侧顶点扎进来"完全没有候选），法线取
-    /// "**从网面最近点指向顶点**"（见 [`mesh_probe`]），接触距离 = `skin`（扮演两片半厚之和）。
+    /// B 顶点 × A 三角；只做一向时"另一侧顶点扎进来"完全没有候选），法线取"**从网面最近点指向顶点**"
+    /// （见 [`mesh_probe`]），接触距离 = `skin`（扮演两片半厚之和）。
     /// 流形法线按 **a→b** 定号（与 `mesh_pair` / `hull_vs_mesh` 同约定）。
     ///
-    /// **成本**：O(V_a·T_b + V_b·T_a) 暴力（小网无压力；大网要空间加速，属后续片）。
-    /// **默认档不动**：不注册成对三角网的场景**逐位不变**（本函数根本不被调用）。
+    /// **成本**：O(V_a·T_b + V_b·T_a) 暴力（小网无压力；大网要空间加速，属后续片）。**默认档不动**：不注册成对三角网的场景**逐位不变**（本函数根本不被调用）。
     #[allow(clippy::too_many_arguments)] // 两侧体号/形状/位姿 + 出参（与 `mesh_pair` 同形）
     pub(crate) fn mesh_vs_mesh(
         &mut self,
@@ -64,19 +63,19 @@ impl DefaultNarrowPhase {
         let (Shape::TriMesh { mesh: ma, .. }, Shape::TriMesh { mesh: mb, .. }) = (*sa, *sb) else {
             return;
         };
-        if !self.fill_mesh_world(0, a, sa, pa, ra) || !self.fill_mesh_world(1, b, sb, pb, rb) {
+        if !crate::mesh_pair::fill_mesh_world(self, 0, a, sa, pa, ra)
+            || !crate::mesh_pair::fill_mesh_world(self, 1, b, sb, pb, rb)
+        {
             return;
         }
         let na = self.ws.hull_pts[0].len();
         let band = self.skin;
-        // **空间哈希**（两路各一张：0 路 = A 顶点 × **B 的三角** ⇒ 查 `grid_b`；1 路相反）。
-        // 建格 O(T)、查询 O(V) ⇒ 把 O(V·T) 降到 O(V+T+候选)；**候选序列与暴力同序** ⇒ 读数逐位不变。
+        // **空间哈希**（两路各一张：0 路 = A 顶点 × **B 的三角** ⇒ 查 `grid_b`；1 路相反）。建格 O(T)、查询 O(V) ⇒ 把 O(V·T) 降到 O(V+T+候选)；**候选序列与暴力同序** ⇒ 读数逐位不变。
         let grid_b = TriGrid::build(&self.ws.hull_pts[1], self.meshes.tris(mb), band);
         let grid_a = TriGrid::build(&self.ws.hull_pts[0], self.meshes.tris(ma), band);
         // 两路扫描：(顶点侧, 面侧, 面仓库, 面侧的格子, a→b 的符号)。⚠️ `Manifold::normal` 的约定是
         // **从 a 指向 b**（`types.rs` 明写）⇒ 0 路（a 顶点 × b 面）的分离方向是 **−d**（`d` 指
-        // 从 b 面到 a 顶点），1 路取反。**首版两路都取了 +1** ⇒ 实测两片被"**推拢**"（+0.01 的
-        // 初始间隙被压到 0）—— "符号/约定要查档、别靠直觉" 的又一次。
+        // 从 b 面到 a 顶点），1 路取反。**首版两路都取了 +1** ⇒ 实测两片被"**推拢**"（+0.01 的初始间隙被压到 0）—— "符号/约定要查档、别靠直觉" 的又一次。
         let dirs = [
             (0usize, 1usize, mb, &grid_b, -1.0f32),
             (1, 0, ma, &grid_a, 1.0),

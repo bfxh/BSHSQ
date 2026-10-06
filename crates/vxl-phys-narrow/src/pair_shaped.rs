@@ -232,7 +232,9 @@ impl DefaultNarrowPhase {
                 }
                 // 三角网 × 高度场：**逐顶点采样**（`mesh_pair.rs::mesh_heightfield`；法线与 sign
                 // 由本函数的"最深样本地形法线"那段形状无关地处理）。
-                Shape::TriMesh { mesh, .. } => self.mesh_heightfield(mesh, bpos, brot, hf),
+                Shape::TriMesh { mesh, .. } => {
+                    crate::mesh_pair::mesh_heightfield(self, mesh, bpos, brot, hf)
+                }
                 // 下列各臂都不可达：复合体已在上面展开；外壳 × 高度场由 `hull_pair` 先行受理；
                 // 高度场 × 提供者由 `provider_pair` 先行受理（原 `hull_heightfield` 死代码已删）。
                 Shape::Compound { .. } | Shape::HeightField(_) => return true,
