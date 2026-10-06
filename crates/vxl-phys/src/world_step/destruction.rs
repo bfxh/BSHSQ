@@ -13,7 +13,7 @@
 use crate::{Vec3, World};
 
 use vxl_phys_destruction::impact_tiers::{
-    impulse_level, sites_within_budget, TierCurve, REF_IMPULSE,
+    depth_rounds, impulse_level, sites_within_budget, TierCurve, REF_IMPULSE,
 };
 use vxl_phys_destruction::DestructionConfig;
 
@@ -54,8 +54,10 @@ pub trait DestructionExt {
     /// 确定性：记录序 → 纯函数分档 → `seeds_jittered`（格点序）→ `fracture_voronoi`
     /// （固定扫描序）⇒ 同输入同输出。
     ///
-    /// ⚠️ 本片只做 `cfg.depth == One`（一轮细分）：多轮要**碎片自身**的体素表示，属下一片
-    /// （`FractureDepth` 的语义见 `impact_tiers::depth_rounds`）。
+    /// ⚠️ **目前只实现 `cfg.depth == One`（一轮细分）**：`Two` / `Three` 需要"碎片自身的
+    /// 体素表示"（层级 Voronoi 划分），属单独一片。未实现前本函数**断言拒绝**多轮配置
+    /// （而不是静默按一轮处理——后者会让调用方以为拿到了多轮细分的结果）。
+    /// （`FractureDepth` 的语义见 `impact_tiers::depth_rounds`。）
     ///
     /// `curve` 由调用方给（`TierCurve::default()` 是起点锚点）：**预算封顶只有在曲线够大时
     /// 才会咬住**（默认曲线的 site 上限只有 43，远小于最小预算 `B1K` = 1024）。
@@ -76,6 +78,13 @@ impl DestructionExt for World {
         curve: TierCurve,
         density: f32,
     ) -> usize {
+        // 多轮细分未实现 ⇒ 显式拒绝（见 trait 方法文档）。这是**配置错误**，不是运行期
+        // 可恢复状态：静默降级成一轮会让调用方拿到与配置不符的结果。
+        assert_eq!(
+            depth_rounds(cfg.depth),
+            1,
+            "FractureDepth::Two/Three 的多轮细分尚未实现；请用 depth = One"
+        );
         // 先在**只读**扫描里收集「挖点」（按记录序 ⇒ 确定性）：(球心, 半径, site 数)。
         let mut digs: Vec<(Vec3, f32, u32)> = Vec::new();
         for rec in &self.impacts {
