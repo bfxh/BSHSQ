@@ -34,7 +34,7 @@ pub(crate) fn capsule_ab(
 ) {
     let axis = Mat3::from_quat(ra).mul_vec3(Vec3::Y);
     // 凸体对方走**解析最近点**（`EXPERIMENTS.md` R.2）；对方不是多面体（胶囊/球）时退回 GJK 距离老路，两条路都给出对方**表面点** `p_other`。
-    let (n_raw, p_other) = if np.poly_for(sb).is_some() {
+    let (n_raw, p_other) = if crate::support::poly_for(np, sb).is_some() {
         let Some((p_sample, surf)) = crate::prims::capsule_axis_reach(
             np,
             pa - axis * half_height,
@@ -131,7 +131,7 @@ pub(crate) fn capsule_ba(
 ) {
     let axis = Mat3::from_quat(rb).mul_vec3(Vec3::Y);
     // 同臂 1：凸体对方走解析最近点，非多面体（胶囊/球）退回 GJK 老路。
-    let (n_raw, p_other) = if np.poly_for(sa).is_some() {
+    let (n_raw, p_other) = if crate::support::poly_for(np, sa).is_some() {
         let Some((p_sample, surf)) = crate::prims::capsule_axis_reach(
             np,
             pb - axis * half_height,

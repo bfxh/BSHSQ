@@ -30,26 +30,6 @@ impl DefaultNarrowPhase {
         self.compounds.half_extents(id)
     }
 
-    /// 子形状表借出到 scratch（递归前必须归还；嵌套复合体已在注册期丢弃 ⇒ 不会重入）。
-    pub(crate) fn kids_take(&mut self, id: u32) -> Option<Vec<CompoundChild>> {
-        let mut buf = std::mem::take(&mut self.kids_buf);
-        buf.clear();
-        match self.compounds.get(id) {
-            Some(kids) => {
-                buf.extend_from_slice(kids);
-                Some(buf)
-            }
-            None => {
-                self.kids_buf = buf;
-                None
-            }
-        }
-    }
-
-    pub(crate) fn kids_put(&mut self, buf: Vec<CompoundChild>) {
-        self.kids_buf = buf;
-    }
-
     /// 外壳点云 → 局部 AABB 半长（门面构 `Shape::ConvexHull` 用）。
     pub fn hull_half_extents(&self, id: u32) -> Vec3 {
         self.hulls.half_extents(id)
@@ -67,22 +47,6 @@ impl DefaultNarrowPhase {
     /// 由 `World` 在每次 `collide` 前设置：检测间隔 = 距下一次窄相的时间。
     pub fn set_predict_dt(&mut self, dt: f32) {
         self.predict_dt = if dt > 0.0 { dt } else { 0.0 };
-    }
-
-    /// 本对的充气量＝`max(0, 接近速度)·predict_dt`（`predict_dt = 0` ⇒ 恒 0）。
-    /// 接近速度取**质心**相对速度在法向的投影（忽略角速度贡献：角项在贴面接触上是一阶小量）。
-    pub(crate) fn predict_inflate(
-        &self,
-        a: u32,
-        b: u32,
-        bodies: &vxl_phys_core::BodySet,
-        n: Vec3,
-    ) -> f32 {
-        if self.predict_dt <= 0.0 {
-            return 0.0;
-        }
-        let vrel = bodies.linvel[b as usize] - bodies.linvel[a as usize];
-        (-vrel.dot(n)).max(0.0) * self.predict_dt
     }
 
     pub fn new(skin: f32) -> Self {
@@ -120,32 +84,6 @@ impl DefaultNarrowPhase {
             },
             probe: ProbeCounters::default(),
         }
-    }
-
-    pub(crate) fn poly_for(&mut self, shape: &Shape) -> Option<usize> {
-        let key = poly_key(shape);
-        if key == 0 {
-            return None;
-        }
-        if let Some(&idx) = self.ws.poly_index.get(&key) {
-            return Some(idx);
-        }
-        let poly = match *shape {
-            Shape::Box { half } => ConvexPolytope::box_polytope(half),
-            Shape::Cylinder {
-                half_height,
-                radius,
-            } => ConvexPolytope::cylinder_polytope(radius, half_height, CYLINDER_SEGMENTS),
-            Shape::Cone {
-                half_height,
-                radius,
-            } => ConvexPolytope::cone_polytope(radius, half_height, CYLINDER_SEGMENTS),
-            _ => return None,
-        };
-        self.ws.polys.push(poly);
-        let idx = self.ws.polys.len() - 1;
-        self.ws.poly_index.insert(key, idx);
-        Some(idx)
     }
 }
 
@@ -408,4 +346,66 @@ fn hull_points_in_band(pts: &[Vec3], plane: f32, n: Vec3, skin: f32) -> Vec<Cont
             feature: (i as u32) + 1,
         })
         .collect()
+}
+
+/// 子形状表借出到 scratch（递归前必须归还；嵌套复合体已在注册期丢弃 ⇒ 不会重入）。
+pub(crate) fn kids_take(np: &mut DefaultNarrowPhase, id: u32) -> Option<Vec<CompoundChild>> {
+    let mut buf = std::mem::take(&mut np.kids_buf);
+    buf.clear();
+    match np.compounds.get(id) {
+        Some(kids) => {
+            buf.extend_from_slice(kids);
+            Some(buf)
+        }
+        None => {
+            np.kids_buf = buf;
+            None
+        }
+    }
+}
+
+pub(crate) fn kids_put(np: &mut DefaultNarrowPhase, buf: Vec<CompoundChild>) {
+    np.kids_buf = buf;
+}
+
+/// 本对的充气量＝`max(0, 接近速度)·predict_dt`（`predict_dt = 0` ⇒ 恒 0）。
+/// 接近速度取**质心**相对速度在法向的投影（忽略角速度贡献：角项在贴面接触上是一阶小量）。
+pub(crate) fn predict_inflate(
+    np: &DefaultNarrowPhase,
+    a: u32,
+    b: u32,
+    bodies: &vxl_phys_core::BodySet,
+    n: Vec3,
+) -> f32 {
+    if np.predict_dt <= 0.0 {
+        return 0.0;
+    }
+    let vrel = bodies.linvel[b as usize] - bodies.linvel[a as usize];
+    (-vrel.dot(n)).max(0.0) * np.predict_dt
+}
+
+pub(crate) fn poly_for(np: &mut DefaultNarrowPhase, shape: &Shape) -> Option<usize> {
+    let key = poly_key(shape);
+    if key == 0 {
+        return None;
+    }
+    if let Some(&idx) = np.ws.poly_index.get(&key) {
+        return Some(idx);
+    }
+    let poly = match *shape {
+        Shape::Box { half } => ConvexPolytope::box_polytope(half),
+        Shape::Cylinder {
+            half_height,
+            radius,
+        } => ConvexPolytope::cylinder_polytope(radius, half_height, CYLINDER_SEGMENTS),
+        Shape::Cone {
+            half_height,
+            radius,
+        } => ConvexPolytope::cone_polytope(radius, half_height, CYLINDER_SEGMENTS),
+        _ => return None,
+    };
+    np.ws.polys.push(poly);
+    let idx = np.ws.polys.len() - 1;
+    np.ws.poly_index.insert(key, idx);
+    Some(idx)
 }

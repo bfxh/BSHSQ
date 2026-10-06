@@ -231,7 +231,7 @@ fn box_pair(
     });
     if let Some((sep, n, src)) = crate::sat::sat(np, pb - pa) {
         // 速度充气视野（见 `predict_dt` 字段注）：`0` ⇒ 逐位同现行。
-        np.ws.inflate = np.predict_inflate(a, b, bodies, n);
+        np.ws.inflate = crate::support::predict_inflate(np, a, b, bodies, n);
         if sep > np.skin + np.ws.inflate {
             return;
         }
@@ -262,11 +262,11 @@ fn poly_pair(
     out: &mut Vec<Manifold>,
 ) {
     // 圆柱/圆锥参与的对：走通用路径（多面体填充 + 逐顶点/通用 SAT）。
-    let ia = match np.poly_for(sa) {
+    let ia = match crate::support::poly_for(np, sa) {
         Some(i) => i,
         None => return,
     };
-    let ib = match np.poly_for(sb) {
+    let ib = match crate::support::poly_for(np, sb) {
         Some(i) => i,
         None => return,
     };
@@ -295,7 +295,7 @@ fn poly_pair(
     };
     if let Some((sep, n, src)) = crate::sat::sat(np, pb - pa) {
         // 速度充气视野（同盒对路径；见 `predict_dt` 字段注）。
-        np.ws.inflate = np.predict_inflate(a, b, bodies, n);
+        np.ws.inflate = crate::support::predict_inflate(np, a, b, bodies, n);
         if sep > np.skin + np.ws.inflate {
             return;
         }
@@ -578,7 +578,7 @@ fn heightfield_pair(
         let ok = match *body_shape {
             Shape::Sphere { radius } => crate::hf::sphere_heightfield(np, bpos, radius, hf),
             Shape::Box { .. } | Shape::Cylinder { .. } | Shape::Cone { .. } => {
-                let idx = match np.poly_for(body_shape) {
+                let idx = match crate::support::poly_for(np, body_shape) {
                     Some(i) => i,
                     None => return true,
                 };
