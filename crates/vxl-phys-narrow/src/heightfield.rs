@@ -153,7 +153,7 @@ impl vxl_phys_core::interop::CollisionProvider for HeightField {
         let Some(idx) = np.poly_for(&Shape::Box { half }) else {
             return false;
         };
-        if !np.poly_heightfield(idx, pos, rot, self) {
+        if !crate::hf::poly_heightfield(&mut np, idx, pos, rot, self) {
             return false;
         }
         push_hf_contacts(&np.ws.cand, self, out);
@@ -170,7 +170,7 @@ impl vxl_phys_core::interop::CollisionProvider for HeightField {
         out: &mut Vec<InteropContact>,
     ) -> bool {
         let mut np = DefaultNarrowPhase::new(skin);
-        if !np.sphere_heightfield(center, radius, self) {
+        if !crate::hf::sphere_heightfield(&mut np, center, radius, self) {
             return false;
         }
         push_hf_contacts(&np.ws.cand, self, out);
