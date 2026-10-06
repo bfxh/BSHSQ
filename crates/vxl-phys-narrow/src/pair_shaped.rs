@@ -68,215 +68,6 @@ impl DefaultNarrowPhase {
         pair_dispatch::process_pair_shaped(self, &mut args);
     }
 
-    /// **外部碰撞提供者参与的对**（体素/网格/喷溅场…；ROUTE §2.1 兼容轴）。
-    /// 受理的形状面：`Box` / `Sphere` / `ConvexHull` / `Capsule`（其余形状待专用解法，
-    /// 见 `provider.rs::provider_shape_contacts`）；
-    /// 法线约定与高度场一致：提供者在 a → +n_s（外向）；在 b → −n_s。
-    ///
-    /// 返回 `true` = 本段已处理（**进入本段后所有路径都结束整对**，与原实现一致）。
-    #[allow(clippy::too_many_arguments)]
-    fn provider_pair(
-        &mut self,
-        a: u32,
-        b: u32,
-        bodies: &vxl_phys_core::BodySet,
-        sa: &Shape,
-        sb: &Shape,
-        pa: Vec3,
-        ra: Quat,
-        pb: Vec3,
-        rb: Quat,
-        providers: &dyn vxl_phys_core::interop::ProviderColliders,
-        out: &mut Vec<Manifold>,
-    ) -> bool {
-        let pr_a = match sa {
-            Shape::Provider(id) => Some(*id),
-            _ => None,
-        };
-        let pr_b = match sb {
-            Shape::Provider(id) => Some(*id),
-            _ => None,
-        };
-        if pr_a.is_some() || pr_b.is_some() {
-            if pr_a.is_some() && pr_b.is_some() {
-                return true; // provider-provider 暂不支持（需要 provider 对偶解法）
-            }
-            let (body_shape, bpos, brot, pr_is_a) = if pr_a.is_some() {
-                (sb, pb, rb, true)
-            } else {
-                (sa, pa, ra, false)
-            };
-            let id = pr_a.or(pr_b).unwrap();
-            let mut buf: Vec<vxl_phys_core::interop::InteropContact> = Vec::new();
-            // **接触带按相对速度自适应**（实测修复）：固定 skin（0.02 m）小于每 tick
-            // 位移（8 m/s ⇒ 0.13 m）时，体**跨过皮肤带** ⇒ 进入体内才建接触，此时
-            // 接近速度已≈0 ⇒ 冲击判据不触发、且无 spec 减速（实测：8 m/s 弹体无声
-            // 停在墙前 0.04 m、零破坏）。带 = max(skin, |v_rel|·dt·1.5)；dt 取引擎
-            // 固定基础步 1/60（子步更小 ⇒ 该带偏保守、安全）。
-            let vrel = if pr_is_a {
-                bodies.linvel[b as usize] - bodies.linvel[a as usize]
-            } else {
-                bodies.linvel[a as usize] - bodies.linvel[b as usize]
-            };
-            // **+ skin 余量**（2026-09-15 修复）：带恰等于「样点到表面距离」时
-            // 接触的出现与否只在速度上差 0.5%（实测基准 wall_provider：2 子步下
-            // 0.1398 vs 0.14 的刀锋 ⇒ 墙面接触整整晚一个子步出现，期间水平动量
-            // 被倾斜的地板法线吸收、撞墙事件不登记）。加一个 skin 把刀锋推开，
-            // 使「带内即建（预测）接触」在速度上连续；预测接触由求解器按
-            // distance/dt 限接近速度，不会造成假制动。
-            let band = velocity_band(self.skin, vrel);
-            // 体形状 → 候选接触：**分发与采样在 `provider.rs`**（本文件受尺寸棘轮，
-            // 只准减不许胖 ⇒ 会继续长的采样代码不放这里）。受理面见该文件。
-            let ok = crate::provider::provider_shape_contacts(
-                self,
-                body_shape,
-                if pr_is_a { b } else { a },
-                bpos,
-                brot,
-                id,
-                pr_is_a,
-                band,
-                providers,
-                &mut buf,
-            );
-            if !ok || buf.is_empty() {
-                return true; // 不支持 / 全部顶点都不在接触带内
-            }
-            let sgn = if pr_is_a { 1.0 } else { -1.0 };
-            // 流形法线 = 多面候选里选**主导接触面**。候选来自 provider 的
-            // **逐面发射**（每张面各自发带内样本；共享角点会在相邻面里重复出现
-            // ——只有「面心样本」（feature % 16 == 0）能证明该面真的贴着）。
-            // 选择次序（2026-09-15 修复，取代旧的"点数最多、并列取最深"单一规则）：
-            //   ① 有**闭合速度**的面（法线逆着相对速度 = 正在撞上去）优先，取最大者；
-            //   ② 否则只考虑**带面心样本**的组（排除只有角点的"伪面"）；
-            //   ③ 组内仍按点数最多、并列取最深。
-            // 实测：旧的单一规则在墙角按深度选中**地板面**、丢掉墙面 ⇒ 体的水平
-            // 动量被倾斜地板法线吸收、撞墙事件不登记（bench `wall_provider`：
-            // 12 m/s 弹体停在墙前 0.14 m、vx 11.4→−0.02）。
-            let Some((best_key, best_normal)) = pick_dominant_normal(&buf, vrel, sgn) else {
-                return true;
-            };
-            let normal = best_normal;
-            // **选点：四角优先，面心补位**（2026-09-22，P10 修复）。
-            // 提供者每面发 5 点：`feature % 16 == 0` = **面心**，1..4 = **四角**；而流形只有
-            // 4 槽。旧的 `take(4)` 按**生成序**取 ⇒ 恰好丢掉**第 4 个角** ⇒ 接触力偶不对称
-            // ⇒ 每 tick 注入净力矩 ⇒ **静置单盒持续自旋**（实测 `|ω| ≈ 1.6 rad/s`、永不如入睡；
-            // 见 `OPEN-PROBLEMS.md` P10 的逐 tick 轨迹：补丁恰为「中心 + 三角」、缺 (+x,+z)）。
-            // ⇒ 角点定义力偶、面心只是冗余：**先把角点取满**，面心仅在角点不足时补位。
-            // 稳定性：`sort_by_key` 是稳定排序 ⇒ 同类内保持生成序（确定性不变）。
-            let pts = four_corner_points(&buf, best_key);
-            out.push(Manifold {
-                a,
-                b,
-                normal,
-                points: ContactPoints::from_slice(&pts),
-            });
-            return true;
-        }
-        false
-    }
-
-    /// 高度场参与的对（地形法线取最深接触的采样法线）。返回 `true` = 本段已处理。
-    #[allow(clippy::too_many_arguments)]
-    fn heightfield_pair(
-        &mut self,
-        a: u32,
-        b: u32,
-        bodies: &vxl_phys_core::BodySet,
-        sa: &Shape,
-        sb: &Shape,
-        pa: Vec3,
-        ra: Quat,
-        pb: Vec3,
-        rb: Quat,
-        heightfields: &[HeightField],
-        out: &mut Vec<Manifold>,
-    ) -> bool {
-        let hf_a = match sa {
-            Shape::HeightField(id) => Some(*id as usize),
-            _ => None,
-        };
-        let hf_b = match sb {
-            Shape::HeightField(id) => Some(*id as usize),
-            _ => None,
-        };
-        if hf_a.is_some() && hf_b.is_some() {
-            return true;
-        }
-        if hf_a.is_some() || hf_b.is_some() {
-            let (body_shape, bpos, brot, hf_is_a) = if hf_a.is_some() {
-                (sb, pb, rb, true)
-            } else {
-                (sa, pa, ra, false)
-            };
-            let hf = match heightfields.get(hf_a.or(hf_b).unwrap()) {
-                Some(h) => h,
-                None => return true,
-            };
-            // **速度自适应接触带**（`OPEN-PROBLEMS.md` #6）：直连高度场路径原先**恒用**
-            // 固定 `self.skin`，而 provider 通道早已按 `velocity_band` 把带加宽
-            // （`heightfield.rs` 的 `CollisionProvider` 实现只是把这个带当 `skin` 参数
-            // 收下 ⇒ 两条路对同一对应当给出同一条带）。这里补上同一条口径。
-            //
-            // 存进 `ws.inflate`（本对 scratch：`collide` 每帧先清零、各路径各自置位）
-            // ⇒ 高度场族三个采样函数统一读 `self.skin + self.ws.inflate`。
-            let vrel = bodies.linvel[b as usize] - bodies.linvel[a as usize];
-            self.ws.inflate = velocity_band(self.skin, vrel) - self.skin;
-            let ok = match *body_shape {
-                Shape::Sphere { radius } => crate::hf::sphere_heightfield(self, bpos, radius, hf),
-                Shape::Box { .. } | Shape::Cylinder { .. } | Shape::Cone { .. } => {
-                    let idx = match self.poly_for(body_shape) {
-                        Some(i) => i,
-                        None => return true,
-                    };
-                    crate::hf::poly_heightfield(self, idx, bpos, brot, hf)
-                }
-                // 三角网 × 高度场：**逐顶点采样**（`mesh_pair.rs::mesh_heightfield`；法线与 sign
-                // 由本函数的"最深样本地形法线"那段形状无关地处理）。
-                Shape::TriMesh { mesh, .. } => {
-                    crate::mesh_pair::mesh_heightfield(self, mesh, bpos, brot, hf)
-                }
-                // 下列各臂都不可达：复合体已在上面展开；外壳 × 高度场由 `hull_pair` 先行受理；
-                // 高度场 × 提供者由 `provider_pair` 先行受理（原 `hull_heightfield` 死代码已删）。
-                Shape::Compound { .. } | Shape::HeightField(_) => return true,
-                Shape::ConvexHull { .. } | Shape::Provider(_) => return true,
-                // 胶囊体 × 地形：沿中心线取 N 个样本（每个样本按球处理）。
-                Shape::Capsule {
-                    half_height,
-                    radius,
-                } => {
-                    let axis = Mat3::from_quat(brot).mul_vec3(Vec3::Y);
-                    crate::hf::capsule_heightfield(
-                        self,
-                        bpos - axis * half_height,
-                        bpos + axis * half_height,
-                        radius,
-                        hf,
-                    )
-                }
-            };
-            if !ok {
-                return true;
-            }
-            // 地形法线（取最深接触的采样法线）。
-            let deepest = self.ws.cand[0];
-            let n_t = hf
-                .sample(deepest.point.x, deepest.point.z)
-                .map(|(_, n)| n)
-                .unwrap_or(Vec3::Y);
-            // 流形法线 a→b：a=地形 → +n_t（推向 b）；b=地形 → -n_t。
-            let normal = if hf_is_a { n_t } else { -n_t };
-            out.push(Manifold {
-                a,
-                b,
-                normal,
-                points: ContactPoints::from_slice(&self.ws.cand),
-            });
-            return true;
-        }
-        false
-    }
-
     /// 非 heightfield 对的形状分发（各臂见对应 helper）。
     #[allow(clippy::too_many_arguments)]
     fn pair_non_heightfield(
@@ -520,6 +311,117 @@ impl DefaultNarrowPhase {
     }
 }
 
+/// **外部碰撞提供者参与的对**（体素/网格/喷溅场…；ROUTE §2.1 兼容轴）。
+/// 受理的形状面：`Box` / `Sphere` / `ConvexHull` / `Capsule`（其余形状待专用解法，
+/// 见 `provider.rs::provider_shape_contacts`）；
+/// 法线约定与高度场一致：提供者在 a → +n_s（外向）；在 b → −n_s。
+///
+/// 返回 `true` = 本段已处理（**进入本段后所有路径都结束整对**，与原实现一致）。
+///
+/// **自由函数**（2026-10-06 设计层处置）：原先它是 `DefaultNarrowPhase` 的方法，
+/// 每加一个提供者族的求解器都要往类型添方法；现在族求解器 = 本文件里的自由函数。
+#[allow(clippy::too_many_arguments)]
+fn provider_pair(
+    np: &mut DefaultNarrowPhase,
+    a: u32,
+    b: u32,
+    bodies: &vxl_phys_core::BodySet,
+    sa: &Shape,
+    sb: &Shape,
+    pa: Vec3,
+    ra: Quat,
+    pb: Vec3,
+    rb: Quat,
+    providers: &dyn vxl_phys_core::interop::ProviderColliders,
+    out: &mut Vec<Manifold>,
+) -> bool {
+    let pr_a = match sa {
+        Shape::Provider(id) => Some(*id),
+        _ => None,
+    };
+    let pr_b = match sb {
+        Shape::Provider(id) => Some(*id),
+        _ => None,
+    };
+    if pr_a.is_some() || pr_b.is_some() {
+        if pr_a.is_some() && pr_b.is_some() {
+            return true; // provider-provider 暂不支持（需要 provider 对偶解法）
+        }
+        let (body_shape, bpos, brot, pr_is_a) = if pr_a.is_some() {
+            (sb, pb, rb, true)
+        } else {
+            (sa, pa, ra, false)
+        };
+        let id = pr_a.or(pr_b).unwrap();
+        let mut buf: Vec<vxl_phys_core::interop::InteropContact> = Vec::new();
+        // **接触带按相对速度自适应**（实测修复）：固定 skin（0.02 m）小于每 tick
+        // 位移（8 m/s ⇒ 0.13 m）时，体**跨过皮肤带** ⇒ 进入体内才建接触，此时
+        // 接近速度已≈0 ⇒ 冲击判据不触发、且无 spec 减速（实测：8 m/s 弹体无声
+        // 停在墙前 0.04 m、零破坏）。带 = max(skin, |v_rel|·dt·1.5)；dt 取引擎
+        // 固定基础步 1/60（子步更小 ⇒ 该带偏保守、安全）。
+        let vrel = if pr_is_a {
+            bodies.linvel[b as usize] - bodies.linvel[a as usize]
+        } else {
+            bodies.linvel[a as usize] - bodies.linvel[b as usize]
+        };
+        // **+ skin 余量**（2026-09-15 修复）：带恰等于「样点到表面距离」时
+        // 接触的出现与否只在速度上差 0.5%（实测基准 wall_provider：2 子步下
+        // 0.1398 vs 0.14 的刀锋 ⇒ 墙面接触整整晚一个子步出现，期间水平动量
+        // 被倾斜的地板法线吸收、撞墙事件不登记）。加一个 skin 把刀锋推开，
+        // 使「带内即建（预测）接触」在速度上连续；预测接触由求解器按
+        // distance/dt 限接近速度，不会造成假制动。
+        let band = velocity_band(np.skin, vrel);
+        // 体形状 → 候选接触：**分发与采样在 `provider.rs`**（本文件受尺寸棘轮，
+        // 只准减不许胖 ⇒ 会继续长的采样代码不放这里）。受理面见该文件。
+        let ok = crate::provider::provider_shape_contacts(
+            np,
+            body_shape,
+            if pr_is_a { b } else { a },
+            bpos,
+            brot,
+            id,
+            pr_is_a,
+            band,
+            providers,
+            &mut buf,
+        );
+        if !ok || buf.is_empty() {
+            return true; // 不支持 / 全部顶点都不在接触带内
+        }
+        let sgn = if pr_is_a { 1.0 } else { -1.0 };
+        // 流形法线 = 多面候选里选**主导接触面**。候选来自 provider 的
+        // **逐面发射**（每张面各自发带内样本；共享角点会在相邻面里重复出现
+        // ——只有「面心样本」（feature % 16 == 0）能证明该面真的贴着）。
+        // 选择次序（2026-09-15 修复，取代旧的"点数最多、并列取最深"单一规则）：
+        //   ① 有**闭合速度**的面（法线逆着相对速度 = 正在撞上去）优先，取最大者；
+        //   ② 否则只考虑**带面心样本**的组（排除只有角点的"伪面"）；
+        //   ③ 组内仍按点数最多、并列取最深。
+        // 实测：旧的单一规则在墙角按深度选中**地板面**、丢掉墙面 ⇒ 体的水平
+        // 动量被倾斜地板法线吸收、撞墙事件不登记（bench `wall_provider`：
+        // 12 m/s 弹体停在墙前 0.14 m、vx 11.4→−0.02）。
+        let Some((best_key, best_normal)) = pick_dominant_normal(&buf, vrel, sgn) else {
+            return true;
+        };
+        let normal = best_normal;
+        // **选点：四角优先，面心补位**（2026-09-22，P10 修复）。
+        // 提供者每面发 5 点：`feature % 16 == 0` = **面心**，1..4 = **四角**；而流形只有
+        // 4 槽。旧的 `take(4)` 按**生成序**取 ⇒ 恰好丢掉**第 4 个角** ⇒ 接触力偶不对称
+        // ⇒ 每 tick 注入净力矩 ⇒ **静置单盒持续自旋**（实测 `|ω| ≈ 1.6 rad/s`、永不如入睡；
+        // 见 `OPEN-PROBLEMS.md` P10 的逐 tick 轨迹：补丁恰为「中心 + 三角」、缺 (+x,+z)）。
+        // ⇒ 角点定义力偶、面心只是冗余：**先把角点取满**，面心仅在角点不足时补位。
+        // 稳定性：`sort_by_key` 是稳定排序 ⇒ 同类内保持生成序（确定性不变）。
+        let pts = four_corner_points(&buf, best_key);
+        out.push(Manifold {
+            a,
+            b,
+            normal,
+            points: ContactPoints::from_slice(&pts),
+        });
+        return true;
+    }
+    false
+}
+
 /// 法向量化键（0.1 精度）：同面法线落进同一小组（确定性、组数 ≤ 10）。
 fn quant_normal(v: Vec3) -> (i32, i32, i32) {
     (
@@ -623,6 +525,110 @@ fn four_corner_points(
             feature: c.feature,
         })
         .collect()
+}
+
+/// 高度场参与的对（地形法线取最深接触的采样法线）。返回 `true` = 本段已处理。
+///
+/// **自由函数**（2026-10-06 设计层处置）：同 `provider_pair`，高度场族求解器
+/// 不再占用 `DefaultNarrowPhase` 的方法账。
+#[allow(clippy::too_many_arguments)]
+fn heightfield_pair(
+    np: &mut DefaultNarrowPhase,
+    a: u32,
+    b: u32,
+    bodies: &vxl_phys_core::BodySet,
+    sa: &Shape,
+    sb: &Shape,
+    pa: Vec3,
+    ra: Quat,
+    pb: Vec3,
+    rb: Quat,
+    heightfields: &[HeightField],
+    out: &mut Vec<Manifold>,
+) -> bool {
+    let hf_a = match sa {
+        Shape::HeightField(id) => Some(*id as usize),
+        _ => None,
+    };
+    let hf_b = match sb {
+        Shape::HeightField(id) => Some(*id as usize),
+        _ => None,
+    };
+    if hf_a.is_some() && hf_b.is_some() {
+        return true;
+    }
+    if hf_a.is_some() || hf_b.is_some() {
+        let (body_shape, bpos, brot, hf_is_a) = if hf_a.is_some() {
+            (sb, pb, rb, true)
+        } else {
+            (sa, pa, ra, false)
+        };
+        let hf = match heightfields.get(hf_a.or(hf_b).unwrap()) {
+            Some(h) => h,
+            None => return true,
+        };
+        // **速度自适应接触带**（`OPEN-PROBLEMS.md` #6）：直连高度场路径原先**恒用**
+        // 固定 `np.skin`，而 provider 通道早已按 `velocity_band` 把带加宽
+        // （`heightfield.rs` 的 `CollisionProvider` 实现只是把这个带当 `skin` 参数
+        // 收下 ⇒ 两条路对同一对应当给出同一条带）。这里补上同一条口径。
+        //
+        // 存进 `ws.inflate`（本对 scratch：`collide` 每帧先清零、各路径各自置位）
+        // ⇒ 高度场族三个采样函数统一读 `np.skin + np.ws.inflate`。
+        let vrel = bodies.linvel[b as usize] - bodies.linvel[a as usize];
+        np.ws.inflate = velocity_band(np.skin, vrel) - np.skin;
+        let ok = match *body_shape {
+            Shape::Sphere { radius } => crate::hf::sphere_heightfield(np, bpos, radius, hf),
+            Shape::Box { .. } | Shape::Cylinder { .. } | Shape::Cone { .. } => {
+                let idx = match np.poly_for(body_shape) {
+                    Some(i) => i,
+                    None => return true,
+                };
+                crate::hf::poly_heightfield(np, idx, bpos, brot, hf)
+            }
+            // 三角网 × 高度场：**逐顶点采样**（`mesh_pair.rs::mesh_heightfield`；法线与 sign
+            // 由本函数的"最深样本地形法线"那段形状无关地处理）。
+            Shape::TriMesh { mesh, .. } => {
+                crate::mesh_pair::mesh_heightfield(np, mesh, bpos, brot, hf)
+            }
+            // 下列各臂都不可达：复合体已在上面展开；外壳 × 高度场由 `hull_pair` 先行受理；
+            // 高度场 × 提供者由 `provider_pair` 先行受理（原 `hull_heightfield` 死代码已删）。
+            Shape::Compound { .. } | Shape::HeightField(_) => return true,
+            Shape::ConvexHull { .. } | Shape::Provider(_) => return true,
+            // 胶囊体 × 地形：沿中心线取 N 个样本（每个样本按球处理）。
+            Shape::Capsule {
+                half_height,
+                radius,
+            } => {
+                let axis = Mat3::from_quat(brot).mul_vec3(Vec3::Y);
+                crate::hf::capsule_heightfield(
+                    np,
+                    bpos - axis * half_height,
+                    bpos + axis * half_height,
+                    radius,
+                    hf,
+                )
+            }
+        };
+        if !ok {
+            return true;
+        }
+        // 地形法线（取最深接触的采样法线）。
+        let deepest = np.ws.cand[0];
+        let n_t = hf
+            .sample(deepest.point.x, deepest.point.z)
+            .map(|(_, n)| n)
+            .unwrap_or(Vec3::Y);
+        // 流形法线 a→b：a=地形 → +n_t（推向 b）；b=地形 → -n_t。
+        let normal = if hf_is_a { n_t } else { -n_t };
+        out.push(Manifold {
+            a,
+            b,
+            normal,
+            points: ContactPoints::from_slice(&np.ws.cand),
+        });
+        return true;
+    }
+    false
 }
 
 /// （球, 球）：中心距判据 + 单点流形（`dist < 1e-9` 时给轴向兜底点）。
