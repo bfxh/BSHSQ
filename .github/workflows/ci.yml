@@ -30,10 +30,17 @@ name: ci
 # ② 纯文档/工具目录改动跳过（docs/**、**/*.md、gold-sample/** 不产出引擎
 #    二进制，门禁无判定力；gold-sample 为独立包不进 workspace）；
 # ③ 编译类 job 统一挂 rust-cache（Cargo.lock 键控）；
-# ④ 零编译的文本层检查合并在一个 job 内（省 runner 分配开销）。
-
+# ④ 零编译的文本层检查合并在一个 job 内（省 runner 分配开销）；
+# ⑤ **分支推送不再触发全量**（2026-10-04 实测：同一 commit 被 `push` 与 `pull_request`
+#    各跑一遍 20 个 job ⇒ 双份 runner 占用 + 排队，两份结论完全相同）。现在
+#    **分支的权威判定 = 它那条 PR 的 run**；合进 main 的那次 push 仍跑全量（留档）。
+#    ⚠️ 代价要说清：**没开 PR 的分支 = 没有 CI**（main 未设分支保护，拦不住直接推）。
+#    兜底两条：⑴ 要过门就开 PR（本仓历史全部走 PR，见 git log）；⑵ 无 PR 的分支用
+#    `gh workflow run ci.yml --ref <分支>` 手动补一次全量（`workflow_dispatch` 仍在）。
 on:
   push:
+    branches:
+      - main
     paths-ignore:
       - "docs/**"
       - "**/*.md"
@@ -198,10 +205,24 @@ jobs:
         env:
           RUSTFLAGS: ${{ matrix.linker }}
         run: cargo clippy --workspace --all-targets -- -D warnings
+      # **为什么不写成裸的 `cargo test --workspace --release`（2026-10-04 实测）**：
+      # 全轮 wall-clock 26 分钟里，关键路径就是这一步的**编译**，不是测试——cargo 自报
+      # `Finished release in 23m 05s`（MSVC 行；同机口径 GCC 9m 33s / Clang 11m 58s），
+      # 而 384 个用例的执行是**秒级**。裸写法会连带构建 34 个 example 与 20 组 doctest
+      # ⇒ 约 120 个 release+thin-LTO 链接，全在 4 核 Windows runner 上排队。
+      # `--lib --tests` 只留库单测 + 集成测试（判定力所在），砍掉 example/doctest 的链接。
+      # 覆盖面去向（**不是删门，是挪门**）：
+      #   · doctest → test-debug 档（Linux debug 全量，含 doctest）；
+      #   · example **编译** → 本 job 的 Clippy 步（`--all-targets` 覆盖 examples）；
+      #   · example **实跑** → determinism 档（m0_gates / determinism / m1_collision_row）。
+      # ⚠️ 残留缺口（如实记）：vxl-phys-gpu 的 14 个 example 此后在 CI 里**只做类型检查、
+      #    不再做 release 链接**（test-debug 排除了该 crate）。它们是无门的演示件；
+      #    哪天要钉住，单列一个 `cargo build --release --examples` 的 job，别退回这里。
+      #    另：本档被砍掉的 doctest 实测只有 **3 个用例**（384 = 381 + 3），不是数量级损失。
       - name: Test（工作区；GPU 工作区抖动用例见下一步单独重试——issue #30）
         env:
           RUSTFLAGS: ${{ matrix.linker }}
-        run: cargo test --workspace --release -- --skip same_device_rerun_is_bitwise_identical
+        run: cargo test --workspace --release --lib --tests -- --skip same_device_rerun_is_bitwise_identical
       # 已知 CI 抖动（issue #30）：MSVC 行的 `sorted_copies_boundary` 偶发**启动期**
       # 0xc0000005（STATUS_ACCESS_VIOLATION，历史"重跑即绿"）。把这两个用例从工作区跑里
       # 分出来、**重试 ≤3 次**：不掩盖任何断言失败（三次都挂 = 红），只吞掉运行器瞬态。

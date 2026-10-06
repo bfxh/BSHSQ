@@ -36,6 +36,30 @@ bash scripts/vocab_scan.sh . > /tmp/vocab.log 2>&1; echo "vocab=$?"
 同风格补挂，门禁链现在真的五项全绿。凡是"门禁全绿"的结论都必须**逐项贴退出码**，
 不能只看 test。
 
+## 等 CI（推送之后；**别用 Start-Sleep 盲等**，2026-10-04 立此条）
+
+**实测口径**（run 37207498589，合 main 那次全量）：整轮 wall-clock **26 分 14 秒**，其中
+关键路径是 matrix 的 `Test（工作区）` **一步的编译** —— cargo 自报 `Finished release in
+23m 05s`（MSVC 行；GCC 9m 33s / Clang 11m 58s），而 384 个用例的**执行是秒级**；其余 18 个
+job 全在 7 分钟内收口。⇒ 等 CI 的正确姿势是**事件驱动**，不是按分钟切片睡觉：
+`Start-Sleep 720` 一跳 12 分钟，CI 早就收口了人还在睡，26 分钟能等到 40 分钟。
+
+```bash
+cd "/d/KF/BSHSQ"
+gh pr checks <PR号> --watch                 # 收口即返回（默认 10s 刷新；-i 可调）
+gh run watch <run-id> --exit-status         # 无 PR 时（workflow_dispatch / main 推送）
+gh run list --limit 5                       # 分不清"排队"还是"在跑"时先看 status
+```
+
+- **只等 PR 那一条 run**：分支推送已不再触发全量（`on.push` 收窄到 main，理由见 ci.yml
+  成本注释 ⑤），同一 commit 双份 20 个 job 的时代结束了。
+- 非 watch 的 `gh pr checks` 在仍有 pending 时**退出码 8**（不是失败）——写进脚本时要按
+  8/0/其它三档判，别把 8 当红。
+- 卡住先看是排队还是执行：`queued` 久 = 并发额度被占（本仓一轮要占 20 个 job），
+  不是代码问题；`in_progress` 久 = 大概率就是 MSVC 那 23 分钟编译。
+- **别拿"等 CI"当免跑本地的理由**：本地一条命令 `bash scripts/gate_all.sh`（3–4 分钟，
+  pre-push 钩子已挂）永远先跑；CI 是复核，不是第一道。
+
 ## 规模档门（2026-09-22 新增；**10 万+10 万档的唯一自动门**）
 
 ```bash
