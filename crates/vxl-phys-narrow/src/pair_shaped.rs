@@ -127,7 +127,8 @@ impl DefaultNarrowPhase {
             let band = velocity_band(self.skin, vrel);
             // 体形状 → 候选接触：**分发与采样在 `provider.rs`**（本文件受尺寸棘轮，
             // 只准减不许胖 ⇒ 会继续长的采样代码不放这里）。受理面见该文件。
-            let ok = self.provider_shape_contacts(
+            let ok = crate::provider::provider_shape_contacts(
+                self,
                 body_shape,
                 if pr_is_a { b } else { a },
                 bpos,
@@ -324,7 +325,7 @@ impl DefaultNarrowPhase {
                 },
                 _,
             ) => {
-                self.capsule_ab(a, b, pa, ra, pb, rb, sb, half_height, radius, out);
+                capsule::capsule_ab(self, a, b, pa, ra, pb, rb, sb, half_height, radius, out);
             }
             (
                 _,
@@ -333,7 +334,7 @@ impl DefaultNarrowPhase {
                     radius,
                 },
             ) => {
-                self.capsule_ba(a, b, pa, ra, pb, rb, sa, half_height, radius, out);
+                capsule::capsule_ba(self, a, b, pa, ra, pb, rb, sa, half_height, radius, out);
             }
             _ => {}
         }
