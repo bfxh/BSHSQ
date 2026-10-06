@@ -14,6 +14,10 @@ test / vocab / discipline / god / deps_lock / ci_shape / typos）+ 行为门 + �
 ⚠️ 跑它时**别编辑源码**、**别并发其它 cargo 构建**（两条都踩过，见文末）。
 下面展开的是它内部逐步跑的东西：
 
+> ⚠️ **先读 `KNOWLEDGE.md` §1.9「门是量具，不是目标」（2026-10-06 定调）**：门禁/棘轮/台账是
+> **测量**工具，不是目标。一个改动要么**改设计**、要么有**实测收益/缺陷修复**；两者都不是就别做。
+> 为了让门变绿去改测试断言 / 放宽阈值 / 挪方法凑数字，都算**把门拆了**。PR 模板第一问就是这条。
+
 ```bash
 cd "/d/KF/BSHSQ"
 export CARGO_TARGET_DIR=C:/vxl-wl-target
@@ -65,13 +69,16 @@ gh run list --limit 5                       # 分不清"排队"还是"在跑"时
   再单跑同一个仍会卡），**CI 侧无适配器本来就跳过** ⇒ 默认跳过（口径与 CI 对齐），要跑就
   `GPU_TESTS=1 bash scripts/gate_all.sh`（带 `timeout 300` + 重试 ≤3）。详见 issue #30。
 
-## 规模档门（2026-09-22 新增；**10 万+10 万档的唯一自动门**）
+## 规模档门（2026-09-22 新增；**10 万+10 万档的唯一自动门**；2026-10-06 起**在 CI 里**）
 
 ```bash
 bash scripts/gate_scale.sh              # 判据见下；已接线进 gate_all.sh 的 `step scale`
 SCALE_STRICT=1 bash scripts/gate_scale.sh   # 计时按 >10% 严判（须**安静机**）
 SCALE_FREEZE=1 bash scripts/gate_scale.sh   # 换代：打印可直接粘贴的冻结值块
 ```
+
+> ✅ **2026-10-06：搬进 CI**（`ci.yml` 的 `scale` job，与 `m1_islands` 的串并行哈希一致判据同 job）
+> —— 它判的确定性量**跨机可比**，本就该自动；此前只在本地跑，等于每轮靠人记得手敲。
 
 **判据分两类**（这是它的设计要点）：① **确定性量逐项精确断言**——NaN / 深穿透 / 峰值流形 /
 warm 槽 / 峰值接触点 / 峰值候选 / 活跃 tick / 末态 awake（实测跨次**逐位一致**）；

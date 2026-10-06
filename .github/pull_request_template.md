@@ -1,47 +1,22 @@
-<!-- 关联任务：写 `docs/M1-PLAN.md 第 N 段` 或里程碑编号（T1~T6）；无关联请说明来源。 -->
+<!--
+第一问只问一件事：**你改的是设计，还是门？**（口径见 `docs/KNOWLEDGE.md` §1.9「门是量具，
+不是目标」：一个改动要么改设计，要么有实测收益/缺陷修复；两者都不是 ⇒ 不要开这个 PR。）
+-->
 
-关联任务：
+## 这个改动解决什么
 
-<details>
-<summary>变更与验证</summary>
+- [ ] **改设计**：让"下一个同类改动**不必再动同一个地方**"（分派表 / 域 trait / 拆求解器…）
+      —— 写清"改之前必须动哪里、改之后不必动哪里"
+- [ ] **实测收益 / 缺陷修复**（附读数或最小复现）
+- [ ] 两者都不是 ⇒ **不要开这个 PR**（"让门变绿"不是理由；见 §1.9）
 
-- 变更（做了什么、为什么这样做）：
-- 验证（**原始输出要点**：命令 + 关键数字 + 结论；不写「已验证」三个字了事）：
+## 判据
 
-</details>
+- 新增/改动的判据文件：
+- 若**动了既有测试**：哪条读数 / 哪个反例证明**原判据是错的**（不许为了让门变绿改断言）：
+- 若**改了冻结值 / 基线**（哈希、冻结读数、棘轮基线）：按 `ADR 0004` 写清"旧值 → 新值 + 理由"：
 
-<details>
-<summary>确定性影响（本项目提交门的硬指标）</summary>
+## 门禁
 
-<!-- 触及引擎行为的改动必须回答；纯文档/工具改动写「不适用」并说明。 -->
-
-- `m0_gates` 哈希：旧 `0x…`（全量 u128）→ 新 `0x…`；或「逐位不变」
-- `determinism` FINAL_HASH（10 轮）：
-- 若哈希变化：变化原因（算术序 / 分支路径 / 参数默认值 …）与「是否影响金样容差」的判断：
-- 新钉板测试：本次改动引入的不变式测试名（无常量则写「无」并说明为何不需要）：
-
-</details>
-
-<details>
-<summary>提交门自检（本地等价可跑部分）</summary>
-
-- [ ] `cargo fmt --all --check`
-- [ ] `cargo clippy --workspace --all-targets -- -D warnings`（CI 另有强化档）
-- [ ] `cargo test --workspace --release`
-- [ ] `cargo doc --workspace --no-deps`（`RUSTDOCFLAGS=-D warnings`）
-- [ ] `bash scripts/discipline_scan.sh .`（零 unsafe / 零 f64 / 零 SIMD 内建）
-- [ ] `bash scripts/vocab_scan.sh .`
-- [ ] `cargo deny check`（依赖层：仅在依赖变动时需要）
-- [ ] `cargo run --release -p vxl-phys --example m0_gates`（触及引擎行为时）
-- 说明：miri / loom / TSan / ASan / 三编译器矩阵 / aarch64 哈希比对**只在 CI 跑**，
-  本地跑不了不影响提交，但**不允许**因此宣称「CI 已过」——等 CI 结论。
-
-</details>
-
-<details>
-<summary>风险与回退</summary>
-
-- 已知风险 / 负面结果（无效的尝试也要记录，避免后人重走）：
-- 回退方式（单提交回退？还是需要附带数据迁移/参数回滚）：
-
-</details>
+- [ ] `bash scripts/gate_all.sh` 全绿（或说明为什么这条不需要跑）
+- [ ] 若只动了文档：说明为什么连轻量 job 也不需要
