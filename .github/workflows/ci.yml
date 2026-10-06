@@ -560,6 +560,48 @@ jobs:
           path: |
             gold-sample/gold-*.txt
 
+  # ==================== 规模档（10 万 + 10 万）：**此前只在本地跑**，2026-10-06 搬进 CI ====================
+  # 为什么必须在 CI：`gate_scale.sh` 判的是**确定性量**（NaN / 深穿透 / 峰值流形 / 峰值接触点 /
+  # 峰值候选 / warm 槽 / 活跃 tick / 末态 awake / 翻转峰）—— 它们只由场景与码决定、**跨机可比**，
+  # 是"M1-EXIT §2.3 登记'规模档没有自动门'这条出口债"的唯一自动化落点。计时量在脚本里本就是
+  # **软门**（>2× 才红，>1.5× 只黄）⇒ 上 CI 不会变成 flaky 计时门。
+  # ⚠️ 别把这一步改成"只报不判"：`F_CAND` / `F_MF` / `F_PTS` 那几项是**精确断言**，
+  # 它们正是防"改一行让候选翻倍"的那道门（2026-10-06 的宽相各轴独立 fat 盒换代就是被它抓到的）。
+  scale:
+    name: 规模档 (10 万+10 万)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      # 日志落工作区（脚本默认那条 `C:/…` 是给 Windows 本地留的；CI 上显式给路径，别凭空造 `C:` 目录）。
+      # ⚠️ `SCALE_TIME_REPORT=1`（2026-10-06 首次上场实测后加）：runner 只有 4 vCPU、冻结值取自
+      #    本机 8 线程 ⇒ 计时实测 **2.53×** 冻结值 —— 按 `SPEC` §5「性能门只在参考硬件判定」，
+      #    这台机器**不该判计时**（只报）；**确定性量照旧逐项精确判**（首次上场时它们**全部命中**，
+      #    顺带证明了 10 万档场景**跨平台逐位可复现**）。
+      - name: 规模档门（确定性量精确判；计时在 CI 只报不判）
+        run: SCALE_LOG=scale-gate.log SCALE_TIME_REPORT=1 bash scripts/gate_scale.sh
+      # `m1_islands`：**只判机器无关的那一条** —— 串行/并行末态哈希逐位一致。
+      # ⚠️ 示例**自己**会对"解算扩展 ≥3×"打 verdict 并以非零退出（首次上场实测：4 vCPU runner 上
+      #    2.08×）。但按 `SPEC` §5 那条判据归**参考硬件**（见 `OPEN-PROBLEMS.md` T4 的更正：
+      #    本机 9 跑 2.75–3.75× 单次不可判）⇒ 这里**不看它的退出码**（`gate_all.sh` 里那一步
+      #    也是 `want=report`，同款口径），只看输出里那条机器无关的哈希一致；**缺了那行照样红**
+      #    （崩了/没跑到自然就没有那行）。
+      - name: m1_islands（只判串并行哈希一致；扩展比只报）
+        run: |
+          cargo run --release -q -p vxl-phys --example m1_islands > islands.txt 2>&1 || true
+          tail -4 islands.txt
+          grep -q "逐位一致" islands.txt || { echo "::error::m1_islands 未产出「串行/并行末态哈希逐位一致」（崩了或没跑到）"; exit 1; }
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: scale-gate
+          path: |
+            scale-gate.log
+            islands.txt
+
   # ==================== 汇总门：任一前置门未成功 → 红（Free 私有仓无必需检查，单状态即分支门） ====================
   gates-summary:
     name: 汇总（提交门）
@@ -577,6 +619,7 @@ jobs:
       - determinism-arm64
       - hash-compare
       - ratchet
+      - scale
     if: always()
     runs-on: ubuntu-latest
     steps:

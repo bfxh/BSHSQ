@@ -44,6 +44,10 @@ need_text "TSan 不在 CI 里"               "-Zsanitizer=thread"
 need_text "ASan 不在 CI 里"               "-Zsanitizer=address"
 need_text "确定性 10 轮不在 CI 里"        "--example determinism"
 need_text "门槛场景不在 CI 里"            "--example m0_gates"
+# ②a' 规模档（10 万+10 万）：**确定性量**的自动门（2026-10-06 从"只在本地跑"搬进 CI）。
+#      判的是峰值流形/接触点/候选/warm 槽这些**跨机可比**的量；计时在脚本里是软门。
+need_text "规模档门不在 CI 里（10 万+10 万 的确定性量就没人守了）" "bash scripts/gate_scale.sh"
+need_text "m1_islands 的机器无关判据不在 CI 里"                    "逐位一致"
 # ②b GPU 抖动用例的**范围化重试**（issue #30）：工作区跑里 skip、专用步重试——两条都必须在，
 #    少一条就变成"用例根本没跑"或"重试步被删"
 need_text "GPU 抖动用例的专用重试步不在 CI 里（issue #30）" "Test: sorted_copies_boundary（重试"
