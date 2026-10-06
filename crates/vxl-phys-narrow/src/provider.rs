@@ -8,130 +8,128 @@
 //! `Capsule` 是新增（见 `capsule_provider_contacts` 的注）。
 use super::*;
 
-impl DefaultNarrowPhase {
-    /// 把「体形状 vs 提供者」的候选接触压进 `buf`；返回 `false` = 该形状不受理（**显式列名**：
-    /// 复合体已在上游展开，高度场 × 提供者与提供者 × 提供者是已登记的缺口，见支持矩阵 §1 #10）。
-    #[allow(clippy::too_many_arguments)] // 形状/位姿/提供者/出参 + 带符号朝向
-    pub(crate) fn provider_shape_contacts(
-        &mut self,
-        body_shape: &Shape,
-        body: u32,
-        bpos: Vec3,
-        brot: Quat,
-        id: u32,
-        pr_is_a: bool,
-        band: f32,
-        providers: &dyn vxl_phys_core::interop::ProviderColliders,
-        buf: &mut Vec<vxl_phys_core::interop::InteropContact>,
-    ) -> bool {
-        self.probe.prov_pairs += 1;
-        match *body_shape {
-            Shape::Box { half } => {
-                self.probe.prov_bulk += 1;
-                providers.contacts_box(id, half, bpos, brot, band, buf)
-            }
-            // 球：SDF 类提供者解析求解（`depth = r − sdf(center)`）
-            Shape::Sphere { radius } => {
-                self.probe.prov_bulk += 1;
-                providers.contacts_sphere(id, bpos, radius, band, buf)
-            }
-            // 外壳 vs 提供者：**顶点采样**（逐顶点按 SDF 解析求深度/法线；多点 ⇒ 面接触稳定）。
-            Shape::ConvexHull { .. } => self.hull_provider_contacts(
-                body_shape, body, bpos, brot, id, pr_is_a, band, providers, buf,
-            ),
-            // 胶囊 vs 提供者：**沿轴 N 球采样**（胶囊 = 沿轴球族的并集）。
-            Shape::Capsule {
-                half_height,
-                radius,
-            } => capsule_provider_contacts(
+/// 把「体形状 vs 提供者」的候选接触压进 `buf`；返回 `false` = 该形状不受理（**显式列名**：
+/// 复合体已在上游展开，高度场 × 提供者与提供者 × 提供者是已登记的缺口，见支持矩阵 §1 #10）。
+#[allow(clippy::too_many_arguments)] // 形状/位姿/提供者/出参 + 带符号朝向
+pub(crate) fn provider_shape_contacts(
+    np: &mut DefaultNarrowPhase,
+    body_shape: &Shape,
+    body: u32,
+    bpos: Vec3,
+    brot: Quat,
+    id: u32,
+    pr_is_a: bool,
+    band: f32,
+    providers: &dyn vxl_phys_core::interop::ProviderColliders,
+    buf: &mut Vec<vxl_phys_core::interop::InteropContact>,
+) -> bool {
+    np.probe.prov_pairs += 1;
+    match *body_shape {
+        Shape::Box { half } => {
+            np.probe.prov_bulk += 1;
+            providers.contacts_box(id, half, bpos, brot, band, buf)
+        }
+        // 球：SDF 类提供者解析求解（`depth = r − sdf(center)`）
+        Shape::Sphere { radius } => {
+            np.probe.prov_bulk += 1;
+            providers.contacts_sphere(id, bpos, radius, band, buf)
+        }
+        // 外壳 vs 提供者：**顶点采样**（逐顶点按 SDF 解析求深度/法线；多点 ⇒ 面接触稳定）。
+        Shape::ConvexHull { .. } => hull_provider_contacts(
+            np, body_shape, body, bpos, brot, id, pr_is_a, band, providers, buf,
+        ),
+        // 胶囊 vs 提供者：**沿轴 N 球采样**（胶囊 = 沿轴球族的并集）。
+        Shape::Capsule {
+            half_height,
+            radius,
+        } => capsule_provider_contacts(
+            bpos,
+            brot,
+            half_height,
+            radius,
+            id,
+            band,
+            &mut np.probe,
+            providers,
+            buf,
+        ),
+        // 圆柱 / 圆锥 vs 提供者：**端面圆 + 母线采样**（逐点查询；见下方函数注）。
+        Shape::Cylinder {
+            half_height,
+            radius,
+        } => {
+            let rings = [(-half_height, radius), (0.0, radius), (half_height, radius)];
+            ring_provider_contacts(
                 bpos,
                 brot,
-                half_height,
-                radius,
+                rings,
+                None,
                 id,
                 band,
-                &mut self.probe,
+                &mut np.probe,
                 providers,
                 buf,
-            ),
-            // 圆柱 / 圆锥 vs 提供者：**端面圆 + 母线采样**（逐点查询；见下方函数注）。
-            Shape::Cylinder {
-                half_height,
-                radius,
-            } => {
-                let rings = [(-half_height, radius), (0.0, radius), (half_height, radius)];
-                ring_provider_contacts(
-                    bpos,
-                    brot,
-                    rings,
-                    None,
-                    id,
-                    band,
-                    &mut self.probe,
-                    providers,
-                    buf,
-                )
-            }
-            Shape::Cone {
-                half_height,
-                radius,
-            } => {
-                // 圆锥半径沿母线线性收缩：ρ(y) = radius·(half_height − y)/(2·half_height)；
-                // 顶点（+端）是几何极值点，单独补一个样本。
-                let rings = [
-                    (-half_height, radius),
-                    (-half_height * 0.5, radius * 0.75),
-                    (0.0, radius * 0.5),
-                ];
-                ring_provider_contacts(
-                    bpos,
-                    brot,
-                    rings,
-                    Some(half_height),
-                    id,
-                    band,
-                    &mut self.probe,
-                    providers,
-                    buf,
-                )
-            }
-            // 三角网 vs 提供者：**逐顶点**点查询（与外壳臂同构；非凸 ⇒ 不走 GJK/EPA）。
-            Shape::TriMesh { .. } => crate::mesh_pair::mesh_provider_contacts(
-                self, body_shape, body, bpos, brot, id, pr_is_a, band, providers, buf,
-            ),
-            Shape::Compound { .. } | Shape::HeightField(_) | Shape::Provider(_) => false,
+            )
         }
+        Shape::Cone {
+            half_height,
+            radius,
+        } => {
+            // 圆锥半径沿母线线性收缩：ρ(y) = radius·(half_height − y)/(2·half_height)；
+            // 顶点（+端）是几何极值点，单独补一个样本。
+            let rings = [
+                (-half_height, radius),
+                (-half_height * 0.5, radius * 0.75),
+                (0.0, radius * 0.5),
+            ];
+            ring_provider_contacts(
+                bpos,
+                brot,
+                rings,
+                Some(half_height),
+                id,
+                band,
+                &mut np.probe,
+                providers,
+                buf,
+            )
+        }
+        // 三角网 vs 提供者：**逐顶点**点查询（与外壳臂同构；非凸 ⇒ 不走 GJK/EPA）。
+        Shape::TriMesh { .. } => crate::mesh_pair::mesh_provider_contacts(
+            np, body_shape, body, bpos, brot, id, pr_is_a, band, providers, buf,
+        ),
+        Shape::Compound { .. } | Shape::HeightField(_) | Shape::Provider(_) => false,
     }
+}
 
-    /// 外壳 vs 提供者（原 `pair_shaped.rs` 的 hull 臂，纯搬移）。
-    ///
-    /// 顶点序即特征序；顶点世界点走缓存（同体同帧多对时只做一次 O(n) 变换）。
-    /// 返回 `true` = "本通路受理"（含**外壳数据缺失**的情形——搬移前那里是 `return true`，
-    /// 语义是"整对结束"，调用方对 `true`/`false` 的处理相同，这里原样保留）。
-    #[allow(clippy::too_many_arguments)]
-    fn hull_provider_contacts(
-        &mut self,
-        body_shape: &Shape,
-        body: u32,
-        bpos: Vec3,
-        brot: Quat,
-        id: u32,
-        pr_is_a: bool,
-        band: f32,
-        providers: &dyn vxl_phys_core::interop::ProviderColliders,
-        buf: &mut Vec<vxl_phys_core::interop::InteropContact>,
-    ) -> bool {
-        let side = if pr_is_a { 1 } else { 0 };
-        if !self.fill_hull_world(side, body, body_shape, bpos, brot) {
-            return true;
-        }
-        let mut supported = false;
-        self.probe.prov_samples += self.ws.hull_pts[side].len() as u64;
-        for k in 0..self.ws.hull_pts[side].len() {
-            supported |= providers.contacts_point(id, self.ws.hull_pts[side][k], band, buf);
-        }
-        supported
+/// 外壳 vs 提供者（原 `pair_shaped.rs` 的 hull 臂，纯搬移）。
+///
+/// 顶点序即特征序；顶点世界点走缓存（同体同帧多对时只做一次 O(n) 变换）。
+/// 返回 `true` = "本通路受理"（含**外壳数据缺失**的情形——搬移前那里是 `return true`，
+/// 语义是"整对结束"，调用方对 `true`/`false` 的处理相同，这里原样保留）。
+#[allow(clippy::too_many_arguments)]
+fn hull_provider_contacts(
+    np: &mut DefaultNarrowPhase,
+    body_shape: &Shape,
+    body: u32,
+    bpos: Vec3,
+    brot: Quat,
+    id: u32,
+    pr_is_a: bool,
+    band: f32,
+    providers: &dyn vxl_phys_core::interop::ProviderColliders,
+    buf: &mut Vec<vxl_phys_core::interop::InteropContact>,
+) -> bool {
+    let side = if pr_is_a { 1 } else { 0 };
+    if !np.fill_hull_world(side, body, body_shape, bpos, brot) {
+        return true;
     }
+    let mut supported = false;
+    np.probe.prov_samples += np.ws.hull_pts[side].len() as u64;
+    for k in 0..np.ws.hull_pts[side].len() {
+        supported |= providers.contacts_point(id, np.ws.hull_pts[side][k], band, buf);
+    }
+    supported
 }
 
 /// **胶囊 vs 提供者：沿轴 N 球采样**（`k = 0` = `−axis·half_height` 端，`k = N−1` =
