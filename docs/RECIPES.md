@@ -75,10 +75,14 @@ gh run list --limit 5                       # 分不清"排队"还是"在跑"时
 bash scripts/gate_scale.sh              # 判据见下；已接线进 gate_all.sh 的 `step scale`
 SCALE_STRICT=1 bash scripts/gate_scale.sh   # 计时按 >10% 严判（须**安静机**）
 SCALE_FREEZE=1 bash scripts/gate_scale.sh   # 换代：打印可直接粘贴的冻结值块
+SCALE_TIME_REPORT=1 bash scripts/gate_scale.sh  # **非参考硬件**（CI runner/旁证机）：计时只报不判
 ```
 
 > ✅ **2026-10-06：搬进 CI**（`ci.yml` 的 `scale` job，与 `m1_islands` 的串并行哈希一致判据同 job）
 > —— 它判的确定性量**跨机可比**，本就该自动；此前只在本地跑，等于每轮靠人记得手敲。
+> ⚠️ CI 那一步带 `SCALE_TIME_REPORT=1`：runner 只有 4 vCPU（冻结值取自本机 8 线程）⇒ 计时实测
+> **2.53×** 冻结值，按 `SPEC` §5 那台机器**不该判计时**。**确定性量照旧精确判**——首次上场它们
+> **全部命中**，顺带证明 10 万档场景**跨平台逐位可复现**。
 
 **判据分两类**（这是它的设计要点）：① **确定性量逐项精确断言**——NaN / 深穿透 / 峰值流形 /
 warm 槽 / 峰值接触点 / 峰值候选 / 活跃 tick / 末态 awake（实测跨次**逐位一致**）；

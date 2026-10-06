@@ -18,6 +18,7 @@
 #   bash scripts/gate_scale.sh              # 默认：确定性量精确 + 计时粗门
 #   SCALE_STRICT=1 bash scripts/gate_scale.sh   # 计时按 >10% 严判（安静机）
 #   SCALE_FREEZE=1 bash scripts/gate_scale.sh   # 换代：打印可直接粘贴的冻结值块
+#   SCALE_TIME_REPORT=1 bash scripts/gate_scale.sh  # **非参考硬件**（CI runner / 旁证机）：计时只报不判
 # 退出码：0 = 全绿；1 = 判据不达标；2 = 找不到路径；3 = **没有真正做判定**（解析不到摘要行）。
 #
 # ⚠️ 跑它时别并发其它构建/门（本仓有并发开发者；计时段会互相污染）。
@@ -136,12 +137,20 @@ printf '  %-12s 实测 %s（冻结 %s，比 %s×）\n' 全期均 "$avg" "$T_AVG"
 printf '  %-12s 实测 %s（冻结 %s，比 %s×）\n' 最差tick "$worst" "$T_WORST" "$ratio_worst"
 
 strict="${SCALE_STRICT:-0}"
-verdict_time=$(awk -v ra="$ratio_avg" -v rw="$ratio_worst" -v strict="$strict" 'BEGIN{
+# **非参考硬件上的计时口径**（2026-10-06 加，CI runner 逼出来的）：`SPEC.md` §5 写死
+# "性能门只在参考硬件（§3 = i5-13490F）上判定"。CI 的 ubuntu runner 只有 4 vCPU，而冻结值取自
+# 本机 8 线程 ⇒ 实测全期均 **2.53×** 冻结值——那不是"崩坏"，是**机器不同**。
+# `SCALE_TIME_REPORT=1` ⇒ 计时**只报不判**（读数与比值照打）；确定性量照旧**逐项精确判**。
+# 判据不缩水：这只是把"不该在这台机器上判的量"还给 `SPEC §5` 指定的那台机器。
+time_report="${SCALE_TIME_REPORT:-0}"
+verdict_time=$(awk -v ra="$ratio_avg" -v rw="$ratio_worst" -v strict="$strict" -v rep="$time_report" 'BEGIN{
+    if (rep == "1") { print "REPORT"; exit }
     r = (ra+0 > rw+0) ? ra+0 : rw+0;
     if (strict == "1")      { if (r > 1.10) print "FAIL"; else print "OK" }
     else                    { if (r > 2.00) print "FAIL"; else if (r > 1.50) print "WARN"; else print "OK" }
 }')
 case "$verdict_time" in
+    REPORT) echo "  ℹ️ 计时**只报不判**（SCALE_TIME_REPORT=1：非参考硬件，判据归 SPEC §5 的参考机）" ;;
     FAIL) echo "  ❌ 计时 >$([ "$strict" = 1 ] && echo '10%（严判）' || echo '2×（粗门）') ⇒ 按协议先在**安静机**复测："
           echo "     bash scripts/ab_perf.sh <旧ref> 3 '平均' cargo run --release -p vxl-phys --example m1_scale -- 8 102400 100000 600 16"
           fail=1 ;;
@@ -171,9 +180,13 @@ phase_report 宽相 2 '[0-9.]+ \(AABB'
 phase_report 窄相 3 '[0-9.]+'
 phase_report 解算 4 '[0-9.]+'
 
-if [ "$fail" -eq 0 ]; then
-    echo "✅ 规模档门全绿（确定性量逐项一致；计时$([ "$verdict_time" = WARN ] && echo '有黄项' || echo '在门内')）"
+  if [ "$fail" -eq 0 ]; then
+    case "$verdict_time" in
+        REPORT) echo "✅ 规模档门全绿（**确定性量逐项一致**；计时按 SCALE_TIME_REPORT=1 只报不判）" ;;
+        WARN)   echo "✅ 规模档门全绿（确定性量逐项一致；计时有黄项，见上）" ;;
+        *)      echo "✅ 规模档门全绿（确定性量逐项一致；计时在门内）" ;;
+    esac
     exit 0
-fi
+  fi
 echo "❌ 规模档门不达标（改动确定性量 ⇒ 按 ADR-0004 换代并记理由；计时超标 ⇒ 安静机 ab_perf 复测）" >&2
 exit 1
