@@ -66,11 +66,31 @@ need_text "重试步没开 pipefail（管道会吞掉退出码）"    "set -o pi
 need_text "抖动 artifact 名没用 job-index（matrix.label 含 / 会让上传失败）" \
           'name: gpu-flake-logs-${{ strategy.job-index }}'
 
-# ③ 汇总门必须继续 needs 这些前置门（skipped 被 GitHub 视作通过 ⇒ 漏一个门就漏一片）
-for dep in static-text static-deps static-code matrix test-debug miri loom tsan asan \
-           determinism determinism-arm64 hash-compare; do
-  need_text "汇总门的 needs 少了：$dep" "      - $dep"
-done
+# ③ 汇总门必须收敛**所有**承重 job（skipped 被 GitHub 视作通过 ⇒ 漏一个门就漏一片）。
+#    **按形状判定，不再手写枚举**：旧写法只列 12 个 dep，而 needs 里实际有 14 个 ——
+#    `ratchet` / `scale` 两条**没有任何门守**（有人从 needs 里删掉它们不会红）。这与 ⑧ 同源：
+#    "逐点枚举会漏"。以下规则让**新增承重 job 若不接进汇总就直接红**，不必再改本脚本。
+#    豁免（报告层，其 job 上方注释已写明"不进 gates-summary"）：coverage / gold-sample；
+#    汇总门自身不算承重门。
+jobs_all="$(awk '/^jobs:/{f=1;next} f && /^  [a-z][a-z0-9-]*:/{s=$0; sub(/:.*/,"",s); sub(/^  /,"",s); print s}' "$CI")"
+needs_all="$(awk '/^  gates-summary:/{f=1} f && /^    needs:/{g=1;next} g && /^      - /{print $2} g && /^    [a-z]/{exit}' "$CI")"
+if [ -z "$jobs_all" ] || [ -z "$needs_all" ]; then
+  echo "❌ 形状锁从 ci.yml 提取不到 job/needs（结构变了 ⇒ 本门会静默失效）"
+  FAIL=1
+else
+  for dep in $(printf '%s\n' "$jobs_all" | grep -vE '^(coverage|gold-sample|gates-summary)$'); do
+    printf '%s\n' "$needs_all" | grep -qx -- "$dep" || {
+      echo "❌ 汇总门 needs 漏了承重 job：$dep（新增门不接进汇总 = 白跑）"
+      FAIL=1
+    }
+  done
+  for dep in $needs_all; do
+    printf '%s\n' "$jobs_all" | grep -qx -- "$dep" || {
+      echo "❌ 汇总门 needs 里有不存在的 job：$dep（拼错 / 已改名）"
+      FAIL=1
+    }
+  done
+fi
 
 # ③b debug 档测试 job 必须在：`debug_assert!` 只在 debug 档编译进来，而其余测试一律
 #     `--release` ⇒ 少了它，这类引擎不变量在 CI 里**永不执行**（OPEN-PROBLEMS P8 的教训）。
