@@ -21,6 +21,11 @@
 > ⑥ "**与刚体共求解器**"按字面仍未做 —— 现状是 **XPBD 子步 + 反作用耦合**（`cloth_coupling.rs`），
 > `ElementKind::Xpbd` / `ConstraintElement` 仍是"声明了没接线"（与 `ROUTE.md` M2 的说明一致）。
 > ⇒ §1.1/§2 以下的行文保留为**当时的证据**，但结论以本块为准。
+>
+> **状态口径（2026-10-08 起）**：本块列的"缺/已落地"以 **`docs/CAPABILITIES.yaml` 为单一事实源**
+> （相关 id：`PHY-SCOPE-SURFEL-TORQUE-{RIGID,CLOTH}` / `PHY-SCOPE-XPBD-COUPLING` /
+> `PHY-SCOPE-UNIFIED-SOLVER` / `PHY-SCOPE-VOLUME-PRESSURE` / `PHY-SCOPE-EDGE-FRICTION`）。
+> 本块正文负责解释证据与背景，**状态不许与登记表不一致**。
 
 ## 1. 现状：三条问题的答案（先说结论）
 
