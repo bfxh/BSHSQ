@@ -18,8 +18,20 @@ impl log::Log for StderrLogger {
     }
 
     fn log(&self, rec: &log::Record<'_>) {
+        // ⚠️ **直写真实 stderr**，不用 `eprintln!`：libtest 默认把 stdout/stderr 捕获到内存，
+        // 只在测试正常结束时才吐出来 —— 而 issue #30 的现场是**挂住不返回 / 启动期崩溃**，
+        // 那时捕获缓冲根本不落盘，`eprintln!` 等于白记。`io::stderr()` 绕开捕获、立刻可见。
         // 前缀带 `gpu-diag` 便于在 CI artifact 里 grep（tests/ 目录不受 print-gate 管）。
-        eprintln!("[gpu-diag {} {}] {}", rec.level(), rec.target(), rec.args());
+        use std::io::Write;
+        let mut err = std::io::stderr().lock();
+        writeln!(
+            err,
+            "[gpu-diag {} {}] {}",
+            rec.level(),
+            rec.target(),
+            rec.args()
+        )
+        .ok();
     }
 
     fn flush(&self) {}
