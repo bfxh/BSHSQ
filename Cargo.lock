@@ -1055,6 +1055,7 @@ dependencies = [
 name = "vxl-phys-gpu"
 version = "0.1.0"
 dependencies = [
+ "log",
  "vxl-phys",
  "vxl-phys-broad",
  "vxl-phys-core",

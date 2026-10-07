@@ -13,6 +13,11 @@ wgpu = "30"
 vxl-phys-core = { workspace = true }
 
 [dev-dependencies]
+# `log` 门面（**只进 dev**）：CI 早就设了 `RUST_LOG=wgpu_core=info,wgpu_hal=info`，
+# 但测试二进制**没有初始化 logger** ⇒ wgpu 一行日志都出不来，"启动期崩溃/挂起"只剩退出码
+# （issue #30 的根因抓取卡在这里）。`wgpu-core` 本就依赖 `log` ⇒ 不新增 crate、不改发布面。
+# 见 `tests/common/mod.rs` 的 `init_logger`。
+log = "0.4"
 # 探针要用现有 CPU 流体做"苹果对苹果"对拍（同数学/同场景）；只进 dev ⇒ 不进发布依赖面。
 vxl-phys-fluid = { workspace = true }
 # facade 接线验收（`gpu_facade_probe`）要建 `World` 并登记卡上步进后端；同样只进 dev。

@@ -242,7 +242,10 @@ jobs:
           # 启动期 0xc0000005 在 Rust 运行时可打出 fault 栈（issue #30 的根因抓取用）。
           RUST_BACKTRACE: "1"
           # **wgpu 启动路径日志**（issue #30 第 1 条）：适配器枚举 / 设备请求是"启动期崩溃"
-          # 的头号怀疑对象；没有这行日志就只能看到退出码。只开 info 档，别把 CI 日志冲爆。
+          # 的头号怀疑对象。⚠️ **光设这一行不产生日志**：2026-10-07 之前测试二进制没有初始化
+          # logger ⇒ `RUST_LOG` 是死的（issue #30 comment 4 实测"一行都没有"）。现在由
+          # `crates/vxl-phys-gpu/tests/common/mod.rs::init_logger` 接到 `log` 门面（`RUST_LOG`
+          # 为空则不装 ⇒ 其它 job 零影响）。只开 info 档，别把 CI 日志冲爆。
           RUST_LOG: "wgpu_core=info,wgpu_hal=info,naga=warn"
         run: |
           # ⚠️ **必须开 pipefail**：`bash -e`（Actions 的默认外壳）下管道的退出码是**最后一个

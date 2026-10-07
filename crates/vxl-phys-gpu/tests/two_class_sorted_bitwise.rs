@@ -13,6 +13,7 @@
 //! ⚠️ **无适配器 ⇒ 跳过**（与既有 GPU 判据同口径：CI 上不跑，跑它的是本地全量门禁）。
 //! ⚠️ 盲区（如实记）：`overflow == 0` 与"两张表非平凡"由 `two_class_real_scene.rs` 的
 //! CPU oracle 断言（那条**只跑网格**、不跑整 tick）——本文件判的是**数值等价**，不重复判表。
+mod common;
 mod support;
 
 use support::scene_2b;
@@ -24,6 +25,7 @@ const TICKS: usize = 3;
 const SUB: usize = 4;
 
 fn have_adapter() -> bool {
+    common::init_logger(); // `RUST_LOG` 非空时把 wgpu 启动日志转到 stderr（issue #30）
     if vxl_phys_gpu::probe::adapters().is_empty() {
         println!("（本机无可用适配器 ⇒ 跳过；与其它 GPU 探针同口径）");
         return false;
@@ -113,8 +115,7 @@ fn mixed_2b_sorted_and_flat_are_bitwise_identical() {
     let (pos, vel, pmass) = flatten_all(&f);
     let mut flat = Packet::new_flat(0, pc, &pos, &vel, &pmass).expect("平铺档建包失败");
     let mut sorted = Packet::new(0, pc, &pos, &vel, &pmass).expect("格序档建包失败");
-    // **判据 2**：档没建起来时，两边跑的是同一条路 ⇒ 判据 1 是**空过**（§26.3 触点 7 之前必红）。
-    // 两头都断言：读点若是"恒真"就证明不了任何事（平铺档必须给 false）。
+    // **判据 2**：档没建起来时两边跑的是同一条路 ⇒ 判据 1 是**空过**（§26.3 触点 7 之前必红）；两头都断言（读点恒真就证明不了任何事，平铺档必须给 false）。
     assert!(
         sorted_active(&sorted) && !sorted_active(&flat),
         "格序档读点必须**分辨得出**两档：`new_sorted` 建了、`new` 没建（否则判据 1 是空过）"
