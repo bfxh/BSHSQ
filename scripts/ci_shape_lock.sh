@@ -143,6 +143,30 @@ grep -qF -- 'exit "$rc"' "$REL" || {
   FAIL=1
 }
 
+# ⑧ **ci.yml 里 `| tee` 一律不许吞退出码**（2026-10-07）：⑦ 把 release.yml 的门禁接 tee 逐条
+#    禁掉，但 ci.yml 侧此前只有**被点名**的 GPU 重试步（②d）保证开了 pipefail；determinism /
+#    覆盖率 / 金样三条同样 `| tee` 的步骤都没开 ⇒ 程序失败被 tee 的 0 吞掉、步骤恒绿（#140 只
+#    在 aarch64 那条修过同一个坑，正是"逐点补会漏"的证据）。这里改成**按形状判定**：凡出现
+#    `| tee`，其所在步骤内必须有 `set …pipefail`（纯注释行不算）——新增同类步骤若漏开即红。
+tee_bad="$(awk '
+  /^[[:space:]]*#/ { next }
+  /^      - / { step = FNR }
+  /pipefail/ { pf[FNR] = 1 }
+  /\|[[:space:]]*tee/ { n++; tl[n] = FNR; sl[n] = step }
+  { src[FNR] = $0 }
+  END {
+    for (i = 1; i <= n; i++) {
+      ok = 0
+      for (j = sl[i]; j <= tl[i]; j++) if (j in pf) ok = 1
+      if (!ok) printf "  ci.yml:%d %s\n", tl[i], src[tl[i]]
+    }
+  }' "$CI")"
+if [ -n "$tee_bad" ]; then
+  echo "❌ ci.yml 里有 \`| tee\` 的步骤没开 pipefail（程序失败会被 tee 的 0 吞成假绿）："
+  printf '%s\n' "$tee_bad"
+  FAIL=1
+fi
+
 if [ "$FAIL" -eq 0 ]; then
   echo "✅ CI 形状锁通过（四提交门 + 汇总门 needs 完整 / 关键命令在 / 安全与成本基线在 /" \
        "action 全钉 SHA / 本地门链与钩子齐全）"
