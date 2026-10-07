@@ -24,6 +24,11 @@ use vxl_phys_core::Vec3;
 
 pub mod damage;
 pub mod plastic;
+// **体积 / 气压约束**（`SPEC.md` §4.6；默认 `k ≤ 0` = 关）—— 独立模块 + **自由函数**：
+// 按 `god.gate.json` 对 ClothSheet 的处置口径（「约束族求解挪进独立求解器」），
+// **新加一族约束不往本类型添方法**（本域一行方法都没加）。
+pub mod volume;
+use volume::VolumePressure;
 // **弯曲约束族并组**（腾 `ClothSheet` 成员位；见 `cloth/bend.rs`）——`soft/lib.rs` 零预算，
 // 所以走 `cloth.rs` 的子模块（不需要 crate 级 `mod`）。
 mod bend;
@@ -161,6 +166,8 @@ pub struct ClothSheet {
     /// **布 × 介质的 scratch 组**（逐面样本 + 反作用冲量 + 逐顶点质量倍率；三者并组腾成员位，
     /// 见 `cloth/medium.rs`）：`samples` 空 = 关（默认）⇒ 阻力/双向/湿质量**三半都短路**。
     pub medium: ClothMedium,
+    /// **体积 / 气压**（`SPEC.md` §4.6「体积守恒」；`k ≤ 0` 默认关 ⇒ 首行短路，与其它域同款）。
+    pub volume: VolumePressure,
 }
 
 impl ClothSheet {
@@ -176,16 +183,14 @@ impl ClothSheet {
         let n = points.len();
         let rho = if density > 0.0 { density } else { 1.0 };
         let t = if thickness > 0.0 { thickness } else { 1e-3 };
-        // 拓扑 + 注册长度（唯一边 = 结构+剪切、二环对 = 弯曲）+ 薄壳均分质量 —— 各自抽成纯函数
-        // （`new` 顶 god 门最长函数棘轮，2026-09-29 抽出）。
+        // 拓扑 + 注册长度 + 薄壳均分质量 —— 各自抽成纯函数（`new` 顶 god 门最长函数棘轮）。
         let (cons, rest, bend, bend_rest) = topology(&tris, &points, n);
         let mass = shell_mass(&tris, &points, rho, t);
         Self {
             pos: points,
             prev: Vec::new(),
             vel: vec![Vec3::ZERO; n],
-            // `inv_mass` / `self_contacts` **就地**算：前者要 `mass`、后者要 `cons`/`bend` ⇒ 必须排在
-            // 这三个字段**被移走之前**（结构体字面量按书写序求值）。顺带让 `new` 少两行（尺寸棘轮）。
+            // `inv_mass` / `self_contacts` **就地**算（要排在 `mass`/`cons`/`bend` 被移走之前），顺带少两行（尺寸棘轮）。
             inv_mass: inv_mass_of(&mass),
             mass,
             self_contacts: SelfContacts::new(t * 0.5, &cons, &bend),
@@ -205,6 +210,7 @@ impl ClothSheet {
             aero: ClothAero::default(),
             damage: damage::Damage::default(),
             medium: ClothMedium::default(),
+            volume: VolumePressure::default(),
         }
     }
 
@@ -318,9 +324,13 @@ impl ClothSheet {
         // **关弯曲**（非有限 compliance）⇒ `a_tilde_bend = inf`。`inf/inf = NaN` 会毒化整场
         // （弯曲金丝雀判据实测抓到过）⇒ 下方**显式短路**，不是"靠数学自然退化"。
         let a_tilde_bend = self.bend_compliance / (h * h);
+        // **体积/气压**（`k ≤ 0` ⇒ 短路）：与距离/弯曲**同段位、每迭代一次**——三者交替
+        // Gauss-Seidel。先读出参数再传 `&mut self`（否则与字段借用冲突）。
+        let (vk, vt) = (self.volume.k, self.volume.target);
         for _ in 0..self.iterations.max(1) {
             self.project_edges(a_tilde);
             self.project_bend(a_tilde_bend);
+            volume::project_volume(self, h, vk, vt);
         }
         // **损伤步**：塑性流动先、撕裂检查后（两子域默认关 ⇒ 首行短路、逐位不变）
         self.damage_step();

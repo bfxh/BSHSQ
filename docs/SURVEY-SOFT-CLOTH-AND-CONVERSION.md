@@ -13,10 +13,10 @@
 > | "`vxl-phys` 不依赖它" | **已接线**（`vxl-phys` 依赖 `vxl-phys-soft`，门面 `cloth_*`/`rope_*` 推进） |
 > | "三角网作为碰撞形状：没有；且 cylinder/cone/capsule vs 三角网不产生接触" | **已有**：`Shape::TriMesh` + `MeshStore` + `mesh_pair`（受理**盒/球/胶囊/圆柱/锥**）+ `mesh_vs_mesh`（双面口径）；布-布与布-形状都有接触 |
 > | "自碰撞/布-布：没有" | **已落地**：点-点（`cloth_self_collision.rs`）+ **点-边进阶档**（`cloth_self_collision/edge.rs`）+ **自摩擦库仑锥**（`cloth_self_friction.rs`）——三者**各自默认关** |
-> | "距离/弯曲/体积约束：无 XPBD 约束" | 距离/结构/弯曲 ✓、**撕裂**（`cloth_tear.rs`）✓、**塑性**（`cloth/plastic.rs`）✓；**体积约束仍缺** |
+> | "距离/弯曲/体积约束：无 XPBD 约束" | 距离/结构/弯曲 ✓、**撕裂**（`cloth_tear.rs`）✓、**塑性**（`cloth/plastic.rs`）✓、**体积/气压 ✓（2026-10-07，`cloth/volume.rs`：Müller 2007 气压 + XPBD 投影，默认关）** |
 > | "面元气动：28 行纯配置，无消费方" | `vxl-phys-aero` 的 `face_force_with_lift` 有消费方：`cloth_aero.rs` **升力已接入**（判据 `tests/cloth_aero_lift.rs`）；**面元力矩按边界明确不含**（不是漏） |
 >
-> **真正还缺的**：① **体积约束**；② **点-边对的摩擦**（点-边的推开已做，摩擦仍属后续片，见 `edge.rs` 的"边界"注）；
+> **真正还缺的**：~~① **体积约束**~~（✅ **2026-10-07 落地**）；② **点-边对的摩擦**（点-边的推开已做，摩擦仍属后续片，见 `edge.rs` 的"边界"注）；
 > ③ **面元力矩**；④ **GPU 档**；⑤ 出口判据本身：**悬臂/旗飘金样 + 刚度档表**（`ROUTE.md` §7 的 M4 出口）**仍未做**；
 > ⑥ "**与刚体共求解器**"按字面仍未做 —— 现状是 **XPBD 子步 + 反作用耦合**（`cloth_coupling.rs`），
 > `ElementKind::Xpbd` / `ConstraintElement` 仍是"声明了没接线"（与 `ROUTE.md` M2 的说明一致）。
