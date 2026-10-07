@@ -197,3 +197,52 @@ fn fracture_voronoi_hier(
     world.refresh_provider_bounds();
     n
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{per_round_sites, pow_le};
+
+    /// `k^r ≤ cap` 的整数判据（饱和乘法；别退回浮点/别溢出）。
+    #[test]
+    fn pow_le_boundaries() {
+        assert!(pow_le(2, 10, 1024));
+        assert!(!pow_le(2, 11, 1024));
+        assert!(pow_le(3, 6, 729));
+        assert!(!pow_le(3, 7, 729));
+        assert!(pow_le(1, 64, 1));
+        assert!(!pow_le(1, 64, 0), "1^r = 1 > 0 ⇒ 预算为 0 时不成立");
+    }
+
+    /// 预算摊法：k^r ≤ cap，且轮数取到 `depth` 给的上限。
+    #[test]
+    fn per_round_sites_respects_budget_and_depth() {
+        // 单轮：site 原样。
+        assert_eq!(per_round_sites(13, 1, 1024), (13, 1));
+        // 两轮：13² = 169 ≤ 1024 ⇒ 原样两轮。
+        assert_eq!(per_round_sites(13, 2, 1024), (13, 2));
+        // 三轮：13³ = 2197 > 1024 ⇒ 降到 k=10（10³ = 1000）。
+        assert_eq!(per_round_sites(13, 3, 1024), (10, 3));
+        // 四轮：k=5（5⁴ = 625）；k=6 时 1296 > 1024。
+        assert_eq!(per_round_sites(100, 4, 1024), (5, 4));
+        // site 很小：原样用满轮数。
+        assert_eq!(per_round_sites(2, 5, 1024), (2, 5));
+        // k 退化到 1 ⇒ 单轮（碎一块不算"一层"）。
+        assert_eq!(per_round_sites(1, 3, 1024), (1, 1));
+        // cap = 0：任何 k ≥ 2 都不行 ⇒ 单轮 1 块。
+        assert_eq!(per_round_sites(500, 3, 0), (1, 1));
+    }
+
+    /// 兜底不变量：枚举规模档 × site × 轮数，**任何输入都不超预算**。
+    #[test]
+    fn per_round_never_exceeds_cap() {
+        for &cap in &[1u32, 2, 7, 64, 1024, 10_000, 100_000, 1_000_000] {
+            for &sites in &[1u32, 2, 3, 13, 43, 316, 2000] {
+                for rounds in 1..=3 {
+                    let (k, r) = per_round_sites(sites, rounds, cap);
+                    assert!(r >= 1 && r <= rounds.max(1), "轮数越界：r={r}");
+                    assert!(pow_le(k, r, cap), "超预算：k={k} r={r} cap={cap}");
+                }
+            }
+        }
+    }
+}
