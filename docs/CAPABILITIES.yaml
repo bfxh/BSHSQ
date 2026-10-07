@@ -108,7 +108,9 @@ capabilities:
     notes: >
       现状 = XPBD 子步 + 反作用两腿（`body.dv` / `body.dx`），门面在体解算之后取用 ⇒ 下一 tick 生效。
       这不是"共享求解系统"（见下一条）；两者不得用同一个布尔值表示。
-    contract_tests: crates/vxl-phys-soft/tests/xpbd_scaling_contract.rs
+    contract_tests:
+      - crates/vxl-phys-soft/tests/xpbd_scaling_contract.rs
+      - crates/vxl-phys-soft/tests/xpbd_projection_analytic.rs
     contract_coverage:
       - id: fixed_timestep
         status: covered
@@ -122,18 +124,25 @@ capabilities:
           薄壳均分质量（cloth_minimal 判据①的刚性平移）；角反作用那边进一步要求"惯量不硬编码"——
           angular_reaction_holds 从同形状同密度的临时 World 读 inv_mass / local_inv_inertia。
       - id: compliance_scales_with_dt_squared
-        status: partially
+        status: covered
         note: >
-          代码事实 = a_tilde = α/h²（cloth.rs::project_constraints）。判据只到"收敛趋势"
-          （xpbd_scaling_contract：平均下垂随 substeps 单调、相邻档差递减）；**精确**钉住尺度律
-          需要"只投影一步"的入口 —— 当前 step 把 predict/project/contacts/write_back 打包了。
-          ⚠️ 如实说明：若把 α/h² 误写成 α/h，收敛趋势判据**抓不到**（刚度仍单调随 h 变），
-          所以这里标 partially 而不是 covered。
+          代码事实 = a_tilde = α/h²（cloth.rs / rope.rs）。**精确判据** =
+          xpbd_projection_analytic::single_projection_matches_analytic_alpha_over_h_squared：
+          把预测/接触/回写在**位置读数**上的影响逐个消掉（重力 0、初速 0、radius<0、write_back
+          只改 vel）后，substeps = 1 的一次 step 就是恰好一次投影 ⇒ 残差应等于解析式
+          C₁ = C₀·α̃/(w + α̃)。四档 (α, h) 实测相对差 2.1e-7 ～ 8.4e-4（最差那档是小量 C 上的
+          f32 减法抵消）。若把 α/h² 误写成 α/h，比例会差约 59 倍 ⇒ 1% 容差足够分辨。
+          另：xpbd_scaling_contract 的"收敛趋势"判据保留（原始场景下它抓不到尺度错误，已在
+          该文件头注里写明这一点）。
       - id: lambda_lifetime_per_substep
-        status: partially
+        status: covered
         note: >
-          代码事实 = 每子步开头清零（同一函数）。与上一条同理：判据只能间接（趋势），
-          精确判定同样需要只投影的入口。
+          代码事实 = 每子步开头清零（rope.rs::substep / cloth.rs::project_constraints）。
+          **精确判据** = xpbd_projection_analytic::lambda_resets_each_substep_so_projection_ratio_is_constant：
+          连续两个 tick（各一次投影）的**残差比例相同**（实测第 1 步 0.017682310、第 2 步
+          0.017663319，解析 0.017681725）。若 lambda 跨子步累积，第二个比例会偏约 w/α̃ ≈ 55 倍。
+          ⚠️ 该判据要求第二个 tick 前**清 vel** —— write_back 会把上一次投影的位移换算成速度，
+          不清零则预测步会带着它过冲（实测残差变号，比例 −0.96）。
       - id: reaction_writeback_timing
         status: covered
         note: cloth_reaction / angular_reaction_holds / cloth_body（反作用在体解算之后取用 ⇒ 下一 tick 生效）
