@@ -1,0 +1,175 @@
+# 能力 / 范围登记表（本仓的单一事实源）
+#
+# 存在理由（2026-10-08）：`SURVEY` 与 `ROUTE` 曾就同一件事给出相反状态 —— 面元力矩在
+# `SURVEY` 写"按边界明确不含（不是漏）"、在 `ROUTE` 写"仍缺"，查下来两边说的其实是同一件
+# 事的两半（刚体侧早就有实现和判据，布料侧有意不单列）。同类还有沙堆模型（三处写着"按用户
+# 口径不做"，而里程碑出口判定里仍挂着它）。⇒ 状态从这里派生，各文档正文可独立解释、
+# 但不得各自定义状态。
+#
+# 字段与规则取自《LSSMJ-CICD 完整审核与落地方案 · v5》§15.3（该文审的是 LSSMJ 仓库，但这一节
+# 是明确写给"物理仓"即本仓的），本表把它落成可维护的形态：
+#   scope          : included | excluded | unresolved —— 这件事是否在本仓范围内
+#   implementation : absent | coupled | unified | unknown
+#                    仅当 scope=included 时有意义；`coupled` = 双向力交换但非同一求解系统
+#   required_evidence : 判定所需的最小证据集；缺任一条 ⇒ 该条只能停在 unresolved
+#   decision_id    : 拍板记录（ADR 号 / issue / PR）；`null` 表示尚无
+#
+# 规则（同 §15.3）：
+#   · excluded + absent  = 设计边界（不是欠账，别再据此立项）
+#   · included + absent  = 实现缺口（必须有任务、能力标记，以及失败/拒绝时的明确行为）
+#   · unresolved         = 禁止"已支持/完成"宣称、禁止默认开启；也不必阻塞无关的错字修复
+#   · 相近但不是一回事的能力用不同 id（例：`coupled` 与 `unified` 不能用同一个布尔值伪装等价）
+#
+# 维护：改这里的 scope/implementation 时，同步 `ROUTE.md` / `SURVEY-*.md` / 支持矩阵里引用本表的
+# 状态段（正文解释可以不同，状态不许不同）。
+version: 1
+updated: "2026-10-08"
+
+capabilities:
+  # ── 面元力矩：刚体侧与布料侧是两件事，分开登记（文档点名的例子） ──
+  - id: PHY-SCOPE-SURFEL-TORQUE-RIGID
+    title: 面元气动力矩（刚体 / TriMesh 侧）
+    scope: included
+    implementation: implemented
+    implementation_path: crates/vxl-phys/src/world_step/aero.rs
+    evidence:
+      - id: impl_site
+        note: 逐面 t_sum += (center - pos).cross(f)（力臂叉积，aero.rs）
+      - id: tests
+        note: crates/vxl-phys/tests/aero_face_torque.rs（4 条：静力矩闭式逐位 / 力臂线性标度 / 动力学方向 / 金丝雀）
+      - id: session_record
+        note: docs/SESSION-2026-09-28-TRIANGLE-CLOTH.md 第 25 行（"刚体侧早就在逐面施加 τ，缺的是判据"）
+    required_evidence:
+      - implementation_path
+      - tests
+    decision_id: null
+    owner: maintainer
+    notes: >
+      v5 §15.4 另列了一组合同级验证（参考点变换、刚性旋转协变性、对称分布零净矩、
+      纯力偶零合力非零力矩、反作用恰好一次）—— 现有 4 条覆盖了其中的"闭式逐位"与"力臂标度"，
+      其余几条尚未落地（见 deficit 字段）。
+    deficit:
+      - 对称分布零净矩（未覆盖）
+      - 纯力偶零合力非零力矩（未覆盖）
+      - 刚性旋转协变性（未覆盖）
+      - 反作用恰好一次（子步/迭代/帧间不重复累计）（未覆盖）
+
+  - id: PHY-SCOPE-SURFEL-TORQUE-CLOTH
+    title: 面元气动力矩（布料侧，作为独立输出量）
+    scope: excluded
+    implementation: absent
+    implementation_path: crates/vxl-phys-soft/src/cloth_aero.rs
+    evidence:
+      - id: boundary_note
+        note: cloth_aero.rs 头注"本档不含力矩（顶点力天然给出分布力矩，但没有单独立这条量）"
+    required_evidence:
+      - boundary_note
+    decision_id: null
+    owner: maintainer
+    notes: >
+      设计边界，不是漏：布料的逐顶点面元力天然产生分布力矩，缺的只是"单独把力矩作为一条
+      可读量输出"。若将来要这条量，应走 `included + absent` 的流程（任务 + 能力标记 + 行为）。
+
+  # ── XPBD 耦合：`coupled` 与 `unified` 必须分开（§15.3 明文） ──
+  - id: PHY-SCOPE-XPBD-COUPLING
+    title: 布料/绳 与刚体的双向耦合（子步 + 反作用回传）
+    scope: included
+    implementation: coupled
+    implementation_path: crates/vxl-phys-soft/src/cloth_coupling.rs
+    evidence:
+      - id: tests
+        note: crates/vxl-phys-soft/tests/cloth_body.rs 等（粒子↔刚体耦合、反作用两腿）
+    required_evidence:
+      - implementation_path
+      - tests
+    decision_id: null
+    owner: maintainer
+    notes: >
+      现状 = XPBD 子步 + 反作用两腿（`body.dv` / `body.dx`），门面在体解算之后取用 ⇒ 下一 tick 生效。
+      这不是"共享求解系统"（见下一条）；两者不得用同一个布尔值表示。
+
+  - id: PHY-SCOPE-UNIFIED-SOLVER
+    title: 软体与刚体共用一个求解系统（统一求解器）
+    scope: unresolved
+    implementation: unknown
+    implementation_path: null
+    evidence:
+      - id: declaration_only
+        note: crates/vxl-phys-core/src/interop.rs 的 ElementKind::Xpbd 只有定义、全仓零消费方（2026-10-08 核实）
+    required_evidence:
+      - shared_state_design
+      - constraint_jacobian_residual
+      - mass_inertia_treatment
+      - solve_order_and_convergence_criteria
+      - baseline_scenario
+    decision_id: null
+    owner: maintainer
+    notes: >
+      §15.4 的立项门：双向力交换、同一个函数循环、共享线程都不能证明"统一求解器"。
+      先独立设计评审 + 基线场景，再决定是否值得迁移；不得塞进常规 CI 清理 PR。
+      在决议前：禁止"共求解器已支持"类宣称，也不得默认开启。
+
+  # ── 本会话落地的两项（登记以防未来漂移） ──
+  - id: PHY-SCOPE-VOLUME-PRESSURE
+    title: 布料体积 / 气压约束（Müller 2007 气压 + XPBD 投影）
+    scope: included
+    implementation: implemented
+    implementation_path: crates/vxl-phys-soft/src/cloth/volume.rs
+    evidence:
+      - id: tests
+        note: 模块内单测 3 条 + crates/vxl-phys-soft/tests/cloth_volume.rs 3 条（默认关、逐位中性）
+    required_evidence:
+      - implementation_path
+      - tests
+    decision_id: "#146"
+    owner: maintainer
+    notes: 默认 `k ≤ 0` = 关；门面配置入口仍缺（`ClothSheet.volume` 是 pub 字段，可直接设）。
+
+  - id: PHY-SCOPE-EDGE-FRICTION
+    title: 点-边对的目摩擦（切向库仑锥）
+    scope: included
+    implementation: implemented
+    implementation_path: crates/vxl-phys-soft/src/cloth_edge_friction.rs
+    evidence:
+      - id: tests
+        note: 模块内单测 4 条 + crates/vxl-phys-soft/tests/cloth_self_edge_friction.rs 2 条
+    required_evidence:
+      - implementation_path
+      - tests
+    decision_id: "#147"
+    owner: maintainer
+    notes: >
+      复用同一个 `μ`（`SelfCollision::friction`，默认 0 = 关）。集成级"摩擦显著拖住滑移"的判据
+      未做（硬投影约束的接触是间歇的 ⇒ 信噪比不足），已在测试头注如实登记。
+
+  # ── 文献里被否证/明确不做的：登记成设计边界，防止"据此立项" ──
+  - id: PHY-SCOPE-VOXEL-TO-PARTICLE
+    title: 体素 → 粒子（沙 / 尘）
+    scope: excluded
+    implementation: absent
+    implementation_path: null
+    evidence:
+      - id: user_decision
+        note: 用户明确口径"不做"；`PLAN-0.2.md` §附录B、`ROUTE.md` §8 残留段与 §2026-09-14 表三处同记
+    required_evidence:
+      - user_decision
+    decision_id: null
+    owner: maintainer
+    notes: 别再据此立项（`ROUTE.md` 的 M3 出口判定曾挂着它，2026-10-07 已按此口径更正）。
+
+  - id: PHY-SCOPE-GPU-CLOTH
+    title: 布料的 GPU 档
+    scope: included
+    implementation: absent
+    implementation_path: null
+    evidence:
+      - id: route_entry
+        note: ROUTE.md M4 行列为缺口；仓库已有 vxl-phys-gpu（wgpu）但只覆盖流体档
+    required_evidence:
+      - implementation_path
+      - ci_verification_path
+    decision_id: null
+    owner: maintainer
+    notes: >
+      实现缺口（不是设计边界）。⚠️ 立项前必须先答"CI 怎么守"：本仓 CI runner 无 GPU 适配器，
+      GPU 用例在 CI 里跳过 ⇒ 做出来也无自动门（这是 issue #30 同族的验证路径问题）。
