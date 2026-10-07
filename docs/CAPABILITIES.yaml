@@ -108,6 +108,40 @@ capabilities:
     notes: >
       现状 = XPBD 子步 + 反作用两腿（`body.dv` / `body.dx`），门面在体解算之后取用 ⇒ 下一 tick 生效。
       这不是"共享求解系统"（见下一条）；两者不得用同一个布尔值表示。
+    contract_tests: crates/vxl-phys-soft/tests/xpbd_scaling_contract.rs
+    contract_coverage:
+      - id: fixed_timestep
+        status: covered
+        note: PhysConfig.dt 固定 1/60（SPEC §5 固定步长）
+      - id: substep_allocation
+        status: covered
+        note: cloth_minimal 判据③"子步收敛（应变残差随子步数下降，O(h²) 特征）"
+      - id: mass_and_inverse_mass
+        status: covered
+        note: >
+          薄壳均分质量（cloth_minimal 判据①的刚性平移）；角反作用那边进一步要求"惯量不硬编码"——
+          angular_reaction_holds 从同形状同密度的临时 World 读 inv_mass / local_inv_inertia。
+      - id: compliance_scales_with_dt_squared
+        status: partially
+        note: >
+          代码事实 = a_tilde = α/h²（cloth.rs::project_constraints）。判据只到"收敛趋势"
+          （xpbd_scaling_contract：平均下垂随 substeps 单调、相邻档差递减）；**精确**钉住尺度律
+          需要"只投影一步"的入口 —— 当前 step 把 predict/project/contacts/write_back 打包了。
+          ⚠️ 如实说明：若把 α/h² 误写成 α/h，收敛趋势判据**抓不到**（刚度仍单调随 h 变），
+          所以这里标 partially 而不是 covered。
+      - id: lambda_lifetime_per_substep
+        status: partially
+        note: >
+          代码事实 = 每子步开头清零（同一函数）。与上一条同理：判据只能间接（趋势），
+          精确判定同样需要只投影的入口。
+      - id: reaction_writeback_timing
+        status: covered
+        note: cloth_reaction / angular_reaction_holds / cloth_body（反作用在体解算之后取用 ⇒ 下一 tick 生效）
+      - id: no_energy_conservation_assertion_under_damping
+        status: covered
+        note: >
+          这条是**反面**要求（外力/阻尼开启时不得要求机械能严格守恒）：本仓的阻尼/外力场景
+          确实没有写能量守恒断言（用的是形态/应变/反作用口径）。
 
   - id: PHY-SCOPE-UNIFIED-SOLVER
     title: 软体与刚体共用一个求解系统（统一求解器）
