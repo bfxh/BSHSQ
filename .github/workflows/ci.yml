@@ -254,7 +254,10 @@ jobs:
           LOGS="${RUNNER_TEMP:-/tmp}"
           rm -f "$LOGS"/sorted_copies_attempt_*.log
           for i in 1 2 3; do
-            if cargo test --release -p vxl-phys-gpu --test sorted_copies_boundary \
+            # `-- --nocapture`（2026-10-07 加）：libtest 默认把输出**捕获到内存**，只在测试正常
+            # 结束时才吐 ⇒ 挂起/崩溃时现场一行都留不下。开 nocapture 后 `[gpu-diag …]`（wgpu
+            # 启动日志）**实时流进 tee 的日志**，随 artifact 上传（issue #30 的取证依赖它）。
+            if cargo test --release -p vxl-phys-gpu --test sorted_copies_boundary -- --nocapture \
                 2>&1 | tee "$LOGS/sorted_copies_attempt_$i.log"; then
               rm -f "$LOGS/sorted_copies_attempt_$i.log"   # 成功的尝试不留日志（省上传）
               exit 0
