@@ -428,6 +428,14 @@ jobs:
         env:
           RUSTFLAGS: ${{ matrix.linker }}
         run: cargo run --release -q -p vxl-phys --example m3_collapse -- 1200 64
+      # M4 悬臂金样（**布料域**的出口判据「悬臂/旗飘金样」里的悬臂那一半；旗飘要风，另半）。
+      # 判据 = 自由端坐标 / 垂度 / 最大应变**逐位**相等（冻结值存 `f32` 位模式 —— 十进制往返
+      # 对 7 位有效数字会失真，见 example 头注）；与 M3 同口径放进 determinism 档，顺带覆盖三编译器。
+      # 换代按 ADR-0004 记新旧值与理由。
+      - name: M4 悬臂金样（冻结基线自检；布料域）
+        env:
+          RUSTFLAGS: ${{ matrix.linker }}
+        run: cargo run --release -q -p vxl-phys --example m4_cantilever -- 600
       # T6 8A 碰撞行：**报告层，不阻断**——计时随 runner 而异（验收以本机数字为准），
       # 故退出码只记录不拦门；JSON 报告进产物（含 env / p50 / p95 / 首帧建树分项）。
       - name: 8A 碰撞行（报告，不阻断）
