@@ -8,8 +8,10 @@
 //!    同一大曲线下把预算收到 `B1K`（1024）⇒ site 被压回 1024 以内 ⇒ 碎块变少。
 //!    （体素取 **0.1 细档**是为了让弹坑里的格数 ≫ site 数：0.5 档下弹坑只有 ~343 格，
 //!    site 数根本咬不住，预算这条判据就成了摆设。）
-//! ④ `DestructionConfig::depth` **不是装饰**：`Two` / `Three` 的多轮细分尚未实现 ⇒ 显式
-//!    断言拒绝，**不静默降级成一轮**（多轮需要碎片自身的体素表示，属单独一片）。
+//! ④ `DestructionConfig::depth` **真的生效**：`Two` / `Three` 走**层级 Voronoi 多轮细分**
+//!    （`VoxelVolume::fracture_voronoi_hierarchical`），每轮 site 数按 `FragmentBudget` 摊
+//!    （取最大 `k`、`r` 使 `k^r ≤ cap`）；`One` 仍走既有单轮路径（逐位不变）。
+//!    判据 = **更细 + 可复现 + 不超预算**。
 //!
 //! 放**集成测试**而非 `src/tests.rs` 内联模块：后者受 `god.gate.json` 行数棘轮管（只准减），
 //! 新文件只判阈值——这是仓内加测试的既定通道（`tests/debris_mass.rs` 头注同款说明）。
@@ -41,10 +43,16 @@ fn scene() -> World {
 }
 
 /// 跑满 `ticks` 个 tick，返回 `(碎块总数, 末态动态体数, 末态哈希)`。
-fn run(budget: FragmentBudget, curve: TierCurve, ticks: usize) -> (usize, usize, u128) {
+fn run_with(
+    depth: FractureDepth,
+    budget: FragmentBudget,
+    curve: TierCurve,
+    ticks: usize,
+) -> (usize, usize, u128) {
     let mut w = scene();
     let cfg = DestructionConfig {
         budget,
+        depth,
         ..DestructionConfig::default()
     };
     let mut debris = 0usize;
@@ -56,6 +64,11 @@ fn run(budget: FragmentBudget, curve: TierCurve, ticks: usize) -> (usize, usize,
         .filter(|&i| w.bodies.is_dynamic(i))
         .count();
     (debris, dynamic, w.state_hash())
+}
+
+/// 既有三条判据用 `depth = One`（默认档）。
+fn run(budget: FragmentBudget, curve: TierCurve, ticks: usize) -> (usize, usize, u128) {
+    run_with(FractureDepth::One, budget, curve, ticks)
 }
 
 /// 起点锚点曲线（= `TierCurve::default()`，site 上限只有 43）。
@@ -103,17 +116,22 @@ fn tiered_curve_and_budget_reach_the_strategy() {
     );
 }
 
-/// `depth` 不是装饰：多轮细分未实现 ⇒ 入口显式拒绝，不静默按一轮处理。
-/// （多轮落地后，这条应改成"`Two` 真的比 `One` 产出更多碎块"的正向判据。）
+/// `depth` 真的生效：`Two` 应比 `One` 产出的碎块**更多**，且始终 ≤ `FragmentBudget` 的 cap。
 #[test]
-#[should_panic(expected = "尚未实现")]
-fn tiered_multiround_depth_is_rejected_not_silently_downgraded() {
-    let mut w = scene();
-    let cfg = DestructionConfig {
-        budget: FragmentBudget::B1K,
-        depth: FractureDepth::Two,
-        ..DestructionConfig::default()
-    };
-    // 断言在函数入口（先于冲击扫描）⇒ 不需要先 `step`。
-    w.apply_impact_destruction_tiered(0, &cfg, small_curve(), 1000.0);
+fn depth_two_fractures_finer_than_one() {
+    let (one, _, _) = run_with(FractureDepth::One, FragmentBudget::B1K, small_curve(), 120);
+    let (two, _, _) = run_with(FractureDepth::Two, FragmentBudget::B1K, small_curve(), 120);
+    println!("depth 粒化（B1K / small_curve / 120 tick）：One={one} Two={two}");
+    assert!(one > 0, "depth=One 应产出碎块（前置条件）one={one}");
+    assert!(two > one, "depth=Two 应更细：one={one} two={two}");
+    assert!(two <= 1024, "不得超 FragmentBudget::B1K（实得 {two}）");
+}
+
+/// 多轮也可复现：两次构造 ⇒ 计数与末态哈希逐位一致。
+#[test]
+fn depth_two_is_reproducible() {
+    let a = run_with(FractureDepth::Two, FragmentBudget::B1K, small_curve(), 120);
+    let b = run_with(FractureDepth::Two, FragmentBudget::B1K, small_curve(), 120);
+    assert_eq!((a.0, a.1), (b.0, b.1), "多轮碎裂应可复现（计数）");
+    assert_eq!(a.2, b.2, "多轮碎裂应可复现（末态哈希逐位一致）");
 }

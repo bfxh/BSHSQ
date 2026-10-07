@@ -6,8 +6,7 @@
 //! 被刚体接触消费（跨域唯一通道，见 ROUTE §2.1/§5）。
 //!
 //! 确定性：查询只读位图与常数；无哈希迭代、无浮点归约顺序问题（逐格循环固定序）。
-//! 性能：局域扫描是 O(27)/查询——**首版**够用；上量时应换距离场或 BVH
-//! （与「体素→SDF→Provider」的专用解法一并做，见 ROUTE §3 体素行）。
+//! 性能：局域扫描是 O(27)/查询——**首版**够用；上量时应换距离场或 BVH（与「体素→SDF→Provider」的专用解法一并做，见 ROUTE §3 体素行）。
 
 use vxl_phys_core::interop::{CollisionProvider, SurfaceHit};
 use vxl_phys_core::{Aabb, Quat, Vec3};
@@ -15,6 +14,7 @@ use vxl_phys_core::{Aabb, Quat, Vec3};
 // ── 按域拆出的子模块（子目录 voxel/）
 mod surface;
 mod voxel_contacts;
+mod voxel_hier;
 mod voxel_provider;
 mod voxel_volume;
 pub use self::{voxel_contacts::*, voxel_volume::*};
