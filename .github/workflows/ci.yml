@@ -443,6 +443,13 @@ jobs:
         env:
           RUSTFLAGS: ${{ matrix.linker }}
         run: cargo run --release -q -p vxl-phys --example m4_flag -- 600
+      # M5 溃坝金样（**液体域**）：体素盆 + 自由水柱（504 粒）失支撑坍塌 ⇒ 质心沿 +x 前移、
+      # 波前沿推进。判据 = 粒子数 / 末态质心 / 末态最大 x 的 `f32` 位模式逐位（与 M4 同口径）；
+      # ⚠️ 不是"驻留瞬态"断言 —— 自由柱坍塌本就该飞溅（`dam_break.rs` 头注的分工）。
+      - name: M5 溃坝金样（冻结基线自检；液体域）
+        env:
+          RUSTFLAGS: ${{ matrix.linker }}
+        run: cargo run --release -q -p vxl-phys --example m5_dam_break -- 400
       # T6 8A 碰撞行：**报告层，不阻断**——计时随 runner 而异（验收以本机数字为准），
       # 故退出码只记录不拦门；JSON 报告进产物（含 env / p50 / p95 / 首帧建树分项）。
       - name: 8A 碰撞行（报告，不阻断）
