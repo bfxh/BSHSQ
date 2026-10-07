@@ -22,6 +22,12 @@
 #
 # 维护：改这里的 scope/implementation 时，同步 `ROUTE.md` / `SURVEY-*.md` / 支持矩阵里引用本表的
 # 状态段（正文解释可以不同，状态不许不同）。
+#
+# ⚠️ 本文件是 YAML，不是 Markdown。星号在 YAML 里是别名/锚点指示符 —— 值里出现就解析失败
+#    （2026-10-08 建表与补登记时各踩一次，两次都是想写 Markdown 加粗或通配路径）。
+#    ⇒ 字符串里不要用星号，也不要用 Markdown 记号；路径写成"某目录下所有 .rs"这种说法。
+#    编辑后用解析器验一遍：
+#      python -c "import yaml;yaml.safe_load(open('docs/CAPABILITIES.yaml',encoding='utf-8'))"
 version: 1
 updated: "2026-10-08"
 
@@ -111,6 +117,11 @@ capabilities:
     evidence:
       - id: declaration_only
         note: crates/vxl-phys-core/src/interop.rs 的 ElementKind::Xpbd 只有定义、全仓零消费方（2026-10-08 核实）
+      - id: gate
+        note: >
+          crates/vxl-phys/tests/xpbd_solver_gate.rs —— 把"零消费方"做成可执行门：
+          仓内所有 .rs 里一旦出现该变体的消费者即红，逼回本立项门（走完流程后连本测试
+          与这条登记一起更新是正常路径）。
     required_evidence:
       - shared_state_design
       - constraint_jacobian_residual
