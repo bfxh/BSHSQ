@@ -458,6 +458,15 @@ jobs:
         run: |
           cargo run --release --target aarch64-unknown-linux-gnu -p vxl-phys --example determinism \
             | tee determinism-GCC-aarch64.txt
+      # M3 坍塌金样也要过 ARM：破坏路径的冻结哈希应在 aarch64 上**逐位一致**（`SPEC` §5）。
+      # 与 x86 三编译器那一步同一个配方（`1200 64`），共用同一份冻结基线 ⇒ 一处不一致即红。
+      - name: M3 坍塌金样（aarch64/QEMU 实跑；冻结基线自检）
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64-static
+        run: |
+          cargo run --release -q --target aarch64-unknown-linux-gnu -p vxl-phys \
+            --example m3_collapse -- 1200 64
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: gates-GCC-aarch64
