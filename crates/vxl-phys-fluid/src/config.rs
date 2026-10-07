@@ -4,7 +4,12 @@ use super::*;
 /// WCSPH 参数（PLAN-0.3 §1）。
 #[derive(Clone, Debug)]
 pub struct FluidConfig {
+    /// ⚠️ **执行族选择器目前未接线**：`FluidSystem`（CPU WCSPH）只受理 `CpuSph`；GPU 族请走
+    /// 门面的 `World::set_fluid_stepper`（`vxl-phys-gpu` 的 `GpuFluidStepper`）——设成本字段
+    /// **不会**触发 GPU 求解，`FluidSystem::new` 会显式拒绝（不静默跑 CPU）。
     pub family: FluidFamily,
+    /// ⚠️ **当前无消费方**：这是 **PBF**（GPU 目标档）的密度约束迭代数；CPU WCSPH 的密度是
+    /// 直接求和（单趟、无迭代）⇒ 本字段不影响任何结果（PBF 落地时再接线，见 `SPEC.md` §4.8）。
     pub density_iterations: DensityIterations,
     /// 静止密度 ρ0（kg/m³，水 = 1000）。
     pub rest_density: f32,
@@ -53,8 +58,7 @@ impl Default for FluidConfig {
             smoothing_radius: 0.1,
             xsph_viscosity: 0.1,
             tensile_instability_suppression: true,
-            // 声速 c：声学 CFL c·dt/h ≤ ~0.5（dt = 1/(60·substeps)，h = 0.1
-            // ⇒ c = 10 时 c·dt/h ≈ 0.42）；c = ρ0gH 压缩误差 ~ ρ0gH/c²。
+            // 声速 c：声学 CFL c·dt/h ≤ ~0.5（dt = 1/(60·substeps)，h = 0.1 ⇒ c = 10 时 c·dt/h ≈ 0.42）；c = ρ0gH 压缩误差 ~ ρ0gH/c²。
             sound_speed: 10.0,
             gamma_tait: 7.0,
             substeps: 4,

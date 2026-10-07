@@ -55,8 +55,7 @@ fn assemble(cfg: FluidConfig, pos: Vec<Vec3>, spacing: f32) -> FluidSystem {
         pmass: vec![mass; n],
         spans: Vec::new(),
         breact: Vec::new(),
-        // 不变式：`bforce.len() == pos.len()`（`assemble` 给流体段；`set_boundary_particles`
-        // 随 `pos` 一起 resize；`truncate_to_fluid` 一起截断）。
+        // 不变式：`bforce.len() == pos.len()`（`assemble` 给流体段；`set_boundary_particles` 随 `pos` 一起 resize；`truncate_to_fluid` 一起截断）。
         bforce: vec![Vec3::ZERO; n],
         lattice_cache: Vec::new(),
         phase_us: [0; 5],
@@ -69,6 +68,11 @@ impl FluidSystem {
     /// 晶格块初始化：粒子位于 `origin + (i + ½)·spacing`（三轴 `dims` 个），
     /// 质量按「静止晶格密度 = ρ0」反解：m = ρ0 / Σ_lattice W（含自身项）。
     pub fn new(cfg: FluidConfig, origin: Vec3, dims: [usize; 3], spacing: f32) -> Self {
+        // 执行族：`FluidConfig::family` 目前未接线 ⇒ **显式拒绝** GPU 族（不静默跑 CPU SPH）。
+        assert!(
+            cfg.family == FluidFamily::CpuSph,
+            "FluidConfig::family 只支持 CpuSph；GPU 族请走 World::set_fluid_stepper"
+        );
         assemble(cfg, lattice_positions(origin, dims, spacing), spacing)
     }
 
