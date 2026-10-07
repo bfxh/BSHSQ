@@ -450,6 +450,14 @@ jobs:
         env:
           RUSTFLAGS: ${{ matrix.linker }}
         run: cargo run --release -q -p vxl-phys --example m5_dam_break -- 400
+      # M5 浮箱金样（**液体 × 刚体双向**：「溃坝/浮箱」里的浮箱那一半）：水槽 + 铸装水块 +
+      # 轻盒（密度 300）从深潜位上浮。判据 = 粒子数 / 末态盒心 y / v_y 的 f32 位模式逐位。
+      # ⚠️ 配方取 `720`（实测：180/360 tick 盒子还在动，**720 起完全入睡**、且与 1200 逐位相同）
+      # ⇒ 钉的是"浮到平衡"而不是某一瞬间的相位。
+      - name: M5 浮箱金样（冻结基线自检；液体×刚体）
+        env:
+          RUSTFLAGS: ${{ matrix.linker }}
+        run: cargo run --release -q -p vxl-phys --example m5_float_box -- 720
       # T6 8A 碰撞行：**报告层，不阻断**——计时随 runner 而异（验收以本机数字为准），
       # 故退出码只记录不拦门；JSON 报告进产物（含 env / p50 / p95 / 首帧建树分项）。
       - name: 8A 碰撞行（报告，不阻断）

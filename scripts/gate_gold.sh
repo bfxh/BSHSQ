@@ -113,5 +113,10 @@ run_vxl_gold m4_flag 600
 # 位模式逐位（与 M4 同口径；**不是**驻留瞬态断言 —— 自由柱坍塌本就该飞溅）。
 run_vxl_gold m5_dam_break 400
 
-echo "✅ 金样门全绿（fmt / clippy / col45 / pile5 / tower25 / m3_collapse / m4_cantilever / m4_flag / m5_dam_break 全 0）"
+# M5 浮箱（液体 × 刚体双向；配方 `720`）：水槽 + 铸装水块 + 轻盒（密度 300）从深潜位上浮。
+# **实测选窗**：180/360 tick 时盒子还在动（v_y ≠ 0），**720 起完全入睡**（v_y 精确 0）且与
+# 1200 的 y 逐位相同 ⇒ 取 720 才钉的是"浮到平衡"。判据 = 粒子数 / 末态盒心 y / v_y 的位模式逐位。
+run_vxl_gold m5_float_box 720
+
+echo "✅ 金样门全绿（fmt / clippy / col45 / pile5 / tower25 / m3_collapse / m4_cantilever / m4_flag / m5_dam_break / m5_float_box 全 0）"
 exit 0
