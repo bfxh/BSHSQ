@@ -14,10 +14,10 @@
 > | "三角网作为碰撞形状：没有；且 cylinder/cone/capsule vs 三角网不产生接触" | **已有**：`Shape::TriMesh` + `MeshStore` + `mesh_pair`（受理**盒/球/胶囊/圆柱/锥**）+ `mesh_vs_mesh`（双面口径）；布-布与布-形状都有接触 |
 > | "自碰撞/布-布：没有" | **已落地**：点-点（`cloth_self_collision.rs`）+ **点-边进阶档**（`cloth_self_collision/edge.rs`）+ **自摩擦库仑锥**（`cloth_self_friction.rs`）——三者**各自默认关** |
 > | "距离/弯曲/体积约束：无 XPBD 约束" | 距离/结构/弯曲 ✓、**撕裂**（`cloth_tear.rs`）✓、**塑性**（`cloth/plastic.rs`）✓、**体积/气压 ✓（2026-10-07，`cloth/volume.rs`：Müller 2007 气压 + XPBD 投影，默认关）** |
-> | "面元气动：28 行纯配置，无消费方" | `vxl-phys-aero` 的 `face_force_with_lift` 有消费方：`cloth_aero.rs` **升力已接入**（判据 `tests/cloth_aero_lift.rs`）；**面元力矩按边界明确不含**（不是漏） |
+> | "面元气动：28 行纯配置，无消费方" | `vxl-phys-aero` 的 `face_force_with_lift` 有消费方：`cloth_aero.rs` **升力已接入**（判据 `tests/cloth_aero_lift.rs`）；**布料侧的面元力矩按边界明确不单列**（不是漏 —— 顶点力天然给出分布力矩）。⚠️ **刚体侧不是这样**：`world_step/aero.rs` 逐面施加 `τ=(c−p)×F` **早已落地**、判据在 `tests/aero_face_torque.rs`（4 条）—— 别把"布料侧不单列"读成"整个引擎没有力矩" |
 >
 > **真正还缺的**：~~① **体积约束**~~（✅ **2026-10-07 落地**）；~~② **点-边对的摩擦**~~（✅ **2026-10-07 落地**，`cloth_edge_friction.rs`）；
-> ③ **面元力矩**；④ **GPU 档**；⑤ 出口判据：~~悬臂金样~~ / ~~旗飘金样~~（✅ **均 2026-10-07 落地**：`examples/m4_cantilever.rs` / `examples/m4_flag.rs` + 金样门 + CI determinism 档，判据 = 坐标/应变的 `f32` 位模式逐位）、~~刚度档表~~（✅ **2026-10-07 落地**：`tests/cloth_stiffness_table.rs` —— 拉伸主导的钉边方膜，五档严格单调、相对跨度 18.6%）；
+> ~~③ **面元力矩**~~（**刚体侧早已落地**：实现 `world_step/aero.rs` 逐面 `τ=(c−p)×F`、判据 `tests/aero_face_torque.rs` 4 条；**布料侧按边界不单列** ⇒ 见上一行的注）；④ **GPU 档**；⑤ 出口判据：~~悬臂金样~~ / ~~旗飘金样~~（✅ **均 2026-10-07 落地**：`examples/m4_cantilever.rs` / `examples/m4_flag.rs` + 金样门 + CI determinism 档，判据 = 坐标/应变的 `f32` 位模式逐位）、~~刚度档表~~（✅ **2026-10-07 落地**：`tests/cloth_stiffness_table.rs` —— 拉伸主导的钉边方膜，五档严格单调、相对跨度 18.6%）；
 > ⑥ "**与刚体共求解器**"按字面仍未做 —— 现状是 **XPBD 子步 + 反作用耦合**（`cloth_coupling.rs`），
 > `ElementKind::Xpbd` / `ConstraintElement` 仍是"声明了没接线"（与 `ROUTE.md` M2 的说明一致）。
 > ⇒ §1.1/§2 以下的行文保留为**当时的证据**，但结论以本块为准。
