@@ -45,14 +45,29 @@ capabilities:
     decision_id: null
     owner: maintainer
     notes: >
-      v5 §15.4 另列了一组合同级验证（参考点变换、刚性旋转协变性、对称分布零净矩、
-      纯力偶零合力非零力矩、反作用恰好一次）—— 现有 4 条覆盖了其中的"闭式逐位"与"力臂标度"，
-      其余几条尚未落地（见 deficit 字段）。
-    deficit:
-      - 对称分布零净矩（未覆盖）
-      - 纯力偶零合力非零力矩（未覆盖）
-      - 刚性旋转协变性（未覆盖）
-      - 反作用恰好一次（子步/迭代/帧间不重复累计）（未覆盖）
+      v5 §15.4 另列了一组合同级验证。除"纯力偶"（本接口不表达该量，见 contract_coverage 的
+      not_applicable 条）外，其余四项已于 2026-10-08 落地到 contract_tests。
+    contract_tests: crates/vxl-phys/tests/aero_torque_contract.rs
+    contract_coverage:
+      - id: symmetric_zero_net_torque
+        status: covered
+        note: 两块同尺寸板关于 yz 面对称 ⇒ 每面力相同、力臂 x 相消 ⇒ 净矩 ≈ 0
+      - id: reference_point_transform
+        status: covered
+        note: τ_c = τ₀ − c × ΣF，且与独立重算的 Σ(p_i − c) × F_i 一致
+      - id: rigid_rotation_covariance
+        status: covered
+        note: 场景连风一起绕 z 转 90° ⇒ τ 向量同步旋转
+      - id: reaction_applied_once
+        status: covered
+        note: 稳态下逐 tick 快照逐位相同（若在子步/迭代/帧间重复累计会单调增长）
+      - id: pure_couple_zero_force_nonzero_torque
+        status: not_applicable
+        reason: >
+          face_force 是纯阻力（F ∥ u，见 vxl-phys-aero/src/face.rs），力向只随相对风流向；
+          升力项双面自洽（n → −n ⇒ 力不变）⇒ 接口不表达力偶。按 §15.4 自己的口径
+          （"若范围排除力矩，拒绝请求或返回明确 unsupported，禁止悄悄扔掉切向/转动项"），
+          这里如实登记为不适用，而不是假装验过。
 
   - id: PHY-SCOPE-SURFEL-TORQUE-CLOTH
     title: 面元气动力矩（布料侧，作为独立输出量）
