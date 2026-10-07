@@ -42,6 +42,10 @@ use medium::ClothMedium;
 // （`pub` 数据场），公式不外露 ⇒ 本模块保持私有。
 #[path = "cloth_medium.rs"]
 mod cloth_medium;
+// **点-边对的自摩擦**（T4 尾；与点-点自摩擦同一条库仑锥）—— 同样走 `#[path]` 子模块
+// （`soft/lib.rs` 行数零预算；见该文件头注）。
+#[path = "cloth_edge_friction.rs"]
+pub(crate) mod cloth_edge_friction;
 
 /// **球采样接触投影 + 库仑锥**（从 `rope.rs::project_contacts` **纯搬移**——rope 现委托本函数
 /// ⇒ 那边净缩、这边新增，口径逐字不变）：法向推出（只有真穿透才推 ⇒ 无恢复系数）+

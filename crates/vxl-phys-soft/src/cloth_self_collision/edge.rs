@@ -8,9 +8,12 @@
 //! **开关（默认关 ⇒ 零换代）**：子开关 [`PointEdge::enabled`] 首行短路 ⇒ T3 的每条读数
 //! **逐位不变**。
 //!
-//! **边界（写清，不是漏）**：无自摩擦（点-边对的摩擦属后续片）；仍是离散投影 ⇒ **不承诺
-//! CCS**（与 T3 同一句话）；退化边（两端点重合）留给点-点；排除集 = 端点与粒子成**网格
-//! 邻居**（结构/剪切/弯曲同一份 `forbidden` ⇒ 不与折痕处的弹簧对顶）。
+//! **边界（写清，不是漏）**：仍是离散投影 ⇒ **不承诺 CCS**（与 T3 同一句话）；退化边（两端点
+//! 重合）留给点-点；排除集 = 端点与粒子成**网格邻居**（结构/剪切/弯曲同一份 `forbidden`
+//! ⇒ 不与折痕处的弹簧对顶）。
+//! **自摩擦已落地**（2026-10-07，[`crate::cloth_edge_friction`]）：与点-点自摩擦**同一条**
+//! 库仑锥、同一个 `μ`（`SelfCollision::friction`，默认 `0` = 关）；调用点在 `project` 里只占
+//! 一行 —— 那个函数卡在 god 门的最长函数棘轮上，故实现与判据都在独立模块里。
 //!
 //! **确定性**：边按 `cons` 升序建桶 ⇒ 桶内升序；逐粒子候选经 `seen` 去重（复用 ⇒ 热路径
 //! 零分配）；每个（粒子, 边）对每子步**恰好解算一次**。
@@ -118,42 +121,47 @@ impl ClothSheet {
     }
 }
 
+/// **候选收集**（粒子 `i` 的 27 邻格边号，去重后写进 `seen`，返回条数）—— 从 `project`
+/// 抽出：那里卡在 god 门的**最长函数**棘轮上，本片（加摩擦）必须腾出降幅才能合法涨行；
+/// 桶内是插入序 = 边升序 ⇒ 去重后的次序确定（与原内联实现逐条一致）。
+fn collect(sheet: &mut ClothSheet, i: usize, inv: f32) -> usize {
+    let ci = cell_of(sheet.pos[i], inv);
+    let seen = &mut sheet.self_contacts.edges.seen;
+    seen.clear();
+    for dx in -1..=1 {
+        for dy in -1..=1 {
+            for dz in -1..=1 {
+                let key = (ci.0 + dx, ci.1 + dy, ci.2 + dz);
+                let Some(bucket) = sheet.self_contacts.edges.cells.get(&key) else {
+                    continue;
+                };
+                for &e in bucket {
+                    if !seen.contains(&e) {
+                        seen.push(e); // 同一条边落在多个格 ⇒ 去重
+                    }
+                }
+            }
+        }
+    }
+    seen.len()
+}
+
 /// **点-边投影**（点-点趟之后的顺序 Gauss-Seidel 一遍）：按自由粒子升序 × 27 邻格内
 /// 去重后的边候选，每个（粒子, 边）恰好解算一次。
 fn project(sheet: &mut ClothSheet, d_c: f32, inv: f32) -> u32 {
     let n = sheet.pos.len();
     let mut pairs = 0u32;
-    // ① 建格（边 AABB；与点-点同一个 `inv` ⇒ 3×3×3 覆盖证明成立）。
+    let friction = sheet.self_contacts.cfg.friction;
     sheet.self_contacts.edges.rebuild(&sheet.pos, inv);
-    // ② 逐自由粒子 × 27 邻格（与点-点同形）。
     for i in 0..n {
         if sheet.inv_mass[i] == 0.0 {
             continue; // 钉住粒子不发起（与点-点同惯例）
         }
-        let ci = cell_of(sheet.pos[i], inv);
-        // ②a 收集候选（`&mut seen` 的借用锁进本块 ⇒ 块尾结束）。
-        {
-            let seen = &mut sheet.self_contacts.edges.seen;
-            seen.clear();
-            for dx in -1..=1 {
-                for dy in -1..=1 {
-                    for dz in -1..=1 {
-                        let key = (ci.0 + dx, ci.1 + dy, ci.2 + dz);
-                        let Some(bucket) = sheet.self_contacts.edges.cells.get(&key) else {
-                            continue;
-                        };
-                        for &e in bucket {
-                            if !seen.contains(&e) {
-                                seen.push(e); // 同一条边出现在多个格 ⇒ 去重（桶内升序 ⇒ 序确定）
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        // ②b 解算（候选表此后只读 ⇒ 与 `is_forbidden` 的整体借用相容；`pos` 是别的字段）。
-        let cand = &sheet.self_contacts.edges.seen;
-        for &e in cand {
+        // ②a 候选收集（抽成 `collect`，见它的注）。
+        let cand_len = collect(sheet, i, inv);
+        // ②b 解算（候选表此后只读；`pos` 是别的字段 ⇒ 整体借用相容）。
+        for ei in 0..cand_len {
+            let e = sheet.self_contacts.edges.seen[ei];
             let [j32, k32] = sheet.self_contacts.edges.list[e as usize];
             if sheet.self_contacts.is_forbidden(i as u32, j32)
                 || sheet.self_contacts.is_forbidden(i as u32, k32)
@@ -191,6 +199,13 @@ fn project(sheet: &mut ClothSheet, d_c: f32, inv: f32) -> u32 {
             sheet.pos[i] += nrm * (w_i * lam);
             sheet.pos[j] -= nrm * (w_j * (1.0 - u) * lam);
             sheet.pos[k] -= nrm * (w_k * u * lam);
+            crate::cloth::cloth_edge_friction::resist_edge_slip(
+                (&mut sheet.pos, &sheet.prev, &sheet.inv_mass),
+                friction,
+                (i, j, k),
+                (u, w),
+                (nrm, d_c - len),
+            );
             pairs += 1;
         }
     }
