@@ -135,3 +135,18 @@ fn depth_two_is_reproducible() {
     assert_eq!((a.0, a.1), (b.0, b.1), "多轮碎裂应可复现（计数）");
     assert_eq!(a.2, b.2, "多轮碎裂应可复现（末态哈希逐位一致）");
 }
+
+/// `Three` 也要真的生效（三段路径的预算摊法与 Two 不同：k³）——更细 + 不超预算。
+#[test]
+fn depth_three_is_finer_than_two_and_bounded() {
+    let (two, _, _) = run_with(FractureDepth::Two, FragmentBudget::B1K, small_curve(), 120);
+    let (three, _, _) = run_with(
+        FractureDepth::Three,
+        FragmentBudget::B1K,
+        small_curve(),
+        120,
+    );
+    println!("depth 粒化（B1K / small_curve / 120 tick）：Two={two} Three={three}");
+    assert!(three > two, "depth=Three 应更细：two={two} three={three}");
+    assert!(three <= 1024, "不得超 FragmentBudget::B1K（实得 {three}）");
+}
