@@ -10,10 +10,10 @@
 //! **与默认路径并存**：`World::apply_impact_destruction`（定半径球弹坑）**一字未动**；本文件是
 //! **opt-in 的另一条**，所以默认档逐位不变（四哈希门都不走这条路径）。
 
-use crate::{Vec3, World};
+use crate::{Quat, Shape, Vec3, VoxelConversionExt, World};
 
 use vxl_phys_destruction::impact_tiers::{
-    depth_rounds, impulse_level, sites_within_budget, TierCurve, REF_IMPULSE,
+    budget_cap, depth_rounds, impulse_level, sites_within_budget, TierCurve, REF_IMPULSE,
 };
 use vxl_phys_destruction::DestructionConfig;
 
@@ -54,10 +54,14 @@ pub trait DestructionExt {
     /// 确定性：记录序 → 纯函数分档 → `seeds_jittered`（格点序）→ `fracture_voronoi`
     /// （固定扫描序）⇒ 同输入同输出。
     ///
-    /// ⚠️ **目前只实现 `cfg.depth == One`（一轮细分）**：`Two` / `Three` 需要"碎片自身的
-    /// 体素表示"（层级 Voronoi 划分），属单独一片。未实现前本函数**断言拒绝**多轮配置
-    /// （而不是静默按一轮处理——后者会让调用方以为拿到了多轮细分的结果）。
-    /// （`FractureDepth` 的语义见 `impact_tiers::depth_rounds`。）
+    /// **多轮细分**（`cfg.depth ∈ {One, Two, Three}`）：轮次 = `depth_rounds(cfg.depth)`；
+    /// 每轮 site 数 = 曲线给的 site 数**按预算摊**（`per_round_sites`：取最大的 `k ≤ site` 与
+    /// 最大的 `r ≤ rounds`，使 `k^r ≤` `FragmentBudget` 的 cap）—— 口径照 `depth_rounds` 的注
+    /// 「层数决定**能碎几轮**、site 数决定**每轮几块**」。`r == 1` 时**仍走既有单轮路径**
+    /// （`depth = One` 的逐位语义与本改动前完全一致）。
+    ///
+    /// 实现 = `VoxelVolume::fracture_voronoi_hierarchical`：每轮把上一轮的块**回填成体素**再分
+    /// （复用同一套贪心提取），血缘 = "第 r 轮的块是第 r−1 轮某块的格集"。
     ///
     /// `curve` 由调用方给（`TierCurve::default()` 是起点锚点）：**预算封顶只有在曲线够大时
     /// 才会咬住**（默认曲线的 site 上限只有 43，远小于最小预算 `B1K` = 1024）。
@@ -78,15 +82,10 @@ impl DestructionExt for World {
         curve: TierCurve,
         density: f32,
     ) -> usize {
-        // 多轮细分未实现 ⇒ 显式拒绝（见 trait 方法文档）。这是**配置错误**，不是运行期
-        // 可恢复状态：静默降级成一轮会让调用方拿到与配置不符的结果。
-        assert_eq!(
-            depth_rounds(cfg.depth),
-            1,
-            "FractureDepth::Two/Three 的多轮细分尚未实现；请用 depth = One"
-        );
-        // 先在**只读**扫描里收集「挖点」（按记录序 ⇒ 确定性）：(球心, 半径, site 数)。
-        let mut digs: Vec<(Vec3, f32, u32)> = Vec::new();
+        // 轮次 = `FractureDepth`；每轮 site 数再按 `FragmentBudget` 摊（见 `per_round_sites`）。
+        let rounds = depth_rounds(cfg.depth);
+        // 先在**只读**扫描里收集「挖点」（按记录序 ⇒ 确定性）：(球心, 半径, 每轮 site, 轮数)。
+        let mut digs: Vec<(Vec3, f32, u32, u32)> = Vec::new();
         for rec in &self.impacts {
             if rec.provider != id || !self.bodies.is_dynamic(rec.body as usize) {
                 continue;
@@ -106,26 +105,95 @@ impl DestructionExt for World {
             if sites == 0 {
                 continue;
             }
+            let (per_round, rounds_eff) = per_round_sites(sites, rounds, budget_cap(cfg.budget));
             let r = crater_radius(rec.approach);
             digs.push((
                 rec.point + unit_or_zero(rec.velocity) * (r * 1.05),
                 r,
-                sites,
+                per_round,
+                rounds_eff,
             ));
         }
         let mut total = 0usize;
-        for (center, r, sites) in digs {
+        for (center, r, per_round, rounds_eff) in digs {
             // 弹坑域 = 以球心为中心的立方体（边长 2r）；种子抖动格点由体素侧生成。
             let (min, max) = (center - Vec3::splat(r), center + Vec3::splat(r));
-            let seeds = vxl_phys_terrain::voxel::VoxelVolume::seeds_jittered(
-                min,
-                max,
-                sites as usize,
-                SEED_JITTER,
-            );
-            // 复用既有 M3 预断裂那条路径（体素块 → 刚体碎块；自带效应键与 bounds 刷新）。
-            total += self.fracture_voronoi(id, min, max, &seeds, density);
+            if rounds_eff <= 1 {
+                // 单轮：走既有 M3 预断裂路径（效应键 + bounds 刷新都在 `fracture_voronoi` 里）。
+                let seeds = vxl_phys_terrain::voxel::VoxelVolume::seeds_jittered(
+                    min,
+                    max,
+                    per_round as usize,
+                    SEED_JITTER,
+                );
+                total += self.fracture_voronoi(id, min, max, &seeds, density);
+            } else {
+                total +=
+                    fracture_voronoi_hier(self, id, center, r, (per_round, rounds_eff), density);
+            }
         }
         total
     }
+}
+
+/// 预算与轮次 → `(每轮 site 数, 实际轮数)`：取最大的 `r ≤ rounds` 与最大的 `k ≤ sites`，
+/// 满足 `k^r ≤ cap` —— 口径 = 「层数决定**能碎几轮**，site 数决定**每轮几块**」
+/// （`impact_tiers::depth_rounds` 的注）。`k < 2` 时退化成单轮：碎一块不算"一层"。
+fn per_round_sites(sites: u32, rounds: u32, cap: u32) -> (u32, u32) {
+    let sites = sites.max(1);
+    for r in (1..=rounds.max(1)).rev() {
+        let mut k = sites;
+        while k > 1 && !pow_le(k, r, cap) {
+            k -= 1;
+        }
+        if k >= 2 || r == 1 {
+            return (k, r);
+        }
+    }
+    (sites, 1)
+}
+
+/// `k^r ≤ cap`（饱和乘法，避免溢出）。
+fn pow_le(k: u32, r: u32, cap: u32) -> bool {
+    let mut acc = 1u64;
+    for _ in 0..r {
+        acc *= k as u64;
+        if acc > cap as u64 {
+            return false;
+        }
+    }
+    true
+}
+
+/// 多轮分层碎裂：`VoxelVolume::fracture_voronoi_hierarchical` → 逐盒 push 动态体。
+/// 与单轮 `World::fracture_voronoi` **同款口径**：效应键一次、密度公式一致、末尾刷新 bounds。
+/// `plan = (每轮 site 数, 轮数)`；弹坑域 = 以 `center` 为中心、边长 `2r` 的立方体。
+fn fracture_voronoi_hier(
+    world: &mut World,
+    id: u32,
+    center: Vec3,
+    r: f32,
+    plan: (u32, u32),
+    density: f32,
+) -> usize {
+    if world.claim_extraction_effect(id).is_err() {
+        return 0;
+    }
+    let Some(vol) = world.providers.voxel_mut(id) else {
+        return 0;
+    };
+    let (min, max) = (center - Vec3::splat(r), center + Vec3::splat(r));
+    let blocks = vol.fracture_voronoi_hierarchical(min, max, plan.0, plan.1, SEED_JITTER);
+    let mut n = 0usize;
+    for block in blocks {
+        for (c, h) in block {
+            let d = (1e-3 / (8.0 * h.x * h.y * h.z)).max(density).max(1e-3);
+            world
+                .bodies
+                .push_dynamic(Shape::Box { half: h }, c, Quat::IDENTITY, d);
+            n += 1;
+        }
+    }
+    world.refresh_provider_bounds();
+    n
 }
