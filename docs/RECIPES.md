@@ -247,6 +247,14 @@ provider 通道"这条形状已被 `#105` 否证 —— `World::terrain` 是**�
 ——**第 4 个位置参数（substeps）必须是 4**，这是塔能站住的配方，勿改。
 三场景：`col45` / `pile5` / `tower25`。
 
+**M3 坍塌金样（vxl-only；2026-10-07 加）**：`cargo run --release -q -p vxl-phys --example m3_collapse -- 1200 64`
+—— 悬空体素块（4×4×4 m / 0.5 格）预断裂成 **32 个多格碎块**、自由下落 **全睡**：
+碎块 32 / 动态 32 / 清醒 0 / max_depth 0 / `hash 0x22ca32fb3d285c1f2d6a9979a3bc6577`。
+**为什么不是「打塔」**：体素域是**静态地形** —— 打掉几格只会挖洞 + 生成碎块，剩下的格子仍是静态的
+（实测：2×2×10 的塔被 8 m/s 炮弹打掉 8 格，塔纹丝不动）；要让「坍塌」成立必须让**碎块**成为主体。
+入口两处：本机 `bash scripts/gate_gold.sh`（四场景 + fmt/clippy）、CI 的 **determinism 档**（顺带覆盖三编译器哈希一致）；
+`gold-sample` 那条是 Rapier 对照、装不了体素破坏。
+
 ## 求解成本定位（每点开销）
 
 ```bash
