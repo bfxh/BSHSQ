@@ -158,7 +158,7 @@ bash scripts/ab_perf.sh HEAD~1 5 'ns/点' \
 
 ## 行为门（三命令四哈希）
 
-| 场景 | 命令 | 基线（2026-09-15 立；两条哈希值 2026-10-06 随 #6/#4 换代刷新） |
+| 场景 | 命令 | 基线（2026-09-15 立；两条哈希值 2026-10-06 随 **#6** 换代刷新 —— `#107` 的各轴独立 fat 盒是**逐位中性**，只动了 `gate_scale` 的峰值候选，见下方换代链） |
 |---|---|---|
 | 门槛 + 压力 | `cargo run --release -p vxl-phys --example m0_gates` | 门槛 `0x6536fa7211a315187180182438237dda`、末态活跃 **5**、PASS；压力 `0xc23b81902a74b977c8e74e114cf9737a`（report-only） |
 | 确定性 | `cargo run --release -p vxl-phys --example determinism` | `FINAL_HASH=0x655cdbf40ed7e800b5f46785f94fec1e`（10 轮逐位一致） |
@@ -223,6 +223,24 @@ arena 自检 **19/0/0**；长跑 2400 tick 稳定（y 带完整、最深 0.006�
 ⇒ **A 在默认档长跑上不劣反优**；trimesh 的高能量是**既有**现象（值得单独立项，与本改动无关）。
 
 哈希按行为变化更新是**预期流程**（ADR 0004）：落地记录里必须显式写出新旧值与原因。
+
+**2026-10-06 换代：高度场改用「速度自适应接触带」**（`#6` / `#106`；原题"把高度场整体搬进
+provider 通道"这条形状已被 `#105` 否证 —— `World::terrain` 是**公开字段**、`dig` 在**原地**改它，
+挪进 `Providers` 会让**挖洞对窄相不可见**）：
+门槛 `0x6536fa72…` **未变**（反证：`m0_gates` 另一档 `gate_scene` **不含高度场**，一字未动）·
+确定性 `0x711be572…` → **`0x655cdbf4…`** · 压力 `0x417be20a…` → **`0xc23b8190…`**
+（verdict 仍 PASS、双跑一致）。实现 = 模块级 `phase::velocity_band`；`heightfield_pair` 每对算带
+写进 `ws.inflate`，`hf.rs` 三处采样与 `mesh_pair::heightfield` 统一读 `skin + inflate`；
+对拍 `hf_provider_dispatch_parity.rs` 三档两条路逐位一致。全文见 `OPEN-PROBLEMS.md` #6。
+
+**2026-10-06 逐位中性（不是换代）：宽相 fat 盒各轴独立**（`#107`，issue #4）：
+三哈希**一字未动**、金样三场景数值逐项相同；只改了 `gate_scale.sh` 的确定性冻结值 ——
+**峰值候选 `1040623` → `401415`（−61.4%）**。记账口径：哈希不变也要记录，但必须写清"**这是
+中性改动**"，别混进哈希换代链（本仓 2026-09-15 关节族落地同款先例）。
+
+**2026-10-07 补标准出口（非换代；不动任何哈希）**：`scripts/gate_scale.sh` 的分相位块加
+**稳态尾窗**读数（口径 #1 说的"性能门窗口"此前没有出口）；新增 `scripts/gate_sparse.sh` =
+`SPEC` §3「简单碰撞」档的标准入口（默认只报不判，`SPARSE_STRICT=1` 在**参考硬件**上判）。
 
 金样（另用独立 target 目录，避免污染主缓存）：
 `CARGO_TARGET_DIR=C:/vxl-wl-target-gold cargo run --release -p gold-sample -- <scene> 600 16 0.01 4 3.0 30 4`
