@@ -17,7 +17,7 @@
 > | "面元气动：28 行纯配置，无消费方" | `vxl-phys-aero` 的 `face_force_with_lift` 有消费方：`cloth_aero.rs` **升力已接入**（判据 `tests/cloth_aero_lift.rs`）；**面元力矩按边界明确不含**（不是漏） |
 >
 > **真正还缺的**：~~① **体积约束**~~（✅ **2026-10-07 落地**）；~~② **点-边对的摩擦**~~（✅ **2026-10-07 落地**，`cloth_edge_friction.rs`）；
-> ③ **面元力矩**；④ **GPU 档**；⑤ 出口判据：~~悬臂金样~~（✅ **2026-10-07 落地**：`examples/m4_cantilever.rs` + 金样门 + CI determinism 档，判据 = 自由端/垂度/应变的 `f32` 位模式逐位）——**旗飘金样 + 刚度档表仍缺**（档表的实测障碍见 `RECIPES.md`：五档 α 在悬臂上不敏感）；
+> ③ **面元力矩**；④ **GPU 档**；⑤ 出口判据：~~悬臂金样~~ / ~~旗飘金样~~（✅ **均 2026-10-07 落地**：`examples/m4_cantilever.rs` / `examples/m4_flag.rs` + 金样门 + CI determinism 档，判据 = 坐标/应变的 `f32` 位模式逐位）——**刚度档表仍缺**（实测障碍见 `RECIPES.md`：五档 α 在悬臂上不敏感，要换敏感场景）；
 > ⑥ "**与刚体共求解器**"按字面仍未做 —— 现状是 **XPBD 子步 + 反作用耦合**（`cloth_coupling.rs`），
 > `ElementKind::Xpbd` / `ConstraintElement` 仍是"声明了没接线"（与 `ROUTE.md` M2 的说明一致）。
 > ⇒ §1.1/§2 以下的行文保留为**当时的证据**，但结论以本块为准。
