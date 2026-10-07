@@ -3,8 +3,9 @@
 #
 # 为什么有这个脚本：金样读数此前**只写在 `OPEN-PROBLEMS.md` 的 T5 行里、没有任何门看着**
 # ⇒ 那行陈旧到与实际差一倍（入睡写 35/45、实测 45/45）都没人发现。harness 现在**自带冻结
-# 基线自检**（不符即 `❌ … ≠ 基线 …` + exit 1），本脚本把"跑哪三个场景、怎么判绿"固定下来，
-# 免得每轮手敲四条命令还各写各的口径。
+# 基线自检**（不符即 `❌ … ≠ 基线 …` + exit 1），本脚本把"跑哪些场景、怎么判绿"固定下来：
+# **三个 Rapier 对照场景**（col45/pile5/tower25）＋**一个 vxl-only M3 坍塌金样**（破坏路径没有
+# Rapier 对照可做），免得每轮手敲命令还各写各的口径。
 #
 # 用法（从仓库根或任意目录均可；脚本自己找路径）：
 #   bash scripts/gate_gold.sh
@@ -75,5 +76,26 @@ run_scene col45  600 16 0.01 4 3.0 30 4
 run_scene pile5  600 16 0.01 4 3.0 30 4
 run_scene tower25 2400 16 0.01 1 3.0 30 16
 
-echo "✅ 金样门全绿（fmt / clippy / col45 / pile5 / tower25 全 0）"
+# **M3 坍塌金样**（vxl-only；`gold-sample` 是 Rapier 对照通道，装不了体素破坏）。
+# 配方 = `1200 64`（32 个多格碎块、**全睡**）；自检在 example 里（PASS/FAIL），换基线按 ADR-0004。
+# ⚠️ 必须在**主 workspace** 跑（`gold-sample` 自带 [workspace] ⇒ 在那里 `-p vxl-phys` 找不到包）。
+run_m3() {
+    local log="${out}/g_m3_collapse.log"
+    ( cd "$root" && CARGO_TARGET_DIR="${CARGO_TARGET_DIR_M3:-C:/vxl-wl-target}" \
+        cargo run --release -q -p vxl-phys --example m3_collapse -- 1200 64 ) >"$log" 2>&1
+    local rc=$?
+    local line
+    line="$(grep -m1 -E '金样基线 (PASS|FAIL)|跳过基线判定' "$log" || true)"
+    echo "gold_m3_collapse=${rc}  ${line}"
+    [ $rc -eq 0 ] || fail "gold m3_collapse" $rc "$log"
+    case "$line" in
+        *"金样基线 PASS"*) ;;
+        *) echo "❌ gold m3_collapse：**没有真正做基线判定**（配方与 frozen 不匹配？）" >&2
+           tail -n 8 "$log" >&2 || true
+           exit 3 ;;
+    esac
+}
+run_m3
+
+echo "✅ 金样门全绿（fmt / clippy / col45 / pile5 / tower25 / m3_collapse 全 0）"
 exit 0

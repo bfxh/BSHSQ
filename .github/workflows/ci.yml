@@ -412,6 +412,14 @@ jobs:
         env:
           RUSTFLAGS: ${{ matrix.linker }}
         run: cargo run --release -p vxl-phys --example determinism | tee determinism-${{ matrix.label }}.txt
+      # M3 坍塌金样（破坏路径的**冻结基线自检**；`gold-sample` 那条是 Rapier 对照、装不了体素破坏）。
+      # 放 determinism 档 = 本仓既定口径（"example 实跑 → determinism 档"），并且**顺带覆盖跨平台**：
+      # 冻结哈希（配方 `1200 64`）应逐位一致（`SPEC` §5）；不一致即暴露破坏路径的平台相关性。
+      # 配方与基线见 `docs/RECIPES.md` §金样门；换代按 ADR-0004 记新旧值与理由。
+      - name: M3 坍塌金样（冻结基线自检；破坏路径）
+        env:
+          RUSTFLAGS: ${{ matrix.linker }}
+        run: cargo run --release -q -p vxl-phys --example m3_collapse -- 1200 64
       # T6 8A 碰撞行：**报告层，不阻断**——计时随 runner 而异（验收以本机数字为准），
       # 故退出码只记录不拦门；JSON 报告进产物（含 env / p50 / p95 / 首帧建树分项）。
       - name: 8A 碰撞行（报告，不阻断）
