@@ -257,7 +257,12 @@ jobs:
             # `-- --nocapture`（2026-10-07 加）：libtest 默认把输出**捕获到内存**，只在测试正常
             # 结束时才吐 ⇒ 挂起/崩溃时现场一行都留不下。开 nocapture 后 `[gpu-diag …]`（wgpu
             # 启动日志）**实时流进 tee 的日志**，随 artifact 上传（issue #30 的取证依赖它）。
-            if cargo test --release -p vxl-phys-gpu --test sorted_copies_boundary -- --nocapture \
+            # `timeout -k 30 300`（2026-10-07 加）：issue #30 的另一种表现是**挂住不返回**
+            # ——纯重试对"永远不返回"的进程无效（进不了下一次尝试），而 Actions 默认 job 超时
+            # 是 360 分钟，会把 CI 卡死。本地门禁（`gate_all.sh`，PR #108/#111）早用同款
+            # `timeout 300`；这里补齐 CI 侧（`-k 30` = TERM 无效时 30s 后 KILL）。
+            # ⚠️ 超时的 124 码经 pipefail 传成整条管道的退出码 ⇒ 会走下面的重试分支。
+            if timeout -k 30 300 cargo test --release -p vxl-phys-gpu --test sorted_copies_boundary -- --nocapture \
                 2>&1 | tee "$LOGS/sorted_copies_attempt_$i.log"; then
               rm -f "$LOGS/sorted_copies_attempt_$i.log"   # 成功的尝试不留日志（省上传）
               exit 0
