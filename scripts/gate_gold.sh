@@ -76,47 +76,37 @@ run_scene col45  600 16 0.01 4 3.0 30 4
 run_scene pile5  600 16 0.01 4 3.0 30 4
 run_scene tower25 2400 16 0.01 1 3.0 30 16
 
-# **M3 坍塌金样**（vxl-only；`gold-sample` 是 Rapier 对照通道，装不了体素破坏）。
-# 配方 = `1200 64`（32 个多格碎块、**全睡**）；自检在 example 里（PASS/FAIL），换基线按 ADR-0004。
-# ⚠️ 必须在**主 workspace** 跑（`gold-sample` 自带 [workspace] ⇒ 在那里 `-p vxl-phys` 找不到包）。
-run_m3() {
-    local log="${out}/g_m3_collapse.log"
+# **vxl-only 金样**（`gold-sample` 是 Rapier 对照通道，装不了本仓的体素/布料）—— 三者**同款**：
+# 跑**主 workspace** 的 example（`gold-sample` 自带 [workspace] ⇒ 在那里 `-p vxl-phys` 找不到包）、
+# 要求真出现 `金样基线 PASS`（只打"跳过基线判定"即判失败）。判据与冻结值都在各 example 里，
+# 换代按 ADR-0004 记新旧值与理由。
+run_vxl_gold() { # run_vxl_gold <example> <配方参数…>
+    local ex="$1"; shift
+    local log="${out}/g_${ex}.log"
     ( cd "$root" && CARGO_TARGET_DIR="${CARGO_TARGET_DIR_M3:-C:/vxl-wl-target}" \
-        cargo run --release -q -p vxl-phys --example m3_collapse -- 1200 64 ) >"$log" 2>&1
+        cargo run --release -q -p vxl-phys --example "$ex" -- "$@" ) >"$log" 2>&1
     local rc=$?
     local line
     line="$(grep -m1 -E '金样基线 (PASS|FAIL)|跳过基线判定' "$log" || true)"
-    echo "gold_m3_collapse=${rc}  ${line}"
-    [ $rc -eq 0 ] || fail "gold m3_collapse" $rc "$log"
+    echo "gold_${ex}=${rc}  ${line}"
+    [ $rc -eq 0 ] || fail "gold ${ex}" $rc "$log"
     case "$line" in
         *"金样基线 PASS"*) ;;
-        *) echo "❌ gold m3_collapse：**没有真正做基线判定**（配方与 frozen 不匹配？）" >&2
+        *) echo "❌ gold ${ex}：**没有真正做基线判定**（配方与 frozen 不匹配？）" >&2
            tail -n 8 "$log" >&2 || true
            exit 3 ;;
     esac
 }
-run_m3
 
-# **M4 悬臂金样**（vxl-only：`gold-sample` 是 Rapier 通道，装不了本仓的布料）。
-# 配方 = `600` tick；冻结基线存的是 **`f32` 位模式**（十进制往返对 7 位有效数字会失真，
-# 本轮踩过 —— 见 example 头注）。判据 = 自由端坐标 / 垂度 / 最大应变**逐位**相等。
-run_cantilever() {
-    local log="${out}/g_m4_cantilever.log"
-    ( cd "$root" && CARGO_TARGET_DIR="${CARGO_TARGET_DIR_M3:-C:/vxl-wl-target}" \
-        cargo run --release -q -p vxl-phys --example m4_cantilever -- 600 ) >"$log" 2>&1
-    local rc=$?
-    local line
-    line="$(grep -m1 -E '金样基线 (PASS|FAIL)|跳过基线判定' "$log" || true)"
-    echo "gold_m4_cantilever=${rc}  ${line}"
-    [ $rc -eq 0 ] || fail "gold m4_cantilever" $rc "$log"
-    case "$line" in
-        *"金样基线 PASS"*) ;;
-        *) echo "❌ gold m4_cantilever：**没有真正做基线判定**（配方与 frozen 不匹配？）" >&2
-           tail -n 8 "$log" >&2 || true
-           exit 3 ;;
-    esac
-}
-run_cantilever
+# M3 坍塌（体素破坏；配方 `1200 64`）＝ 悬空体素块预断裂成 32 个多格碎块、自由下落**全睡**。
+run_vxl_gold m3_collapse 1200 64
 
-echo "✅ 金样门全绿（fmt / clippy / col45 / pile5 / tower25 / m3_collapse / m4_cantilever 全 0）"
+# M4 悬臂（布料；配方 `600`）：0.4×0.08 m 布带一端钉住、重力下垂到稳态。冻结值存 **`f32` 位模式**
+# （十进制往返对 7 位有效数字会失真 —— 本轮踩过，见 example 头注）。
+run_vxl_gold m4_cantilever 600
+# M4 旗飘（布料 + 气动；配方 `600`）：旗面左列钉旗杆、风沿 +z 垂直吹。⚠️ 旗是**动**的 ⇒ 冻结
+# 读数只在同配方下逐位可复现，**不是**稳态解。
+run_vxl_gold m4_flag 600
+
+echo "✅ 金样门全绿（fmt / clippy / col45 / pile5 / tower25 / m3_collapse / m4_cantilever / m4_flag 全 0）"
 exit 0

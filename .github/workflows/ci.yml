@@ -436,6 +436,13 @@ jobs:
         env:
           RUSTFLAGS: ${{ matrix.linker }}
         run: cargo run --release -q -p vxl-phys --example m4_cantilever -- 600
+      # M4 旗飘金样（**布料 × 气动**：「悬臂/旗飘」里的旗飘那一半）：旗面左列钉旗杆、风沿 +z
+      # 垂直吹（Bridson 线化面元气动 + 升力）。⚠️ 旗是**动**的 ⇒ 冻结读数只在同配方下逐位可
+      # 复现，**不是**稳态解；换代按 ADR-0004 记新旧值与理由。
+      - name: M4 旗飘金样（冻结基线自检；布料×气动）
+        env:
+          RUSTFLAGS: ${{ matrix.linker }}
+        run: cargo run --release -q -p vxl-phys --example m4_flag -- 600
       # T6 8A 碰撞行：**报告层，不阻断**——计时随 runner 而异（验收以本机数字为准），
       # 故退出码只记录不拦门；JSON 报告进产物（含 env / p50 / p95 / 首帧建树分项）。
       - name: 8A 碰撞行（报告，不阻断）
