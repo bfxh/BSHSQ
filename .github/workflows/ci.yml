@@ -408,10 +408,18 @@ jobs:
         env:
           RUSTFLAGS: ${{ matrix.linker }}
         run: cargo run --release -p vxl-phys --example m0_gates -- gates-${{ matrix.label }}.json
+      # ⚠️ **必须钉 bash + pipefail**（2026-10-07，与 aarch64/GPU 重试步同一根因）：本矩阵含
+      # **Windows 行**，那行的默认外壳是 pwsh，`cargo … | tee` 的退出码不反映 cargo 失败；
+      # 即使在 `bash -e` 下，管道的退出码也是**最后一个命令**（tee）的 ⇒ 程序挂了这步照样绿
+      # （假绿；#140 只在 aarch64 那条修过同一个坑，说明"逐点补"会漏）。钉 bash 让三行同语义，
+      # 再加 pipefail 把真退出码传出来。`ci_shape_lock.sh` ⑧ 按**形状**守这条（不点名具体步骤）。
       - name: determinism（10 轮全等）
+        shell: bash
         env:
           RUSTFLAGS: ${{ matrix.linker }}
-        run: cargo run --release -p vxl-phys --example determinism | tee determinism-${{ matrix.label }}.txt
+        run: |
+          set -o pipefail
+          cargo run --release -p vxl-phys --example determinism | tee determinism-${{ matrix.label }}.txt
       # M3 坍塌金样（破坏路径的**冻结基线自检**；`gold-sample` 那条是 Rapier 对照、装不了体素破坏）。
       # 放 determinism 档 = 本仓既定口径（"example 实跑 → determinism 档"），并且**顺带覆盖跨平台**：
       # 冻结哈希（配方 `1200 64`）应逐位一致（`SPEC` §5）；不一致即暴露破坏路径的平台相关性。
@@ -567,7 +575,11 @@ jobs:
         with:
           tool: cargo-llvm-cov@0.9.1     # 钉版本，理由同 typos（@latest 会自己漂）
       - name: 覆盖率（全量测试 + 摘要）
-        run: cargo llvm-cov --workspace --release --json --output-path cov.json --summary-only | tee cov-summary.txt
+        run: |
+          # 管道必须开 pipefail：否则 `cargo llvm-cov | tee` 的失败会被 tee 的 0 吞掉。
+          # 本 job 是 continue-on-error 的报告层，但"cov 根本没产出"不该记成成功（artifact 会误导）。
+          set -o pipefail
+          cargo llvm-cov --workspace --release --json --output-path cov.json --summary-only | tee cov-summary.txt
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
@@ -598,6 +610,8 @@ jobs:
       - name: 三场景对拍（col45 / pile5 / tower25）
         working-directory: gold-sample
         run: |
+          # 报告层也要真退出码：`cargo run … | tee` 失败会被 tee 的 0 吞掉，artifact 就记成"跑完了"。
+          set -o pipefail
           for s in col45 pile5 tower25; do
             echo "=== $s ===" | tee gold-$s.txt
             cargo run --release -- "$s" 600 16 0.01 4 3.0 30 4 2>&1 | tee -a gold-$s.txt
