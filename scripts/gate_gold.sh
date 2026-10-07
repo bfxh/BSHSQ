@@ -108,5 +108,10 @@ run_vxl_gold m4_cantilever 600
 # 读数只在同配方下逐位可复现，**不是**稳态解。
 run_vxl_gold m4_flag 600
 
-echo "✅ 金样门全绿（fmt / clippy / col45 / pile5 / tower25 / m3_collapse / m4_cantilever / m4_flag 全 0）"
+# M5 溃坝（液体；配方 `400`）：体素盆（地板 + 围堰）+ 自由水柱 `0.25×0.25×0.65`（504 粒）
+# 失支撑坍塌 ⇒ 质心沿 +x 前移、波前沿推进。判据 = 粒子数 / 末态质心 / 末态最大 x 的 `f32`
+# 位模式逐位（与 M4 同口径；**不是**驻留瞬态断言 —— 自由柱坍塌本就该飞溅）。
+run_vxl_gold m5_dam_break 400
+
+echo "✅ 金样门全绿（fmt / clippy / col45 / pile5 / tower25 / m3_collapse / m4_cantilever / m4_flag / m5_dam_break 全 0）"
 exit 0
