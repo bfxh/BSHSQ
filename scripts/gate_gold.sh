@@ -97,5 +97,26 @@ run_m3() {
 }
 run_m3
 
-echo "✅ 金样门全绿（fmt / clippy / col45 / pile5 / tower25 / m3_collapse 全 0）"
+# **M4 悬臂金样**（vxl-only：`gold-sample` 是 Rapier 通道，装不了本仓的布料）。
+# 配方 = `600` tick；冻结基线存的是 **`f32` 位模式**（十进制往返对 7 位有效数字会失真，
+# 本轮踩过 —— 见 example 头注）。判据 = 自由端坐标 / 垂度 / 最大应变**逐位**相等。
+run_cantilever() {
+    local log="${out}/g_m4_cantilever.log"
+    ( cd "$root" && CARGO_TARGET_DIR="${CARGO_TARGET_DIR_M3:-C:/vxl-wl-target}" \
+        cargo run --release -q -p vxl-phys --example m4_cantilever -- 600 ) >"$log" 2>&1
+    local rc=$?
+    local line
+    line="$(grep -m1 -E '金样基线 (PASS|FAIL)|跳过基线判定' "$log" || true)"
+    echo "gold_m4_cantilever=${rc}  ${line}"
+    [ $rc -eq 0 ] || fail "gold m4_cantilever" $rc "$log"
+    case "$line" in
+        *"金样基线 PASS"*) ;;
+        *) echo "❌ gold m4_cantilever：**没有真正做基线判定**（配方与 frozen 不匹配？）" >&2
+           tail -n 8 "$log" >&2 || true
+           exit 3 ;;
+    esac
+}
+run_cantilever
+
+echo "✅ 金样门全绿（fmt / clippy / col45 / pile5 / tower25 / m3_collapse / m4_cantilever 全 0）"
 exit 0
