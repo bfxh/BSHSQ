@@ -455,9 +455,25 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64-static
+          # ⚠️ **没有它这个档是假绿**（2026-10-07 抓到现场）：qemu 找不到 aarch64 的动态加载器
+          # （`Could not open '/lib/ld-linux-aarch64.so.1'`）⇒ 二进制根本没跑；而 `| tee` 又让
+          # 步骤取 `tee` 的 0 退出码 ⇒ 一直"成功"。加载器在 cross sysroot 里。
+          QEMU_LD_PREFIX: /usr/aarch64-linux-gnu
         run: |
+          # 管道必须开 pipefail：否则 qemu/程序失败会被 `tee` 的 0 吞掉（同 GPU 重试步 #35 的坑）。
+          set -o pipefail
           cargo run --release --target aarch64-unknown-linux-gnu -p vxl-phys --example determinism \
             | tee determinism-GCC-aarch64.txt
+      # M3 坍塌金样也要过 ARM：破坏路径的冻结哈希应在 aarch64 上**逐位一致**（`SPEC` §5）。
+      # 与 x86 三编译器那一步同一个配方（`1200 64`），共用同一份冻结基线 ⇒ 一处不一致即红。
+      - name: M3 坍塌金样（aarch64/QEMU 实跑；冻结基线自检）
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64-static
+          QEMU_LD_PREFIX: /usr/aarch64-linux-gnu
+        run: |
+          cargo run --release -q --target aarch64-unknown-linux-gnu -p vxl-phys \
+            --example m3_collapse -- 1200 64
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: gates-GCC-aarch64
@@ -495,9 +511,23 @@ jobs:
       - name: determinism FINAL_HASH 汇总（三编译器 + aarch64 全等式）
         run: |
           set -euo pipefail
+          shopt -s nullglob
+          files=(arts/*/determinism-*.txt)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::没有 determinism 产物"; exit 1
+          fi
+          # **每个产物都必须真有 FINAL_HASH**：只对"已有的行"去重会漏掉"某平台其实没跑起来"
+          # （2026-10-07 实测：aarch64 的 qemu 加载器缺失 ⇒ 文件里只有 qemu 报错，而这个汇总
+          #  仍然只看到 3 个哈希 ⇒ 假绿）。缺一个即红。
+          got=0
+          for f in "${files[@]}"; do
+            if grep -q "FINAL_HASH=" "$f"; then got=$((got + 1)); fi
+          done
+          echo "含 FINAL_HASH 的产物 = $got / ${#files[@]}（必须相等）"
+          test "$got" -eq "${#files[@]}"
           echo "== 各平台 FINAL_HASH =="
-          grep -h "FINAL_HASH=" arts/*/determinism-*.txt | tr -d '\r' | sort | uniq -c
-          n=$(grep -h "FINAL_HASH=" arts/*/determinism-*.txt | tr -d '\r' | sed 's/.*FINAL_HASH=//' | sort -u | wc -l)
+          grep -h "FINAL_HASH=" "${files[@]}" | tr -d '\r' | sort | uniq -c
+          n=$(grep -h "FINAL_HASH=" "${files[@]}" | tr -d '\r' | sed 's/.*FINAL_HASH=//' | sort -u | wc -l)
           echo "唯一哈希数 = $n（应为 1；>1 即跨平台不一致）"
           test "$n" -eq 1
 
