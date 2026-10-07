@@ -4,7 +4,7 @@
 //! - [`rope`]：**绳索最小闭环**（XPBD 链 + 点-形状接触 + 摩擦）——判据在 `tests/rope_minimal.rs` 与 `crates/vxl-phys/tests/rope_scene.rs`；
 //! - [`rigid`]：**粒子↔刚体耦合**（Akinci 式最小实现：代理视图 + 穿透查询 + 反作用回填）。
 //!
-//! **仍待落地**（2026-10-05 更正：原列的「自碰撞进阶/自摩擦/升力/撕裂/塑性」多已落地）：体积约束、点-边对自摩擦、面元力矩（升力已接入）、GPU 档；逐条见 `docs/SURVEY-SOFT-CLOTH-AND-CONVERSION.md`。
+//! **仍待落地**（2026-10-05 更正：原列的「自碰撞进阶/自摩擦/升力/撕裂/塑性」多已落地）：点-边对自摩擦、面元力矩（升力已接入）、GPU 档；**体积/气压约束已落地（2026-10-07，[`cloth::volume`]，默认 `k ≤ 0` = 关）**；逐条见 `docs/SURVEY-SOFT-CLOTH-AND-CONVERSION.md`。
 
 #![forbid(unsafe_code)]
 
