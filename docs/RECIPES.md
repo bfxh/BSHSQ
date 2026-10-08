@@ -199,6 +199,7 @@ cargo test -p vxl-phys-splat --test splat_mass      # 核质量 = 场的积分�
 cargo test -p vxl-phys-splat --test splat_particles # 粒子域运动步：自由落体闭式 + 贴面静置 + 穿地金丝雀
 cargo test -p vxl-phys-splat --test splat_pressure  # 自场压力：互斥 + 动量守恒（不等质量也成立）+ 关档空操作
 cargo test -p vxl-phys-splat --test splat_viscosity # 自场黏性：等速度逐位不动 + 只耗散 + 动量守恒
+cargo test -p vxl-phys-splat --test splat_grid_parity # 候选网格 vs 全扫逐位一致（+ 拐点扫描，只报数）
 ```
 
 ⚠️ 阈值口径（`SurfaceDrag::surface_ratio = 0.9`）是**实测标定**的：内部残差亏 ≤1e-4·ρ0、

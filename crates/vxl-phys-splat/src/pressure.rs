@@ -40,13 +40,21 @@ impl Default for SelfPressure {
 const GAMMA: f32 = 7.0;
 
 /// 归一化高斯在 `p` 处的值 `w = opacity·exp(−½α)/m(ρ=1)`（截断与 `density_grad` 同）。
-fn kernel_norm(field: &GaussianSplatField, s: &crate::Splat, p: Vec3) -> f32 {
+/// 压力与黏性共用这一处（单一来源）。
+pub(crate) fn kernel_norm(field: &GaussianSplatField, s: &crate::Splat, p: Vec3) -> f32 {
     let ax = s.axes();
     let a = GaussianSplatField::alpha(s, &ax, p);
     if a > field.cut {
         return 0.0;
     }
     (-0.5 * a).exp() * s.opacity / s.mass(1.0)
+}
+
+/// 每核**真实密度**（kg/m³）：`σ(c_k)·medium_density`（压力与黏性共用）。
+pub(crate) fn densities(field: &GaussianSplatField, n: usize) -> Vec<f32> {
+    (0..n)
+        .map(|k| field.density_grad(field.splats[k].center).0 * field.medium_density)
+        .collect()
 }
 
 /// 施加一个 `dt` 的自场压力（只斥力）；返回**净冲量** `Σ m_k·Δv_k`（判据/审计：逐对反对称 ⇒ ≈0）。
@@ -88,11 +96,10 @@ fn thermo(
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     let rho0 = cfg.rest_density;
     let b = cfg.sound_speed * cfg.sound_speed * rho0 / GAMMA;
-    let mut rho = vec![0.0f32; n];
+    let rho = densities(field, n);
     let mut press = vec![0.0f32; n];
     let mut mass = vec![0.0f32; n];
     for k in 0..n {
-        rho[k] = field.density_grad(field.splats[k].center).0 * field.medium_density;
         mass[k] = field.splats[k].mass(field.medium_density);
         let q = rho[k] / rho0;
         let q2 = q * q;
