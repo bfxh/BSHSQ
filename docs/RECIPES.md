@@ -197,6 +197,7 @@ cargo test -p vxl-phys-fluid --test wind_surface    # 单粒解析对拍 + 内�
 cargo test -p vxl-phys        --test wind_liquid    # 门面 A/B：顺风档 vs 零风档 + 表面领先内部
 cargo test -p vxl-phys-splat --test splat_mass      # 核质量 = 场的积分质量（144³ 中点法对拍）
 cargo test -p vxl-phys-splat --test splat_particles # 粒子域运动步：自由落体闭式 + 贴面静置 + 穿地金丝雀
+cargo test -p vxl-phys-splat --test splat_pressure  # 自场压力：互斥 + 动量守恒（不等质量也成立）+ 关档空操作
 ```
 
 ⚠️ 阈值口径（`SurfaceDrag::surface_ratio = 0.9`）是**实测标定**的：内部残差亏 ≤1e-4·ρ0、
