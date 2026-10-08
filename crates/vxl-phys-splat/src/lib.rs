@@ -36,6 +36,8 @@ use vxl_phys_core::{Aabb, Mat3, Vec3};
 mod flow;
 // **状态桥**（`StateBridge` 实现）单开文件：本文件在 god 门 file_lines 基线上（695 行），
 // 加模块声明这一行的账由 `rebuild_grid` 的循环不变量外提（截断半径 `r` 每核只算一次）换回。
+/// **高斯粒子域的运动步**（②物理代理第一片）：重力积分 + 世界碰撞的非弹性投影。
+pub mod particles;
 mod splat_access;
 
 /// `sdf()` 的**近场细化带**（米）：一阶值的绝对值超过它就直接返回一阶值、不做牛顿投影。
@@ -96,6 +98,26 @@ impl Splat {
         // (2π)^{3/2} = 2π·√(2π)：只用乘/开方（不引 powf 的平台差异）。
         let tau = std::f32::consts::TAU;
         medium_density * self.opacity * (tau * tau.sqrt()) * sx * sy * sz
+    }
+
+    /// **各向异性椭球的支撑半径**沿单位方向 `n`：`r(n) = ‖(σx·n·uₓ, σy·n·u_y, σz·n·u_z)‖`
+    /// —— 单位球经 `diag(σ)` 映射后的支撑距离（②物理代理的碰撞半径口径：贴面时按**朝向**
+    /// 留出正确间隙）。σ 下限与 `alpha`/`mass` 同（1e-4）。
+    pub fn radius_along(&self, n: Vec3) -> f32 {
+        let ax = self.axes();
+        let (sx, sy, sz) = (
+            self.scale.x.max(1e-4),
+            self.scale.y.max(1e-4),
+            self.scale.z.max(1e-4),
+        );
+        let r2 =
+            (sx * n.dot(ax[0])).powi(2) + (sy * n.dot(ax[1])).powi(2) + (sz * n.dot(ax[2])).powi(2);
+        r2.sqrt()
+    }
+
+    /// 最大半轴（碰撞查询的**保守 skin**）。
+    pub fn max_radius(&self) -> f32 {
+        self.scale.x.max(self.scale.y).max(self.scale.z).max(1e-4)
     }
 }
 
