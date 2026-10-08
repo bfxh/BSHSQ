@@ -6,10 +6,11 @@
 //! - `sample(x)`：均匀、稳定、无黏的空气 —— `density = air_density`、`velocity = wind`、
 //!   `occupied = 1`（开放空气处处可用）、`temperature = 0`；**与 `x` 无关**（均匀风场）
 //!   ⇒ 同输入同输出（确定性）。`air_density <= 0` ⇒ [`MediumSample::VACUUM`]（显式关档）。
-//! - `deposit(x, momentum, …)`：风是**运动学背景**（无限大气库）⇒ 吸收动量**不改风速**，
-//!   只累加进 [`AeroState::absorbed`] 做审计：受体拿到 `+J`、大气记 `−J` ⇒ 两者之和为 0。
-//!   ⚠️ 这是"双向耦合"里**大气那一半不做功**的登记边界：要让风因液面而变慢，得先给风场
-//!   一个真实状态（尾流/动量槽），不在本片（见 `ROUTE.md` §4 的"风 × 液"行）。
+//! - `deposit(x, momentum, …)`：动量记进 [`AeroState::absorbed`]（受体拿到 `+J`、大气记 `−J`
+//!   ⇒ 两者之和为 0）。**风速是否因此改变**由 [`AeroConfig::air_mass`] 决定：
+//!   `air_mass = 0`（默认）= **运动学背景**（无限大气库，吸收不改风速）；
+//!   有限 `air_mass` ⇒ `v = wind + absorbed/air_mass`（动量槽，双向那一半）——
+//!   判据见 `tests/medium_field.rs`（动量账 `M·Δv = J` 与能量账 `ΔKE ≤ 0`）。
 use crate::AeroState;
 use vxl_phys_core::interop::{MediumField, MediumSample};
 use vxl_phys_core::Vec3;
@@ -20,9 +21,13 @@ impl MediumField for AeroState {
         if cfg.air_density <= 0.0 {
             return MediumSample::VACUUM;
         }
+        let mut velocity = Vec3::new(cfg.wind[0], cfg.wind[1], cfg.wind[2]);
+        if cfg.air_mass > 0.0 {
+            velocity += self.absorbed * (1.0 / cfg.air_mass);
+        }
         MediumSample {
             density: cfg.air_density,
-            velocity: Vec3::new(cfg.wind[0], cfg.wind[1], cfg.wind[2]),
+            velocity,
             viscosity: 0.0,
             temperature: 0.0,
             occupied: 1.0,

@@ -16,6 +16,15 @@ fn air(wind: [f32; 3], density: f32) -> AeroState {
         drag_coefficient: 1.0,
         lift_slope: 5.0,
         wind,
+        air_mass: 0.0,
+    })
+}
+
+fn air_with_slot(wind: [f32; 3], air_mass: f32) -> AeroState {
+    AeroState::new(AeroConfig {
+        wind,
+        air_mass,
+        ..AeroConfig::default()
     })
 }
 
@@ -50,4 +59,27 @@ fn deposit_absorbs_momentum_without_changing_the_wind() {
     assert_eq!(after, before, "金丝雀：运动学背景 ⇒ 吸收不改风（逐位）");
     m.deposit(Vec3::ZERO, Vec3::ZERO, 0.0, 0.0);
     assert_eq!(m.absorbed, j1 + j2, "零动量沉积不记账");
+}
+
+/// **动量槽（双向那一半）**：有限 `air_mass` ⇒ 风速按 `Δv = J/M` 变慢，且 `M·Δv = J` 闭合；
+/// 默认（`air_mass = 0`）被上面的金丝雀钉住（吸收不改风）。
+#[test]
+fn momentum_slot_slows_the_wind_by_the_absorbed_momentum() {
+    let mut m = air_with_slot([3.0, 0.0, 0.0], 8.0);
+    let v0 = m.sample(Vec3::ZERO).velocity;
+    let j = Vec3::new(-2.0, 0.5, 0.0); // 大气**吸收**的动量（受体拿到 −j）
+    m.deposit(Vec3::ZERO, j, 0.0, 0.0);
+    let v1 = m.sample(Vec3::ZERO).velocity;
+    let dv = v1 - v0;
+    let want = j * (1.0 / 8.0);
+    let rel = (dv - want).length() / want.length();
+    assert!(rel < 1e-6, "风速变化应 = J/M：rel={rel:e}（dv={dv:?}）");
+    let acc = (dv * 8.0 - j).length() / j.length();
+    assert!(acc < 1e-6, "动量账 M·Δv = J 应闭合：rel={acc:e}");
+    assert!(v1.x < v0.x, "受体拿到 +x 动量 ⇒ 大气沿 +x 变慢");
+    let ke_drop = 0.5 * 8.0 * (v0.length_squared() - v1.length_squared());
+    assert!(
+        ke_drop > 0.0,
+        "大气变慢 ⇒ 它的动能下降（要拿能量得先有能量）：{ke_drop:e}"
+    );
 }

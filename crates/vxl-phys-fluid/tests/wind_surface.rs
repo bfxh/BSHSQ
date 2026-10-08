@@ -17,13 +17,19 @@ struct Air {
     v: Vec3,
     rho: f32,
     absorbed: Vec3,
+    /// 动量槽的等效空气质量（0 = 运动学背景：吸收不改风速）。
+    mass: f32,
 }
 
 impl MediumField for Air {
     fn sample(&self, _x: Vec3) -> MediumSample {
+        let mut velocity = self.v;
+        if self.mass > 0.0 {
+            velocity += self.absorbed * (1.0 / self.mass);
+        }
         MediumSample {
             density: self.rho,
-            velocity: self.v,
+            velocity,
             viscosity: 0.0,
             temperature: 0.0,
             occupied: 1.0,
@@ -54,6 +60,7 @@ fn isolated_particle_gains_the_analytic_impulse() {
         v: Vec3::new(2.0, 0.0, 0.0),
         rho: 1.25,
         absorbed: Vec3::ZERO,
+        mass: 0.0,
     };
     let cfg = SurfaceDrag {
         cd: 0.8,
@@ -112,6 +119,7 @@ fn only_free_surface_particles_are_driven() {
         v: Vec3::new(1.0, 0.0, 0.0),
         rho: 1.25,
         absorbed: Vec3::ZERO,
+        mass: 0.0,
     };
     surface_drag(&mut f, &mut air, SurfaceDrag::default(), 1.0 / 240.0);
     assert!(
@@ -125,4 +133,65 @@ fn only_free_surface_particles_are_driven() {
         "内部粒子（ρ ≥ ρ0）必须逐位不动"
     );
     assert!(air.absorbed.x < 0.0, "大气记到反作用（方向相反）");
+}
+
+/// ④ **双向账**（动量槽 `mass > 0`）：一块静止水被有限质量的风吹 ⇒
+/// ① 动量闭合 `ΣΔp_水 + M·Δv_空气 = 0`；② 总动能**不增**（阻力只耗散）——
+/// 这条正是"继承半速被否"那类能量源的通用判据。
+#[test]
+fn two_way_ledger_conserves_momentum_and_does_not_create_energy() {
+    let mut f = sys([8, 8, 8], 0.05);
+    f.step(1.0 / 60.0, &NoProviders); // 让密度快照就绪（自由表面判据）
+    f.set_velocities(&vec![Vec3::ZERO; f.len()]);
+    let surface = 0.9 * f.config().rest_density;
+    let n_surface = f.densities().iter().filter(|d| **d < surface).count();
+    assert!(n_surface > 0, "场景必须真的有自由表面（否则用例无意义）");
+
+    let m = f.particle_mass();
+    let mut air = Air {
+        v: Vec3::new(2.0, 0.0, 0.0),
+        rho: 1.25,
+        absorbed: Vec3::ZERO,
+        mass: 8.0,
+    };
+    let fluid_ke = |f: &FluidSystem| {
+        let mut e = 0.0f32;
+        for v in f.velocities() {
+            e += 0.5 * m * v.length_squared();
+        }
+        e
+    };
+    let air_ke = |a: &Air| 0.5 * a.mass * a.sample(Vec3::ZERO).velocity.length_squared();
+    let ke0 = fluid_ke(&f) + air_ke(&air);
+
+    for _ in 0..4 {
+        surface_drag(&mut f, &mut air, SurfaceDrag::default(), 1.0 / 240.0);
+    }
+    let ke1 = fluid_ke(&f) + air_ke(&air);
+
+    let mut dp_water = Vec3::ZERO;
+    for v in f.velocities() {
+        dp_water += *v * m;
+    }
+    let dp_air = air.absorbed; // 大气吸收的动量 = −水拿到的
+    assert!(
+        dp_water.x > 0.0,
+        "用例非平凡：水确实被推走（Δp={dp_water:?}）"
+    );
+    let resid = (dp_water + dp_air).length();
+    let scale = dp_water.length().max(1e-12);
+    assert!(
+        resid / scale < 1e-5,
+        "动量账应闭合：resid/scale={:.2e}",
+        resid / scale
+    );
+    assert!(
+        ke1 <= ke0 + 1e-9,
+        "阻力只耗散、不造能：ΔKE={:.3e}",
+        ke1 - ke0
+    );
+    assert!(
+        air.sample(Vec3::ZERO).velocity.x < 2.0,
+        "大气沿 +x 变慢（动量槽生效）"
+    );
 }

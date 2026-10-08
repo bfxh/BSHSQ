@@ -26,12 +26,15 @@ pub struct AeroConfig {
     /// 升力线斜率（简化薄翼）。
     pub lift_slope: f32,
     pub wind: [f32; 3],
+    /// **动量槽的等效空气质量**（kg）：**0 = 运动学背景**（吸收动量不改风速，现行默认）；
+    /// 有限值 ⇒ 风速按 `v = wind + absorbed/air_mass` 变化（"大气那一半"参与动量交换）。
+    pub air_mass: f32,
 }
 
 // 紧凑写法（god 门 file_lines / max_fn 棘轮）：`#[rustfmt::skip]` 保持单行 impl，本仓既有先例。
 #[rustfmt::skip]
 impl Default for AeroConfig {
-    fn default() -> Self { Self { air_density: 1.225, drag_coefficient: 1.0, lift_slope: 5.0, wind: [0.0; 3] } }
+    fn default() -> Self { Self { air_density: 1.225, drag_coefficient: 1.0, lift_slope: 5.0, wind: [0.0; 3], air_mass: 0.0 } }
 }
 
 mod face;

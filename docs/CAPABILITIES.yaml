@@ -290,7 +290,10 @@ capabilities:
         note: >
           PLAN-CONVERSION §3.3 的"交接策略三档"（(ii) 速度/角速度继承 + 质心修正、(iii) warm
           残量）在 2026-10-03 被标注为"按用户口径剔除"。⚠️ 这与用户 2026-10-08 的口述
-          （"你只搞状态继承"）相反；本条按最新口述登记为 included，(ii) 已落地，(iii) 仍未做。
+          （"你只搞状态继承"）相反；本条按最新口述登记为 included。⚠️ 口径纠偏（2026-10-08）：
+          已落地的是**同表示的状态搬运**（状态桥，见上条）；(ii) 的**跨表示**交接仍未落地，
+          且碎片路径上"继承半速"早在 `apply_impact_destruction` 里被实测否证（能量源）⇒
+          要做必须走动量守恒口径（`BridgeState` 的 p/L 账），不许重做半速。
       - id: gap_cross_representation
         note: >
           跨表示交接（体素片 → 刚体、布片 → 喷溅等）与"与手工建体逐位退化"对拍仍未落地 ——
@@ -323,8 +326,10 @@ capabilities:
           （空气场），门面把同一份空气场交给液面，只对**自由表面**粒子（密度亏超过阈值
           `ρ < 0.9·ρ0`）施加 Bridson 线化阻力并把反作用沉积回 `AeroState::absorbed`；
           判据见 `fluid/tests/wind_surface.rs`（单粒解析对拍 + 内部逐位不动）与
-          `vxl-phys/tests/wind_liquid.rs`（顺风 vs 零风 A/B）。仍未做：气动域自身的**状态**
-          （大气不因反作用变慢 —— 运动学背景只记账），要做得先给风场尾流/动量槽。
+          `vxl-phys/tests/wind_liquid.rs`（顺风 vs 零风 A/B）。**双向那一半（同日）**：
+          `AeroConfig::air_mass` 默认 `0` = 运动学背景（不变慢）；有限值 = 动量槽
+          （`v = wind + absorbed/air_mass`），判据含**动量闭合**与**总动能不增**（阻力只耗散）。
+          仍未做：空间尾流（均匀场 + 集中质量槽，不是逐点动量场）。
     required_evidence:
       - implementation_path
       - tests
