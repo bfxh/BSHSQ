@@ -9,8 +9,10 @@
 # 字段与规则取自《LSSMJ-CICD 完整审核与落地方案 · v5》§15.3（该文审的是 LSSMJ 仓库，但这一节
 # 是明确写给"物理仓"即本仓的），本表把它落成可维护的形态：
 #   scope          : included | excluded | unresolved —— 这件事是否在本仓范围内
-#   implementation : absent | coupled | unified | unknown
-#                    仅当 scope=included 时有意义；`coupled` = 双向力交换但非同一求解系统
+#   implementation : absent | partial | coupled | unified | unknown
+#                    仅当 scope=included 时有意义；`coupled` = 双向力交换但非同一求解系统。
+#                    `partial` 是本仓在 §15.3 那四个值之外补的：它表示"部分落地"，
+#                    比 `unknown` 准；`coupled` 仍然专指"耦合但非统一求解器"。
 #   required_evidence : 判定所需的最小证据集；缺任一条 ⇒ 该条只能停在 unresolved
 #   decision_id    : 拍板记录（ADR 号 / issue / PR）；`null` 表示尚无
 #
@@ -242,3 +244,114 @@ capabilities:
     notes: >
       实现缺口（不是设计边界）。⚠️ 立项前必须先答"CI 怎么守"：本仓 CI runner 无 GPU 适配器，
       GPU 用例在 CI 里跳过 ⇒ 做出来也无自动门（这是 issue #30 同族的验证路径问题）。
+
+  # ── 范围边界（用户 2026-10-08 口述）：本仓做"物理"与"域间作用"，
+  #    表示转换本身不在本仓（那是转换/渲染侧的事） ──
+  - id: PHY-SCOPE-REPRESENTATION-CONVERSION
+    title: 表示转换本身（体素 → 多边形 / 体素 → 粒子 等"换表示"的机制）
+    scope: excluded
+    implementation: absent
+    implementation_path: null
+    evidence:
+      - id: user_scope
+        note: >
+          用户 2026-10-08 明确："体素转粒子这些…这些不是你该搞的；你只搞状态继承和他们之间的
+          作用"。⇒ 转换机制属转换/渲染侧；本仓只负责转换之后的**物理状态**与**域间作用**。
+    required_evidence:
+      - user_scope
+    decision_id: null
+    owner: maintainer
+    notes: >
+      与既有条目一致（PHY-SCOPE-VOXEL-TO-PARTICLE 已是 excluded）。本条把边界推广到"一切
+      表示转换机制"，免得以后又把转换侧的工作拉进物理仓。
+
+  - id: PHY-SCOPE-STATE-INHERITANCE
+    title: 状态继承（换表示 / 换域时，物理状态从旧状态接过来）
+    scope: included
+    implementation: partial
+    implementation_path: crates/vxl-phys-soft/src/cloth_access.rs
+    evidence:
+      - id: state_bridge
+        note: >
+          StateBridge 家族已落地一部分：布片的导出/导入（cloth_access.rs，2026-10-06；与流体侧
+          同口径，导入连 prev 一起对齐），另有 splat 渲染桥 export_splats。
+      - id: conflicting_record
+        note: >
+          PLAN-CONVERSION §3.3 的"交接策略三档"（(ii) 速度/角速度继承 + 质心修正、(iii) warm
+          残量）在 2026-10-03 被标注为"按用户口径剔除"。⚠️ 这与用户 2026-10-08 的口述
+          （"你只搞状态继承"）相反 —— 本条按**最新口述**登记为 included，细化前先确认。
+    required_evidence:
+      - user_confirmation
+      - momentum_continuity_criteria
+    decision_id: null
+    owner: maintainer
+    notes: >
+      若要落地，PLAN-CONVERSION §3.3 已有现成判据草案：|Δp| ≤ ε_m·|p|、|ΔL| ≤ ε_L·|L|、
+      E_new ≤ E_old + ε，外加"(ii) 档与手工建体逐位退化"。先确认口径再动工。
+
+  - id: PHY-SCOPE-INTEROP-COUPLING
+    title: 域间作用（跨域耦合 / interop）
+    scope: included
+    implementation: partial
+    implementation_path: crates/vxl-phys-core/src/interop.rs
+    evidence:
+      - id: traits
+        note: core::interop 四 trait + ADR 0008/0009（接口层已定义）
+      - id: landed_pairs
+        note: >
+          已落地：流体↔刚体（2a/2b）、布↔刚体、布↔风、喷溅↔介质（medium_pass）、布↔介质
+          （wet / drag）。
+      - id: gap_wind_liquid
+        note: >
+          ROUTE §4 记"风 × 液（表面驱动）❌ 未落地"—— 有意登记为边界（当前只做到同帧共存、
+          互不干扰），要做得先定义气动-液面耦合的判据。
+    required_evidence:
+      - implementation_path
+      - tests
+    decision_id: null
+    owner: maintainer
+    notes: 用户 2026-10-08 点名的"他们之间的作用"。
+
+  - id: PHY-SCOPE-SPLAT
+    title: 高斯喷溅（3DGS）作为物理域
+    scope: included
+    implementation: partial
+    implementation_path: crates/vxl-phys-splat/src/lib.rs
+    evidence:
+      - id: field
+        note: >
+          GaussianSplatField：各向异性高斯和 ⇒ 密度场 / SDF（density_grad / sdf）+ 网格候选加速；
+          实现 ProviderColliders 与 MediumField ⇒ 接触提供者与介质场都已接线
+          （providers.rs / world_step/medium.rs）。
+      - id: bridge
+        note: 渲染桥 export_splats（零拷贝导出）；flow.rs 另有流场侧。
+      - id: gap_layers
+        note: >
+          ROUTE §3.1 的"三层用法"里：① 渲染桥 已落、③ 隐式场（Provider / MediumField）已落、
+          ② 物理代理（splat 当粒子域：质量 + 半径 + 取向，走颗粒/流体/软体求解）**未落地**；
+          CATALOG 另记"均匀网格/BVH 加速待办"。
+    required_evidence:
+      - implementation_path
+      - tests
+    decision_id: null
+    owner: maintainer
+    notes: 用户 2026-10-08 点名"高斯喷溅…这些也是要搞的"。
+
+  - id: PHY-SCOPE-HULL
+    title: 多边形（凸体外壳）作为刚体形状
+    scope: included
+    implementation: implemented
+    implementation_path: crates/vxl-phys-narrow/src/gjk.rs
+    evidence:
+      - id: impl
+        note: >
+          add_hull / spawn_hull_body / spawn_hull_pieces；GJK / EPA + 半空间裁剪 +
+          Voronoi 预断裂。
+      - id: tests
+        note: 窄相测试 + ROUTE §2026-09-14 表记"多边形（凸体外壳）✅"。
+    required_evidence:
+      - implementation_path
+      - tests
+    decision_id: null
+    owner: maintainer
+    notes: 用户 2026-10-08 点名"多边形…这些也是要搞的"。
