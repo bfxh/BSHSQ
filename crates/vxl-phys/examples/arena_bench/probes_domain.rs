@@ -3,7 +3,10 @@
 //!
 //! 与 arena 复刻批的差别：这批没有"对手表"（arena 侧无对应场景），基准读数只作
 //! 本仓自身的历史对照与优化迭代；协议相同（30 预热 + 180 测量、60 Hz 固定步长）。
-use super::*;
+use super::{
+    add_ball, add_box_r, add_static_box, mat, PhysConfig, Shape, Vec3, World, ARENA_DEFAULT,
+    MEASURE, WARMUP,
+};
 use vxl_phys_aero::AeroConfig;
 use vxl_phys_soft::{ClothSheet, Rope, Stiffness};
 

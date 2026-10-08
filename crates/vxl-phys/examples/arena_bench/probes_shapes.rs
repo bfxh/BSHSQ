@@ -1,7 +1,10 @@
 //! probes_shapes：PhysArena「碰撞形状」（`shapes.ts`）复刻批。
 //!
 //! `trimesh-terrain` 已在 `probes_b`（`scene_trimesh_terrain`），不在此重复。
-use super::*;
+use super::{
+    add_ball, add_box_r, add_dyn_shape, ground_mu, heightfield_mesh, icosa_points, mat, rng32,
+    rock_points, s2, spawn_compound, spawn_hull, CompoundChild, PhysConfig, Shape, Vec3, World,
+};
 
 /// arena `mixed-convex`（200 个随机不规则凸包）：窄相只能走 GJK/EPA 通用路径。
 pub(crate) fn scene_mixed_convex(cfg: PhysConfig) -> World {
@@ -55,11 +58,13 @@ pub(crate) fn scene_shape_zoo(cfg: PhysConfig) -> World {
             }
             2 => {
                 // arena 侧给了非单位四元数 [0.2, 0, 0, 0.98]（引擎自行归一）。
-                add_capsule(
+                add_dyn_shape(
                     &mut w,
+                    Shape::Capsule {
+                        half_height: 0.22,
+                        radius: 0.2,
+                    },
                     p,
-                    0.2,
-                    0.22,
                     vxl_phys_core::Quat {
                         x: 0.2,
                         y: 0.0,
@@ -71,22 +76,26 @@ pub(crate) fn scene_shape_zoo(cfg: PhysConfig) -> World {
                 );
             }
             3 => {
-                add_cyl(
+                add_dyn_shape(
                     &mut w,
+                    Shape::Cylinder {
+                        half_height: 0.26,
+                        radius: 0.28,
+                    },
                     p,
-                    0.28,
-                    0.26,
                     vxl_phys_core::Quat::IDENTITY,
                     s2(0.55, 0.05),
                     1000.0,
                 );
             }
             4 => {
-                add_cone(
+                add_dyn_shape(
                     &mut w,
+                    Shape::Cone {
+                        half_height: 0.32,
+                        radius: 0.3,
+                    },
                     p,
-                    0.3,
-                    0.32,
                     vxl_phys_core::Quat::IDENTITY,
                     s2(0.5, 0.05),
                     1000.0,
@@ -166,11 +175,13 @@ pub(crate) fn scene_capsule_rain(cfg: PhysConfig) -> World {
         let z = (r() - 0.5) * span;
         let y = 1.2 + (i % 24) as f32 * 1.15 + r() * 0.3;
         let hh = rad * (1.2 + r() * 1.4);
-        add_capsule(
+        add_dyn_shape(
             &mut w,
+            Shape::Capsule {
+                half_height: hh,
+                radius: rad,
+            },
             Vec3::new(x, y, z),
-            rad,
-            hh,
             vxl_phys_core::Quat::IDENTITY,
             s2(0.6, 0.06),
             900.0,
@@ -214,11 +225,13 @@ pub(crate) fn scene_shape_zoo_hard(cfg: PhysConfig) -> World {
         let p = Vec3::new(x, y, z);
         match i % 3 {
             0 => {
-                add_cone(
+                add_dyn_shape(
                     &mut w,
+                    Shape::Cone {
+                        half_height: 0.8,
+                        radius: 0.55,
+                    },
                     p,
-                    0.55,
-                    0.8,
                     vxl_phys_core::Quat::IDENTITY,
                     s2(0.6, 0.03),
                     1000.0,

@@ -2,7 +2,10 @@
 //!
 //! 体数/尺寸/出生位姿/材质逐字取自 arena 的 `defaultBodies` 档；`ball-pit`
 //! 已在 `probes_a`（`scene_ballpit`），不在此重复。
-use super::*;
+use super::{
+    add_ball, add_box_r, add_dyn_shape, add_static_box, ground, ground_ex, ground_mu, rng32,
+    rot_axis, rot_y, s2, Joint, JointKind, PhysConfig, Shape, Vec3, World, ARENA_DEFAULT,
+};
 
 /// arena `domino`（150 体 + 推子）：单排连锁倾倒。
 pub(crate) fn scene_domino(cfg: PhysConfig) -> World {
@@ -98,11 +101,13 @@ pub(crate) fn scene_ramp_roll(cfg: PhysConfig) -> World {
                 add_ball(&mut w, p, 0.45, s2(0.4, 0.15), 1000.0);
             }
             1 => {
-                add_cyl(
+                add_dyn_shape(
                     &mut w,
+                    Shape::Cylinder {
+                        half_height: 0.45,
+                        radius: 0.45,
+                    },
                     p,
-                    0.45,
-                    0.45,
                     rot_axis(Vec3::X, d90),
                     s2(0.4, 0.1),
                     1000.0,
@@ -172,11 +177,13 @@ pub(crate) fn scene_spinning_tops(cfg: PhysConfig) -> World {
     for i in 0..n {
         let x = ((i % cols) as f32 - (cols as f32 - 1.0) / 2.0) * 2.4;
         let z = ((i / cols) as f32 - (cols as f32 - 1.0) / 2.0) * 2.4;
-        let idx = add_cone(
+        let idx = add_dyn_shape(
             &mut w,
+            Shape::Cone {
+                half_height: 0.6,
+                radius: 0.45,
+            },
             Vec3::new(x, 0.62, z),
-            0.45,
-            0.6,
             rot_axis(Vec3::X, std::f32::consts::PI),
             s2(0.35, 0.05),
             6000.0,
@@ -286,11 +293,13 @@ pub(crate) fn scene_teeter_totter(cfg: PhysConfig) -> World {
 pub(crate) fn scene_rotating_platform(cfg: PhysConfig) -> World {
     let mut w = World::new(cfg);
     ground(&mut w, 140.0);
-    let platform = add_cyl(
+    let platform = add_dyn_shape(
         &mut w,
+        Shape::Cylinder {
+            half_height: 0.5,
+            radius: 5.0,
+        },
         Vec3::new(0.0, 0.5, 0.0),
-        5.0,
-        0.5,
         vxl_phys_core::Quat::IDENTITY,
         s2(0.9, 0.05),
         1000.0,
@@ -373,11 +382,13 @@ pub(crate) fn scene_bowling_pins(cfg: PhysConfig) -> World {
     let (dx, dz) = (0.75f32, 0.9f32);
     for row in 0..rows {
         for k in 0..=row {
-            add_cyl(
+            add_dyn_shape(
                 &mut w,
+                Shape::Cylinder {
+                    half_height: 0.75,
+                    radius: 0.22,
+                },
                 Vec3::new((k as f32 - row as f32 / 2.0) * dx, 0.75, row as f32 * dz),
-                0.22,
-                0.75,
                 vxl_phys_core::Quat::IDENTITY,
                 s2(0.5, 0.05),
                 700.0,

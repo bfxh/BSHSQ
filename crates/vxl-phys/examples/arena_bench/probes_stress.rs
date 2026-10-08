@@ -1,5 +1,8 @@
 //! probes_stress：PhysArena「极端工况」（`stress.ts`）复刻批。
-use super::*;
+use super::{
+    add_ball, add_box_r, add_dyn_shape, add_static_box, ground, ground_mu, rng32, s2, Joint,
+    JointKind, PhysConfig, Shape, Vec3, World, ARENA_DEFAULT,
+};
 
 /// arena `ccd-onslaught`（20 发 0.3 m 弹丸 × 260 m/s 打 0.1 m 薄墙）。
 ///
@@ -356,11 +359,13 @@ pub(crate) fn scene_stress_slender_rod(cfg: PhysConfig) -> World {
         let a = (i as f32 / count as f32) * std::f32::consts::TAU;
         let x = a.cos() * 2.4;
         let z = a.sin() * 2.4;
-        add_cyl(
+        add_dyn_shape(
             &mut w,
+            Shape::Cylinder {
+                half_height: h / 2.0,
+                radius,
+            },
             Vec3::new(x, h / 2.0, z),
-            radius,
-            h / 2.0,
             vxl_phys_core::Quat::IDENTITY,
             s2(0.9, 0.0),
             2000.0,

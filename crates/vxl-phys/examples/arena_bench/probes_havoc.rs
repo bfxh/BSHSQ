@@ -2,7 +2,10 @@
 //!
 //! ⚠️ arena 的这些场景用**低摩擦球堆**假水（无真实 SPH）；本批复刻同一几何与材质。
 //! 炮击类场景 arena 侧逐体 `ccd: true`，本仓按**全局速度阈值 20 m/s** 打开 CCD。
-use super::*;
+use super::{
+    add_ball, add_box_r, add_static_box, ground_mu, rng32, rot_y, s2, Joint, JointKind, PhysConfig,
+    Surf, Vec3, World, ARENA_DEFAULT,
+};
 
 /// arena `havoc.ts::FLUID`（假水材质：friction 0.04 / restitution 0.01 / density 1000）。
 const FLUID: Surf = Surf {

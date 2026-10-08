@@ -6,7 +6,27 @@
 //!
 //! 每条注记（`note`）逐项说明**与 arena 的差异**：本仓无逐体阻尼 / 无 kinematic /
 //! 无 sensor / 无动态三角网等，降级处一律显式写出，不静默近似。
-use super::*;
+use super::{
+    scene_avalanche, scene_big_world, scene_bool_carve, scene_bool_slice, scene_bouncy_balls,
+    scene_bowling_pins, scene_cannonball, scene_capsule_rain, scene_carom, scene_ccd_control,
+    scene_ccd_onslaught, scene_compound_crates, scene_crane, scene_cylinder_jenga,
+    scene_destruct_bridge, scene_destruct_columns, scene_destruct_fracture, scene_destruct_tower,
+    scene_destruct_wall, scene_dom_carve_impact, scene_dom_cloth_wind, scene_dom_fluid_dam,
+    scene_dom_fluid_float, scene_dom_rope_terrain, scene_dom_sph_scale, scene_dom_splash,
+    scene_dom_splat_rest, scene_dom_voronoi, scene_domino, scene_domino_circle,
+    scene_domino_spiral, scene_fluid_cascade, scene_fluid_dam_break, scene_fluid_drain,
+    scene_fluid_pool, scene_fragmentation, scene_free_fall_ladder, scene_gear_train,
+    scene_jenga_stack, scene_mass_ratio, scene_mixed_convex, scene_mixed_pile, scene_motor_wheel,
+    scene_multi_contact_grid, scene_narrow_corridor, scene_newton_cradle, scene_piston_bank,
+    scene_pressure_column, scene_pressure_vise, scene_pyramid_jitter, scene_ragdoll,
+    scene_ragdoll_pile, scene_ramp_roll, scene_random_pile, scene_rope_bridge,
+    scene_rotating_platform, scene_scissor_lift, scene_sensor_field, scene_shape_shells,
+    scene_shape_slices, scene_shape_zoo, scene_shape_zoo_hard, scene_slider_crank,
+    scene_small_objects, scene_sphere_pyramid, scene_spinning_tops, scene_spring_bed,
+    scene_spring_net, scene_stack_arch, scene_stack_honeycomb, scene_stress_long_chain,
+    scene_stress_many_tiny, scene_stress_slender_rod, scene_suspension_span, scene_teeter_totter,
+    scene_tower, PhysConfig, World,
+};
 
 /// 冲击破坏场景的**专用计时窗**参数（provider id / 触发阈值 / 碎块密度）。
 pub(crate) struct ImpactSpec {

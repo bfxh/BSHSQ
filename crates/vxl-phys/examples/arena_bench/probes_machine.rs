@@ -3,7 +3,10 @@
 //!
 //! 拆自 `probes_joint.rs`（2026-10-08：避免单文件超 god 门 800 行）；另一半
 //! （绳桥/布娃娃/曲柄滑块/车轮/弹簧网）在 `probes_joint.rs`。
-use super::*;
+use super::{
+    add_ball, add_box_r, add_dyn_shape, add_static_box, ground_mu, rng32, rot_axis, s2, Joint,
+    JointKind, PhysConfig, Shape, Vec3, World, ARENA_DEFAULT,
+};
 
 /// arena `crane`（塔身→转台→吊臂→吊索→重物，四级串联）。
 pub(crate) fn scene_crane(cfg: PhysConfig) -> World {
@@ -102,11 +105,13 @@ pub(crate) fn scene_piston_bank(cfg: PhysConfig) -> World {
     let d90 = std::f32::consts::FRAC_PI_2;
     for i in 0..n {
         let z = (i as f32 - (n as f32 - 1.0) / 2.0) * spacing;
-        let crank = add_cyl(
+        let crank = add_dyn_shape(
             &mut w,
+            Shape::Cylinder {
+                half_height: 0.18,
+                radius: 0.7,
+            },
             Vec3::new(0.0, 3.0, z),
-            0.7,
-            0.18,
             rot_axis(Vec3::X, d90),
             s2(0.3, 0.05),
             4000.0,
@@ -285,11 +290,13 @@ pub(crate) fn scene_ragdoll_pile(cfg: PhysConfig) -> World {
         let a = (d as f32 / count as f32) * std::f32::consts::TAU;
         let (cx, cz) = (a.cos() * 1.6, a.sin() * 1.6);
         let y0 = 12.0 + d as f32 * 0.05;
-        let torso = add_capsule(
+        let torso = add_dyn_shape(
             &mut w,
+            Shape::Capsule {
+                half_height: 0.55,
+                radius: 0.28,
+            },
             Vec3::new(cx, y0 + 1.2, cz),
-            0.28,
-            0.55,
             vxl_phys_core::Quat::IDENTITY,
             s2(0.6, 0.05),
             900.0,
@@ -309,11 +316,13 @@ pub(crate) fn scene_ragdoll_pile(cfg: PhysConfig) -> World {
             Vec3::new(0.0, -0.26, 0.0),
         ));
         for side in [-1.0f32, 1.0] {
-            let leg = add_capsule(
+            let leg = add_dyn_shape(
                 &mut w,
+                Shape::Capsule {
+                    half_height: 0.5,
+                    radius: 0.2,
+                },
                 Vec3::new(cx + side * 0.34, y0, cz),
-                0.2,
-                0.5,
                 vxl_phys_core::Quat::IDENTITY,
                 s2(0.6, 0.05),
                 800.0,
@@ -348,11 +357,13 @@ pub(crate) fn scene_gear_train(cfg: PhysConfig) -> World {
     let d90 = std::f32::consts::FRAC_PI_2;
     for i in 0..n {
         let x = -((n as f32 - 1.0) / 2.0) * radius * 2.05 + i as f32 * radius * 2.05;
-        let wheel = add_cyl(
+        let wheel = add_dyn_shape(
             &mut w,
+            Shape::Cylinder {
+                half_height: 0.3,
+                radius,
+            },
             Vec3::new(x, 3.0, 0.0),
-            radius,
-            0.3,
             rot_axis(Vec3::X, d90),
             s2(0.9, 0.0),
             2600.0,

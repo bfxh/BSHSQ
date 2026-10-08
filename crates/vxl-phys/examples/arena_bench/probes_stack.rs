@@ -3,7 +3,10 @@
 //! 体数/尺寸/出生位姿/材质逐字取自 arena 的 `defaultBodies` 档（seed 20260915、
 //! 60 Hz、30 预热 + 180 测量与 arena 基准同口径）。已复刻的 `pyramid`/`brick-wall`/
 //! `ball-pit` 在 `probes_a`，不在此重复。
-use super::*;
+use super::{
+    add_ball, add_box_r, add_dyn_shape, add_static_box, ground, ground_mu, levels_of, rng32,
+    rot_axis, rot_y, s2, triangular_levels, PhysConfig, Shape, Vec3, World, ARENA_DEFAULT,
+};
 
 /// arena `stacking.ts::BOX`.
 const BOX: f32 = 0.5;
@@ -172,7 +175,17 @@ pub(crate) fn scene_cylinder_jenga(cfg: PhysConfig) -> World {
                     rot_axis(Vec3::Z, d90),
                 )
             };
-            add_cyl(&mut w, pos, 0.35, 0.4, rot, s2(0.7, 0.05), 1000.0);
+            add_dyn_shape(
+                &mut w,
+                Shape::Cylinder {
+                    half_height: 0.4,
+                    radius: 0.35,
+                },
+                pos,
+                rot,
+                s2(0.7, 0.05),
+                1000.0,
+            );
         }
     }
     w
@@ -236,11 +249,13 @@ pub(crate) fn scene_stack_honeycomb(cfg: PhysConfig) -> World {
             }
             let x = (col as f32 - 6.5) * dx + if row % 2 == 1 { dx / 2.0 } else { 0.0 };
             let z = (row as f32 - 6.5) * dz;
-            add_cyl(
+            add_dyn_shape(
                 &mut w,
+                Shape::Cylinder {
+                    half_height: h,
+                    radius: r,
+                },
                 Vec3::new(x, h, z),
-                r,
-                h,
                 vxl_phys_core::Quat::IDENTITY,
                 s2(0.7, 0.01),
                 1400.0,

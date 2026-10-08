@@ -5,7 +5,10 @@
 //! `chain-hinge` / `hanging-tower` 已在 `probes_b`（640 步锚点分离版），不在此重复。
 //! arena 的 `spring` 关节（软距离）在本仓按**刚性距离**落地（与 wasm 桥同口径），
 //! 逐场景在注册表注记里写明。
-use super::*;
+use super::{
+    add_ball, add_box_r, add_dyn_shape, add_static_box, ground, ground_mu, mat, rng32, rot_axis,
+    s2, Joint, JointKind, PhysConfig, Shape, Vec3, World, ARENA_DEFAULT,
+};
 
 /// arena `rope-bridge`（18 跨桥面 + 悬索 + 5 载荷）：长约束链 + 二次接触。
 pub(crate) fn scene_rope_bridge(cfg: PhysConfig) -> World {
@@ -114,25 +117,142 @@ pub(crate) fn scene_rope_bridge(cfg: PhysConfig) -> World {
 }
 
 /// arena `ragdoll(builder, ox, oz, yaw)` 的复刻：11 刚体 + 10 关节的铰接人形。
-fn ragdoll(w: &mut World, ox: f32, oz: f32, yaw: f32) {
-    use vxl_phys_core::Quat;
-    const HIPS: [f32; 3] = [0.0, 2.16, 0.0];
-    const TORSO: [f32; 3] = [0.0, 3.15, 0.0];
-    const HEAD: [f32; 3] = [0.0, 3.95, 0.0];
-    const HIP_L: [f32; 3] = [-0.2, 1.75, 0.0];
-    const THIGH_L: [f32; 3] = [-0.2, 1.33, 0.0];
-    const KNEE_L: [f32; 3] = [-0.2, 0.905, 0.0];
-    const SHIN_L: [f32; 3] = [-0.2, 0.5, 0.0];
-    const SHOULDER_L: [f32; 3] = [-0.3, 3.0, 0.0];
-    const UPPER_ARM_L: [f32; 3] = [-0.4, 3.0, 0.0];
-    const ELBOW_L: [f32; 3] = [-0.4, 2.65, 0.0];
-    const FORE_ARM_L: [f32; 3] = [-0.4, 2.3, 0.0];
-    const SPINE: [f32; 3] = [0.0, 2.565, 0.0];
-    const NECK: [f32; 3] = [0.0, 3.72, 0.0];
+///
+/// 装配按 rig-local 地标 + 逐侧镜像组织（god 门 120 行线：地标在模块级常量、
+/// 手臂/腿各一个 helper），关节序与 arena 逐字一致：肩×2 → 肘×2 → 髋×2 → 膝×2
+/// → 脊柱 → 颈。
+const RIG_HIPS: [f32; 3] = [0.0, 2.16, 0.0];
+const RIG_TORSO: [f32; 3] = [0.0, 3.15, 0.0];
+const RIG_HEAD: [f32; 3] = [0.0, 3.95, 0.0];
+const RIG_HIP_L: [f32; 3] = [-0.2, 1.75, 0.0];
+const RIG_THIGH_L: [f32; 3] = [-0.2, 1.33, 0.0];
+const RIG_KNEE_L: [f32; 3] = [-0.2, 0.905, 0.0];
+const RIG_SHIN_L: [f32; 3] = [-0.2, 0.5, 0.0];
+const RIG_SHOULDER_L: [f32; 3] = [-0.3, 3.0, 0.0];
+const RIG_UPPER_ARM_L: [f32; 3] = [-0.4, 3.0, 0.0];
+const RIG_ELBOW_L: [f32; 3] = [-0.4, 2.65, 0.0];
+const RIG_FORE_ARM_L: [f32; 3] = [-0.4, 2.3, 0.0];
+const RIG_SPINE: [f32; 3] = [0.0, 2.565, 0.0];
+const RIG_NECK: [f32; 3] = [0.0, 3.72, 0.0];
 
-    let density = 600.0f32;
+/// 布娃娃装配的共享上下文。
+struct Rig<'a> {
+    rot: vxl_phys_core::Quat,
+    density: f32,
+    to_world: &'a dyn Fn([f32; 3]) -> Vec3,
+}
+
+fn rig_sub(a: [f32; 3], from: [f32; 3]) -> Vec3 {
+    Vec3::new(a[0] - from[0], a[1] - from[1], a[2] - from[2])
+}
+
+fn rig_mirror(p: [f32; 3], side: usize) -> [f32; 3] {
+    if side == 0 {
+        p
+    } else {
+        [-p[0], p[1], p[2]]
+    }
+}
+
+/// 一侧手臂（上臂/前臂 + 肩球关节 + 肘转动关节限位 [0.05, 2.4]）。
+fn ragdoll_arm(w: &mut World, rig: &Rig, side: usize, torso: usize) {
+    let shoulder = rig_mirror(RIG_SHOULDER_L, side);
+    let upper = rig_mirror(RIG_UPPER_ARM_L, side);
+    let elbow = rig_mirror(RIG_ELBOW_L, side);
+    let fore = rig_mirror(RIG_FORE_ARM_L, side);
+    let upper_arm = add_dyn_shape(
+        w,
+        Shape::Capsule {
+            half_height: 0.22,
+            radius: 0.13,
+        },
+        (rig.to_world)(upper),
+        rig.rot,
+        s2(0.7, 0.05),
+        rig.density,
+    );
+    let fore_arm = add_dyn_shape(
+        w,
+        Shape::Capsule {
+            half_height: 0.22,
+            radius: 0.12,
+        },
+        (rig.to_world)(fore),
+        rig.rot,
+        s2(0.7, 0.05),
+        rig.density,
+    );
+    w.add_joint(Joint::new(
+        JointKind::Spherical,
+        torso as u32,
+        upper_arm as u32,
+        rig_sub(shoulder, RIG_TORSO),
+        rig_sub(shoulder, upper),
+    ));
+    w.add_joint(
+        Joint::new(
+            JointKind::Revolute,
+            upper_arm as u32,
+            fore_arm as u32,
+            rig_sub(elbow, upper),
+            rig_sub(elbow, fore),
+        )
+        .with_axis(Vec3::X)
+        .with_limits(0.05, 2.4),
+    );
+}
+
+/// 一侧腿（大腿/小腿 + 髋球关节 + 膝转动关节限位 [0, 2.2]）。
+fn ragdoll_leg(w: &mut World, rig: &Rig, side: usize, hips: usize) {
+    let hip = rig_mirror(RIG_HIP_L, side);
+    let thigh = rig_mirror(RIG_THIGH_L, side);
+    let knee = rig_mirror(RIG_KNEE_L, side);
+    let shin = rig_mirror(RIG_SHIN_L, side);
+    let upper_leg = add_dyn_shape(
+        w,
+        Shape::Capsule {
+            half_height: 0.25,
+            radius: 0.15,
+        },
+        (rig.to_world)(thigh),
+        rig.rot,
+        s2(0.8, 0.05),
+        rig.density,
+    );
+    let lower_leg = add_dyn_shape(
+        w,
+        Shape::Capsule {
+            half_height: 0.25,
+            radius: 0.13,
+        },
+        (rig.to_world)(shin),
+        rig.rot,
+        s2(0.8, 0.05),
+        rig.density,
+    );
+    w.add_joint(Joint::new(
+        JointKind::Spherical,
+        hips as u32,
+        upper_leg as u32,
+        rig_sub(hip, RIG_HIPS),
+        rig_sub(hip, thigh),
+    ));
+    w.add_joint(
+        Joint::new(
+            JointKind::Revolute,
+            upper_leg as u32,
+            lower_leg as u32,
+            rig_sub(knee, thigh),
+            rig_sub(knee, shin),
+        )
+        .with_axis(Vec3::X)
+        .with_limits(0.0, 2.2),
+    );
+}
+
+fn ragdoll(w: &mut World, ox: f32, oz: f32, yaw: f32) {
     let (s, c) = ((yaw / 2.0).sin(), (yaw / 2.0).cos());
-    let rot = Quat {
+    let rot = vxl_phys_core::Quat {
         x: 0.0,
         y: s,
         z: 0.0,
@@ -141,81 +261,53 @@ fn ragdoll(w: &mut World, ox: f32, oz: f32, yaw: f32) {
     let to_world = |p: [f32; 3]| -> Vec3 {
         Vec3::new(ox + p[0] * c + p[2] * s, p[1], oz - p[0] * s + p[2] * c)
     };
-    let sub = |a: [f32; 3], from: [f32; 3]| -> Vec3 {
-        Vec3::new(a[0] - from[0], a[1] - from[1], a[2] - from[2])
+    let rig = Rig {
+        rot,
+        density: 600.0,
+        to_world: &to_world,
     };
-    let mirror = |p: [f32; 3]| -> [f32; 3] { [-p[0], p[1], p[2]] };
-
-    let hips = add_capsule(w, to_world(HIPS), 0.19, 0.2, rot, s2(0.7, 0.05), density);
-    let torso = add_capsule(w, to_world(TORSO), 0.22, 0.35, rot, s2(0.7, 0.05), density);
-    let head = add_ball(w, to_world(HEAD), 0.22, s2(0.6, 0.05), density);
+    let hips = add_dyn_shape(
+        w,
+        Shape::Capsule {
+            half_height: 0.2,
+            radius: 0.19,
+        },
+        to_world(RIG_HIPS),
+        rot,
+        s2(0.7, 0.05),
+        rig.density,
+    );
+    let torso = add_dyn_shape(
+        w,
+        Shape::Capsule {
+            half_height: 0.35,
+            radius: 0.22,
+        },
+        to_world(RIG_TORSO),
+        rot,
+        s2(0.7, 0.05),
+        rig.density,
+    );
+    let head = add_ball(w, to_world(RIG_HEAD), 0.22, s2(0.6, 0.05), rig.density);
     for side in 0..2 {
-        let flip = |a: [f32; 3]| if side == 0 { a } else { mirror(a) };
-        let shoulder = flip(SHOULDER_L);
-        let upper = flip(UPPER_ARM_L);
-        let elbow = flip(ELBOW_L);
-        let fore = flip(FORE_ARM_L);
-        let upper_arm = add_capsule(w, to_world(upper), 0.13, 0.22, rot, s2(0.7, 0.05), density);
-        let fore_arm = add_capsule(w, to_world(fore), 0.12, 0.22, rot, s2(0.7, 0.05), density);
-        w.add_joint(Joint::new(
-            JointKind::Spherical,
-            torso as u32,
-            upper_arm as u32,
-            sub(shoulder, TORSO),
-            sub(shoulder, upper),
-        ));
-        w.add_joint(
-            Joint::new(
-                JointKind::Revolute,
-                upper_arm as u32,
-                fore_arm as u32,
-                sub(elbow, upper),
-                sub(elbow, fore),
-            )
-            .with_axis(Vec3::X)
-            .with_limits(0.05, 2.4),
-        );
+        ragdoll_arm(w, &rig, side, torso);
     }
     for side in 0..2 {
-        let flip = |a: [f32; 3]| if side == 0 { a } else { mirror(a) };
-        let hip = flip(HIP_L);
-        let thigh = flip(THIGH_L);
-        let knee = flip(KNEE_L);
-        let shin = flip(SHIN_L);
-        let upper_leg = add_capsule(w, to_world(thigh), 0.15, 0.25, rot, s2(0.8, 0.05), density);
-        let lower_leg = add_capsule(w, to_world(shin), 0.13, 0.25, rot, s2(0.8, 0.05), density);
-        w.add_joint(Joint::new(
-            JointKind::Spherical,
-            hips as u32,
-            upper_leg as u32,
-            sub(hip, HIPS),
-            sub(hip, thigh),
-        ));
-        w.add_joint(
-            Joint::new(
-                JointKind::Revolute,
-                upper_leg as u32,
-                lower_leg as u32,
-                sub(knee, thigh),
-                sub(knee, shin),
-            )
-            .with_axis(Vec3::X)
-            .with_limits(0.0, 2.2),
-        );
+        ragdoll_leg(w, &rig, side, hips);
     }
     w.add_joint(Joint::new(
         JointKind::Spherical,
         hips as u32,
         torso as u32,
-        sub(SPINE, HIPS),
-        sub(SPINE, TORSO),
+        rig_sub(RIG_SPINE, RIG_HIPS),
+        rig_sub(RIG_SPINE, RIG_TORSO),
     ));
     w.add_joint(Joint::new(
         JointKind::Spherical,
         torso as u32,
         head as u32,
-        sub(NECK, TORSO),
-        sub(NECK, HEAD),
+        rig_sub(RIG_NECK, RIG_TORSO),
+        rig_sub(RIG_NECK, RIG_HEAD),
     ));
 }
 
@@ -337,11 +429,13 @@ pub(crate) fn scene_motor_wheel(cfg: PhysConfig) -> World {
             700.0,
         );
         for side in [-1.0f32, 1.0] {
-            let wheel = add_cyl(
+            let wheel = add_dyn_shape(
                 &mut w,
+                Shape::Cylinder {
+                    half_height: 0.1,
+                    radius: 0.42,
+                },
                 Vec3::new(ox, 1.0, side * 0.65),
-                0.42,
-                0.1,
                 rot_axis(Vec3::X, d90),
                 s2(1.2, 0.05),
                 2000.0,

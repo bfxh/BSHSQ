@@ -5,7 +5,7 @@
 //! 在注册表注记里显式标注：
 //!   ① 本仓**无逐体阻尼**（arena 的 `linearDamping`/`angularDamping` 一律略过）；
 //!   ② 本仓**无 kinematic 体、无 sensor**（对应场景给等效物或省略，见注记）。
-use super::*;
+use super::{mat, CompoundChild, Shape, Vec3, World};
 
 /// arena `kit.ts::make` 的默认材质（未给 opts 时）：friction 0.5 / restitution 0.05。
 pub(crate) const ARENA_DEFAULT: Surf = Surf {
@@ -111,77 +111,19 @@ pub(crate) fn add_ball(w: &mut World, pos: Vec3, radius: f32, surf: Surf, densit
     i
 }
 
-/// 动态圆柱（arena `cylinder(pos, radius, halfHeight, opts)`）。
-pub(crate) fn add_cyl(
+/// 动态体（任意形状）的**通用入口**：尺寸在 `Shape` 里，参数 6 个（args 门 ≤7）。
+/// 圆柱/胶囊/圆锥都走这里（各自的包装会多出 1 个形参，超 args 门的软线）。
+pub(crate) fn add_dyn_shape(
     w: &mut World,
+    shape: Shape,
     pos: Vec3,
-    radius: f32,
-    half_height: f32,
     rot: vxl_phys_core::Quat,
     surf: Surf,
     density: f32,
 ) -> usize {
     let m = mat(w, surf.friction, surf.restitution);
     let i = w.bodies.len();
-    w.add_dynamic(
-        Shape::Cylinder {
-            half_height,
-            radius,
-        },
-        pos,
-        rot,
-        density,
-    );
-    w.bodies.set_material(i, m);
-    i
-}
-
-/// 动态胶囊（arena `capsule(pos, radius, halfHeight, opts)`）。
-pub(crate) fn add_capsule(
-    w: &mut World,
-    pos: Vec3,
-    radius: f32,
-    half_height: f32,
-    rot: vxl_phys_core::Quat,
-    surf: Surf,
-    density: f32,
-) -> usize {
-    let m = mat(w, surf.friction, surf.restitution);
-    let i = w.bodies.len();
-    w.add_dynamic(
-        Shape::Capsule {
-            half_height,
-            radius,
-        },
-        pos,
-        rot,
-        density,
-    );
-    w.bodies.set_material(i, m);
-    i
-}
-
-/// 动态圆锥（arena `cone(pos, radius, halfHeight, opts)`）。
-pub(crate) fn add_cone(
-    w: &mut World,
-    pos: Vec3,
-    radius: f32,
-    half_height: f32,
-    rot: vxl_phys_core::Quat,
-    surf: Surf,
-    density: f32,
-) -> usize {
-    let m = mat(w, surf.friction, surf.restitution);
-    let i = w.bodies.len();
-    w.add_dynamic(
-        Shape::Cone {
-            half_height,
-            radius,
-        },
-        pos,
-        rot,
-        density,
-    );
+    w.add_dynamic(shape, pos, rot, density);
     w.bodies.set_material(i, m);
     i
 }

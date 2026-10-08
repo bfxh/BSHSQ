@@ -3,7 +3,7 @@
 //!
 //! 含：`measure_steps`（30 预热 + 180 计时）/ `track_exits`（离场轨迹）/ `Stats`+`collect_stats`
 //! （规模/质量读数）/ `report_spread`（y 分布与最慢最快体）/ `report*` 五段读数 / `bench()`。
-use super::*;
+use super::{Vec3, World, MEASURE, WARMUP};
 
 /// 采样：预热 `WARMUP` 步后逐 tick 计时 `MEASURE` 次。
 fn measure_steps(w: &mut World) -> Vec<f64> {
@@ -375,7 +375,7 @@ fn report_solver_phases(w: &World) {
 pub(crate) fn bench(name: &str, mut w: World, extra_steps: usize) {
     let mut samples = measure_steps(&mut w);
     track_exits(&mut w, extra_steps);
-    samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    samples.sort_by(|a, b| a.total_cmp(b));
     let s = collect_stats(&w, &samples);
     report_spread(&s);
     report(name, &w, &s);
