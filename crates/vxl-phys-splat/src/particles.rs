@@ -7,13 +7,14 @@
 //! 口径与边界：
 //! - **一核一质点**，核间**暂无**相互作用（自场压力/黏性是下一片）；速度槽 = `kern_vel`
 //!   （与介质双向共用；长度不符时惰性补齐）。
-//! - 碰撞走 `CollisionProvider::closest_point`（体素 SDF / trimesh / 高度场 / 喷溅场都是这条
-//!   通道的实现；与流体边界同款非弹性投影）：修正量用沿法线的**椭球支撑半径** `r(n)`
-//!   ⇒ 各向异性核贴面时按朝向留出正确间隙。
+//! - 碰撞走 `ProviderColliders::contacts_point(id, p, skin, …)`（**带探针半径**的那条通道：
+//!   体素/网格/高度场/喷溅场在门面侧都从它出来；`CollisionProvider::closest_point` 不带 skin
+//!   ⇒ 对"粒子半径"查询是死路）。与流体边界同款非弹性投影：修正量用沿法线的**椭球支撑半径**
+//!   `r(n)` ⇒ 各向异性核贴面时按朝向留出正确间隙。
 //! - 确定性：核按注册序、provider 按传入序、接触按返回序；无 HashMap、无浮点归约顺序变化。
-//! - `dt <= 0` ⇒ 空操作；`providers` 空 = **纯弹道**（不查世界）—— 判据里的金丝雀用它。
+//! - `dt <= 0` ⇒ 空操作；`ids` 空 = **纯弹道**（不查世界）—— 判据里的金丝雀用它。
 use crate::GaussianSplatField;
-use vxl_phys_core::interop::CollisionProvider;
+use vxl_phys_core::interop::{InteropContact, ProviderColliders};
 use vxl_phys_core::Vec3;
 
 /// 粒子步参数。
@@ -38,7 +39,8 @@ impl Default for ParticleStep {
 pub fn step_particles(
     field: &mut GaussianSplatField,
     dt: f32,
-    providers: &[&dyn CollisionProvider],
+    providers: &dyn ProviderColliders,
+    ids: &[u32],
     cfg: ParticleStep,
 ) -> usize {
     if dt.is_nan() || dt <= 0.0 || field.splats.is_empty() {
@@ -48,22 +50,27 @@ pub fn step_particles(
         field.kern_vel.clear();
         field.kern_vel.resize(field.splats.len(), Vec3::ZERO);
     }
+    let mut buf: Vec<InteropContact> = Vec::new();
     let mut hits = 0usize;
     for k in 0..field.splats.len() {
         let s = field.splats[k];
         let mut v = (field.kern_vel[k] + cfg.gravity * dt) * cfg.damping;
         let mut c = s.center + v * dt;
-        for prov in providers {
-            if let Some(hit) = prov.closest_point(c) {
-                // 把核心推到"表面外 r(n) 处"：push = r − sdf。
-                let push = s.radius_along(hit.normal) - hit.signed_dist;
+        for id in ids {
+            buf.clear();
+            if !providers.contacts_point(*id, c, s.max_radius(), &mut buf) {
+                continue; // 该 provider 不支持点查询
+            }
+            for ct in &buf {
+                // 约定 `depth = −sdf` ⇒ `push = r − sdf`：把核心推到"表面外 r(n) 处"。
+                let push = s.radius_along(ct.normal) + ct.depth;
                 if push.is_nan() || push <= 0.0 {
                     continue;
                 }
-                c += hit.normal * push;
-                let vn = v.dot(hit.normal);
+                c += ct.normal * push;
+                let vn = v.dot(ct.normal);
                 if vn < 0.0 {
-                    v -= hit.normal * vn; // 非弹性：去掉侵入法向分量
+                    v -= ct.normal * vn; // 非弹性：去掉侵入法向分量
                 }
                 hits += 1;
             }

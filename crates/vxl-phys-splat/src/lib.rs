@@ -36,12 +36,11 @@ use vxl_phys_core::{Aabb, Mat3, Vec3};
 mod flow;
 // **状态桥**（`StateBridge` 实现）单开文件：本文件在 god 门 file_lines 基线上（695 行），
 // 加模块声明这一行的账由 `rebuild_grid` 的循环不变量外提（截断半径 `r` 每核只算一次）换回。
-/// **高斯粒子域的运动步**（②物理代理第一片）：重力积分 + 世界碰撞的非弹性投影。
+// ②物理代理四件（运动步 / 自场压力 / 自场黏性 / 动力学档）：各自的模块头有完整口径。
+pub mod dynamics;
 pub mod particles;
-/// **高斯粒子的自场压力**（②物理代理第二片）：Tait 斥力 + 逐对反对称（动量守恒）。
 pub mod pressure;
 mod splat_access;
-/// **高斯粒子的自场黏性**（②物理代理第三片）：XSPH 对称平滑（只耗散）。
 pub mod viscosity;
 
 /// `sdf()` 的**近场细化带**（米）：一阶值的绝对值超过它就直接返回一阶值、不做牛顿投影。
@@ -139,6 +138,8 @@ struct Grid {
 #[derive(Clone, Debug)]
 pub struct GaussianSplatField {
     splats: Vec<Splat>,
+    #[doc(hidden)]
+    pub dynamics: Option<crate::dynamics::SplatDynamics>, // 见 dynamics.rs：None = 纯提供者（默认）
     /// 等值面阈值：σ > iso ⇒ 内部。
     pub iso: f32,
     /// 截断（α 超过该值不再计入）。**默认 16.0 = 4σ**（`new` 里设；⚠️ 2026-09-27 更正原"9 = 3σ"——P6 已把默认从 3σ 抬到 4σ）。
@@ -186,6 +187,7 @@ impl GaussianSplatField {
     pub fn new(iso: f32) -> Self {
         Self {
             splats: Vec::new(),
+            dynamics: None,
             iso,
             // 4σ 截断（模块头"余量规则"）：3σ 时等值面上方只剩 0.19·σ 余量，
             // 撑不住常见体半径 ⇒ 体心落进死区、永不静置（实测见 P6/splat_rest_probe）。

@@ -366,8 +366,11 @@ capabilities:
           `tests/splat_particles.rs`；同日第二片 `pressure::apply_self_pressure` 自场压力 ——
           Tait 斥力 + 逐对反对称动量守恒，判据见 `tests/splat_pressure.rs`；同日第三片
           `viscosity::apply_self_viscosity` 自场黏性 —— XSPH 对称形式、只耗散、等速度逐位不动，
-          判据见 `tests/splat_viscosity.rs`）⇒ 对称 SPH 动量方程（压力 + 黏性）齐；
-          **仍未做**：内聚/表面张力、门面接线（`World` 扩展 trait）、更快的候选结构；
+          判据见 `tests/splat_viscosity.rs`）⇒ 对称 SPH 动量方程（压力 + 黏性）齐；同日第四片
+          **门面接线**：`dynamics::SplatDynamics` 挂在场上，`World::step` 的体子步跑
+          `world_step/splat_dynamics::pass`（借出场 → 跑 → 放回；接口 = 带 skin 的
+          `ProviderColliders`），判据 `src/tests/splat_dynamics.rs`（真体素地板静置 / 关档逐位不动）；
+          **仍未做**：内聚/表面张力、更快的候选结构（已否证，见 KNOWLEDGE §I）、id 表缓存；
           CATALOG 另记"均匀网格/BVH 加速待办"。
       - id: mass_reading_gap
         note: >

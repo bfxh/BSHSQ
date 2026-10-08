@@ -82,9 +82,15 @@
    `Σ m_j·2/(ρ_k+ρ_j)·w̄·(v_j−v_k)`，**只耗散**；判据 = 等速度逐位不动金丝雀、反向运动被拉平
    且动能不增、不等质量动量守恒、关档/无速度槽空操作、两跑逐位一致）⇒ **对称 SPH 动量方程
    （压力 + 黏性）已凑齐**。
-   ⚠️ **仍未做**：内聚/表面张力、门面接线（走 `World` 扩展 trait；**接口选型待定**：粒子步该吃
-   `CollisionProvider`（无 skin）还是 `ProviderColliders`（带 skin/id —— 网格/高度场只实现了后者））、
-   候选结构（**已实测否证**：直接给对循环建网格不是普遍收益，见 `KNOWLEDGE.md` §I）。
+   **同日第四片（门面接线）**：`World::step` 的体子步里跑 `world_step/splat_dynamics::pass` ——
+   按注册序找 `dynamics` 开档的场、**把场临时借出**（原位留空占位，好让 `&mut field` 与
+   `&providers` 分得开）、跑 `step_dynamics`（压力 → 黏性 → 积分+碰撞）、放回。
+   **接口选型已定**：走 `ProviderColliders::contacts_point(id,p,skin,…)`（带探针半径的那条通道；
+   `CollisionProvider::closest_point` 不带 skin ⇒ 粒子半径查询是死路）；查询 id 表**排除本场自己**
+   （自场不参与自己的碰撞）。开档判据见 `src/tests/splat_dynamics.rs`（落到**真体素地板**上静置在
+   支撑半径处 / 关档逐位不动 / 两跑逐位一致）。
+   ⚠️ **仍未做**：内聚/表面张力、候选结构（**已实测否证**：直接给对循环建网格不是普遍收益，
+   见 `KNOWLEDGE.md` §I）、id 表缓存（现每子步重建，provider 数小 ⇒ 暂可忽略）。
 3. **隐式场（`CollisionProvider` / `MediumField`）**：高斯和 ⇒ 密度场/SDF
    （解析、可求导）⇒ 作为刚体/布料的接触提供者，或直接作为 SPH 的核。
    **数学桥**：SPH 核（poly6/Gaussian）与 splat 同构 ⇒ splat 场可直接充当
