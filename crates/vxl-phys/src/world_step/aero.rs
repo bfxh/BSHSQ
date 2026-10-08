@@ -10,9 +10,12 @@
 //! **仪器与被测同源**：`AeroState.forces/torques` 留本子步施加的那份快照
 //! （判据 ③ 经 `World::aero_force/aero_torque` 读它，不是另算一份）。
 use super::*;
+// 风的下发（布/液两条受体腿）单开文件：本文件受 god 门 file_lines 棘轮（只准减）。
+#[path = "wind.rs"]
+mod wind;
 
 impl World {
-    pub(crate) fn aero_pass(&mut self) {
+    pub(crate) fn aero_pass(&mut self, dt: f32) {
         let Some(st) = self.aero.as_mut() else {
             return; // 未开启 ⇒ 零成本短路（默认档逐位不变）
         };
@@ -30,13 +33,9 @@ impl World {
             // ⇒ C1 起统一为提前不写。**快照（`st.forces/torques`）不受影响**（判据 ③ 读它）。
             coupling::add_force(&mut self.bodies, i, f_sum, t_sum);
         }
-        // **布 × 风**：把同一份风配置**下发**到每张布（`cloth.aero`）⇒ `ROUTE.md` §4「必须有」里
-        // 的"旗飘（布-风）"成为门面一等场景（此前 `cloth.aero` 只能由用户手动填，门面不接）。
-        // 幂等：每子步重写同一份 `cfg`；无布 ⇒ 空循环（零成本）。
-        for cloth in &mut self.soft.cloths {
-            cloth.aero.enabled = true;
-            cloth.aero.cfg = cfg;
-        }
+        // 受体腿（布 × 风 / 液 × 风）在 `wind.rs`：本文件受 god 门棘轮，加行必须让最长函数变短。
+        wind::config_cloths(&mut self.soft.cloths, cfg);
+        wind::drive_liquids(&mut self.fluids, st, cfg.drag_coefficient, dt);
     }
 }
 

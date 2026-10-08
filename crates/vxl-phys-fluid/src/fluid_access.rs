@@ -9,6 +9,9 @@ mod lattice;
 // 而"位置桥 → 状态桥"这次要加两个方法（速度/逐粒质量）⇒ 净账靠外迁保住。
 #[path = "fluid_access/state.rs"]
 mod state;
+// **液面表面驱动**（风/水流 → 自由表面粒子；`ROUTE §4` 的「风 × 液」那一格）。
+#[path = "fluid_access/wind.rs"]
+pub mod wind;
 use lattice::{lattice_positions, lattice_w_sum};
 
 /// **按给定位置建流体系统**（`ROUTE.md` §4「扫描场景起步」的落点）：点云/扫描件先经
