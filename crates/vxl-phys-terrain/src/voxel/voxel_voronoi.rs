@@ -24,6 +24,140 @@ struct OwnerMap {
     data: Vec<u32>,
 }
 
+/// **种子的均匀网格**：归属图那一步的候选加速（每格只查邻近若干格，而不是全部种子）。
+/// 网格只裁候选、**不改判据** —— 最近种子仍是"`(d², 序号)` 最小"，所以结果与全扫逐位一致。
+///
+/// ⚠️ **只在种子足够多时才建**（`GRID_MIN_SITES`）：实测（24³ 格、release）16/32 种子时网格
+/// **反而慢**（建表 + 环遍历的常数项盖过省下的距离计算），64 起打平、128/256/512 对朴素分别是
+/// 9.9/16.9/**35.7×**。拐点随"格数 × 种子数"移动 ⇒ 要改阈值就重跑 `tests/voronoi_parity.rs`
+/// 的成本扫描（那是这把刻度的量具）。
+const GRID_MIN_SITES: usize = 64;
+
+struct SeedGrid {
+    origin: Vec3,
+    inv_bin: f32,
+    bin: f32,
+    dims: (i32, i32, i32),
+    bins: Vec<Vec<u32>>,
+    /// 逐环偏移（`r = 0,1,2,…` 的**壳**；预计算一次 ⇒ 逐格查询不用三重循环 + 过滤）。
+    rings: Vec<Vec<[i32; 3]>>,
+}
+
+impl SeedGrid {
+    /// 建网格：格边 `bin`（调用方给的量级 = 平均种子间距），包住 `[min, max + step]`
+    /// （体素格心可能略超 `max`，留一格余量 ⇒ 查询时不必夹取）。
+    fn build(min: Vec3, max: Vec3, bin: f32, seeds: &[Vec3]) -> Self {
+        let inv_bin = 1.0 / bin;
+        let dims = (
+            (((max.x - min.x) * inv_bin).floor() as i32 + 1).max(1),
+            (((max.y - min.y) * inv_bin).floor() as i32 + 1).max(1),
+            (((max.z - min.z) * inv_bin).floor() as i32 + 1).max(1),
+        );
+        let mut bins: Vec<Vec<u32>> = vec![Vec::new(); (dims.0 * dims.1 * dims.2) as usize];
+        for (si, &s) in seeds.iter().enumerate() {
+            let ix = (((s.x - min.x) * inv_bin).floor() as i32).clamp(0, dims.0 - 1);
+            let iy = (((s.y - min.y) * inv_bin).floor() as i32).clamp(0, dims.1 - 1);
+            let iz = (((s.z - min.z) * inv_bin).floor() as i32).clamp(0, dims.2 - 1);
+            bins[((ix * dims.1 + iy) * dims.2 + iz) as usize].push(si as u32);
+        }
+        // 逐环壳偏移（r = 0 = 单格；r ≥ 1 = 该切比雪夫半径的六个面）
+        let r_max = dims.0.max(dims.1).max(dims.2);
+        let mut rings = Vec::with_capacity(r_max as usize + 1);
+        for r in 0..=r_max {
+            let mut shell = Vec::new();
+            for dx in -r..=r {
+                for dy in -r..=r {
+                    for dz in -r..=r {
+                        if dx.abs().max(dy.abs()).max(dz.abs()) == r {
+                            shell.push([dx, dy, dz]);
+                        }
+                    }
+                }
+            }
+            rings.push(shell);
+        }
+        Self {
+            origin: min,
+            inv_bin,
+            bin,
+            dims,
+            bins,
+            rings,
+        }
+    }
+
+    /// 最近种子 `(d², 序号)`；环扩张到"未扫的格不可能更近"为止（下界 `(r−1)·bin`）。
+    /// 中心格越界（体素格心落在网格外，防御分支）⇒ 退回全扫，绝不漏种子。
+    fn nearest(&self, p: Vec3, seeds: &[Vec3]) -> (f32, u32) {
+        let Some((cx, cy, cz)) = self.center(p) else {
+            return full_scan(p, seeds);
+        };
+        let mut best = (f32::INFINITY, u32::MAX);
+        for (r, shell) in self.rings.iter().enumerate() {
+            let lower = (r.saturating_sub(1)) as f32 * self.bin;
+            if lower > 0.0 && lower * lower > best.0 {
+                break; // 更远的格全都不可能更近
+            }
+            for off in shell {
+                self.scan_bin(cx + off[0], cy + off[1], cz + off[2], p, seeds, &mut best);
+            }
+        }
+        if best.1 == u32::MAX {
+            full_scan(p, seeds) // 不该发生（种子都在区域内）；防御
+        } else {
+            best
+        }
+    }
+
+    /// 扫一格里的种子，按 `(d², 序号)` 取更小者（越界格直接跳过）。
+    fn scan_bin(&self, ix: i32, iy: i32, iz: i32, p: Vec3, seeds: &[Vec3], best: &mut (f32, u32)) {
+        if !self.in_bounds(ix, iy, iz) {
+            return;
+        }
+        for &si in &self.bins[((ix * self.dims.1 + iy) * self.dims.2 + iz) as usize] {
+            let d = (p - seeds[si as usize]).length_squared();
+            if d < best.0 || (d == best.0 && si < best.1) {
+                *best = (d, si);
+            }
+        }
+    }
+
+    /// `p` 所在的格索引；越界 ⇒ `None`（调用方退回全扫）。
+    fn center(&self, p: Vec3) -> Option<(i32, i32, i32)> {
+        let (ix, iy, iz) = self.bin_of(p);
+        if self.in_bounds(ix, iy, iz) {
+            Some((ix, iy, iz))
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    fn in_bounds(&self, ix: i32, iy: i32, iz: i32) -> bool {
+        ix >= 0 && iy >= 0 && iz >= 0 && ix < self.dims.0 && iy < self.dims.1 && iz < self.dims.2
+    }
+
+    /// 世界坐标 → 格索引（不夹取；越界由调用方处理）。
+    #[inline]
+    fn bin_of(&self, p: Vec3) -> (i32, i32, i32) {
+        let f = (p - self.origin) * self.inv_bin;
+        (f.x.floor() as i32, f.y.floor() as i32, f.z.floor() as i32)
+    }
+}
+
+/// 全扫（`(d², 序号)` 最小；与旧判据逐字同规则）。
+fn full_scan(p: Vec3, seeds: &[Vec3]) -> (f32, u32) {
+    let mut best = (f32::INFINITY, u32::MAX);
+    for (si, &seed) in seeds.iter().enumerate() {
+        let d = (p - seed).length_squared();
+        let si = si as u32;
+        if d < best.0 || (d == best.0 && si < best.1) {
+            best = (d, si);
+        }
+    }
+    best
+}
+
 impl OwnerMap {
     /// 查归属（越界 = 无归属；`extract_where` 只访问范围内格，越界分支是防御）。
     #[inline]
@@ -129,6 +263,22 @@ impl VoxelVolume {
             (z1 - z0 + 1).max(0) as usize,
         );
         let mut data = vec![u32::MAX; dims.0 * dims.1 * dims.2];
+        // 候选网格：**种子多到全扫吃亏时才建**（阈值与实测见 `GRID_MIN_SITES`）；格边取
+        // "平均种子间距"量级（`(体积/种子数)^{1/3}`，下限一格）。它只裁候选（环扩张下界
+        // `(r−1)·bin`）⇒ 最近种子仍是全扫的那个 ⇒ 逐位一致。
+        let grid = if seeds.len() >= GRID_MIN_SITES {
+            let volume = ((max.x - min.x) * (max.y - min.y) * (max.z - min.z)).max(0.0);
+            let spacing = (volume / seeds.len() as f32).max(0.0).powf(1.0 / 3.0);
+            let bin = spacing.max(self.step());
+            Some(SeedGrid::build(
+                min,
+                max + Vec3::splat(self.step()),
+                bin,
+                seeds,
+            ))
+        } else {
+            None
+        };
         for iz in z0..=z1 {
             for iy in y0..=y1 {
                 for ix in x0..=x1 {
@@ -136,14 +286,10 @@ impl VoxelVolume {
                         continue;
                     }
                     let c = self.grid_center(ix as u32, iy as u32, iz as u32);
-                    let mut best = (f32::INFINITY, u32::MAX);
-                    for (sj, &seed) in seeds.iter().enumerate() {
-                        let d = (c - seed).length_squared();
-                        let sj = sj as u32;
-                        if d < best.0 || (d == best.0 && sj < best.1) {
-                            best = (d, sj);
-                        }
-                    }
+                    let best = match &grid {
+                        Some(g) => g.nearest(c, seeds),
+                        None => full_scan(c, seeds),
+                    };
                     let at = ((ix - x0) as usize * dims.1 + (iy - y0) as usize) * dims.2
                         + (iz - z0) as usize;
                     data[at] = best.1;

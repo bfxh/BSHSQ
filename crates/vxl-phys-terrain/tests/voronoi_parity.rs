@@ -86,7 +86,7 @@ fn owner_map_matches_the_naive_double_scan_bitwise() {
 fn voronoi_cost_sweep_report_only() {
     // 只报数不判（时间类断言在 CI 上不稳）；**扫种子数**看两版的复杂度差异。
     let (side, step) = (24u32, 0.25f32);
-    for n_seeds in [16usize, 32, 64, 128] {
+    for n_seeds in [16usize, 32, 64, 128, 256, 512] {
         let (mut a, min, max, seeds) = fresh(side, step, n_seeds);
         let t0 = std::time::Instant::now();
         let ra = a.fracture_voronoi(min, max, &seeds);
