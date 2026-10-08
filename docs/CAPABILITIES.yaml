@@ -363,7 +363,9 @@ capabilities:
           ROUTE §3.1 的"三层用法"里：① 渲染桥与反向导入 已落、③ 隐式场（Provider / MediumField）
           已落、② 物理代理**部分落地**（2026-10-08：`particles::step_particles` 运动步 ——
           重力积分 + 世界碰撞的非弹性投影，半径用椭球支撑半径；判据见
-          `tests/splat_particles.rs`）；**核间自场压力/黏性仍未做**（真正当流体/软体的那一半）；
+          `tests/splat_particles.rs`；同日第二片 `pressure::apply_self_pressure` 自场压力 ——
+          Tait 斥力 + 逐对反对称动量守恒，判据见 `tests/splat_pressure.rs`）；
+          **仍未做**：黏性项、内聚/表面张力、门面接线（`World` 扩展 trait）、更快的候选结构；
           CATALOG 另记"均匀网格/BVH 加速待办"。
       - id: mass_reading_gap
         note: >
