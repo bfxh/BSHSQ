@@ -180,6 +180,18 @@ cargo test -p vxl-phys-splat --test splat_state_bridge       # 喷溅：核中�
 别拿合成向量算相对误差；③ "位置桥清速度 ⇒ 动量为 0"是**金丝雀**（它必须与状态桥可分辨，
 否则动量判据恒真）。细节见 `KNOWLEDGE.md` 的 2026-10-08 段。
 
+**风 × 液（表面驱动）判据（2026-10-08 立；三文件五条，秒级）**：气动域当介质场 + 液面表面驱动：
+
+```bash
+cargo test -p vxl-phys-aero  --test medium_field    # 空气 `MediumField`：均匀/关档/吸收不改风
+cargo test -p vxl-phys-fluid --test wind_surface    # 单粒阻力解析对拍 + 内部粒子逐位不动
+cargo test -p vxl-phys        --test wind_liquid    # 门面 A/B：顺风档 vs 零风档 + 表面领先内部
+```
+
+⚠️ 阈值口径（`SurfaceDrag::surface_ratio = 0.9`）是**实测标定**的：内部残差亏 ≤1e-4·ρ0、
+表面亏 ≥0.4·ρ0；严格 `ρ < ρ0` 会把整块当表面（实测退化成整体拖拽 0.108 m/60 tick）。
+细节见 `KNOWLEDGE.md` 的 2026-10-08 §D。
+
 **2026-09-15 参与式降点换代**（`vxl_phys_solver::point_reduce_after = 3`）：
 `0x6219d186…` / `0x63e5eb35…` / `0xd8601988…`（当前）←
 `0x4dcf5d46…` / `0x1e855f89…` / `0x3a8c778e…`（旧世代；把 `point_reduce_after`

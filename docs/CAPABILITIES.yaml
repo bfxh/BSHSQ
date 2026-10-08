@@ -319,8 +319,12 @@ capabilities:
           （wet / drag）。
       - id: gap_wind_liquid
         note: >
-          ROUTE §4 记"风 × 液（表面驱动）❌ 未落地"—— 有意登记为边界（当前只做到同帧共存、
-          互不干扰），要做得先定义气动-液面耦合的判据。
+          **风 × 液（表面驱动）**：单向那一半 2026-10-08 落地 —— 气动域实现 `MediumField`
+          （空气场），门面把同一份空气场交给液面，只对**自由表面**粒子（密度亏超过阈值
+          `ρ < 0.9·ρ0`）施加 Bridson 线化阻力并把反作用沉积回 `AeroState::absorbed`；
+          判据见 `fluid/tests/wind_surface.rs`（单粒解析对拍 + 内部逐位不动）与
+          `vxl-phys/tests/wind_liquid.rs`（顺风 vs 零风 A/B）。仍未做：气动域自身的**状态**
+          （大气不因反作用变慢 —— 运动学背景只记账），要做得先给风场尾流/动量槽。
     required_evidence:
       - implementation_path
       - tests

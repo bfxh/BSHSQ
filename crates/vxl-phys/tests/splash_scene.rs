@@ -8,8 +8,8 @@
 //! ① **刚×液**：入水后柱区流体**峰值速度 > 0**（球把水推开了，不是幽灵穿水）；
 //! ② **刚×风**：静态风帆上的气动合力 = `½ρ·Cd·A·|w|²` 解析值（相对 1e-3），方向 = 风向；
 //! ③ **三域确定性**：同场景跑两遍，`state_hash()` **相同**（三域同帧可复现）；
-//! ④ **域间正交**：开着气动域不影响落球轨迹（球是 `Sphere`，`aero_pass` 只对 `TriMesh` 施力）；
-//!   全程无 NaN、流体粒子数不变。
+//! ④ **直接域间正交**：气动域只对 `TriMesh` 施力 ⇒ 球（`Sphere`）读到的气动合力**恒 0**；
+//! ⑤ **风 × 液**（2026-10-08）：风经液面把水推往 +x ⇒ 球轨迹**允许**被间接带动（钉量级+方向）；全程无 NaN、粒子数不变。
 //!
 //! ⚠️ 场景**铸装**（`PLAN-0.3.md` §4.2）：水块按沉降后几何就位，避免"带落差入盆"的顶心喷泉。
 //! ⚠️ 本文件不许出现 `unwrap` / `expect` / `.clone()`（新文件零基线）。
@@ -102,6 +102,19 @@ fn healthy(w: &World, n_fluid: usize) -> bool {
         && f.velocities().iter().all(|v| v.x.is_finite())
 }
 
+// 紧凑写法（god 门文件行数棘轮）：`#[rustfmt::skip]` 保持单行 fn，本仓既有先例。
+#[rustfmt::skip]
+fn water_com_x(w: &World) -> f32 { let f = &w.fluids()[0].0; let mut s = 0.0f32; for p in f.positions() { s += p.x; } s / f.len() as f32 }
+
+// 判据 ④/⑤：直接正交（球读不到气动力）+ 风经液面间接带动（钉方向与量级）。
+#[rustfmt::skip]
+fn wind_liquid_checks(windy: &World, calm: &World, b: u32, b2: u32, x: (f32, f32)) {
+    assert_eq!((windy.aero_force(b), calm.aero_force(b2)), (Vec3::ZERO, Vec3::ZERO), "球不该被气动域直接施力");
+    let (cw, cc) = (water_com_x(windy), water_com_x(calm));
+    assert!(cw > cc, "风应把水推往 +x：com_wind={cw:.6} vs com_calm={cc:.6}");
+    assert!((x.0 - x.1).abs() < 0.05, "间接影响必须有界：{} vs {}", x.0, x.1);
+}
+
 #[test]
 fn ball_splashes_into_water_with_wind_and_stays_deterministic() {
     const TICKS: usize = 45;
@@ -124,10 +137,7 @@ fn ball_splashes_into_water_with_wind_and_stays_deterministic() {
         (f_sail.x - want).abs() / want < 1e-3 && f_sail.y.abs() < 1e-4 && f_sail.z.abs() < 1e-4,
         "风帆气动合力应 = ½ρCdA|w|² 沿 +x，实得 {f_sail:?}（解析 {want:.4}）"
     );
-    assert!(
-        (x_wind - x_calm).abs() < 1e-9,
-        "气动域不该改动落球轨迹（球非 TriMesh）：{x_wind:.9} vs {x_calm:.9}"
-    );
+    wind_liquid_checks(&windy, &calm, b as u32, b2 as u32, (x_wind, x_calm));
     assert!(healthy(&windy, n), "三域共存后流体应仍健康、粒子数不变");
     let (mut a, _, _, _) = build(Some([8.0, 0.0, 0.0]));
     let (mut c, _, _, _) = build(Some([8.0, 0.0, 0.0]));

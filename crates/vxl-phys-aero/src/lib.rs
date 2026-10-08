@@ -28,18 +28,15 @@ pub struct AeroConfig {
     pub wind: [f32; 3],
 }
 
+// 紧凑写法（god 门 file_lines / max_fn 棘轮）：`#[rustfmt::skip]` 保持单行 impl，本仓既有先例。
+#[rustfmt::skip]
 impl Default for AeroConfig {
-    fn default() -> Self {
-        Self {
-            air_density: 1.225,
-            drag_coefficient: 1.0,
-            lift_slope: 5.0,
-            wind: [0.0, 0.0, 0.0],
-        }
-    }
+    fn default() -> Self { Self { air_density: 1.225, drag_coefficient: 1.0, lift_slope: 5.0, wind: [0.0; 3] } }
 }
 
 mod face;
+/// **空气作为 `MediumField`**（`medium.rs`）：气动域既能对面元施力，也能被介质消费者采样。
+mod medium;
 
 pub use face::{face_force, face_force_tri, face_force_with_lift};
 
@@ -53,14 +50,12 @@ pub struct AeroState {
     pub forces: Vec<Vec3>,
     /// 逐体力矩快照（关于**体原点**；与 `bodies.torque` 同口径）。
     pub torques: Vec<Vec3>,
+    /// **被大气吸收的累计动量**（N·s；`MediumField::deposit` 的审计量）。
+    /// 风是运动学背景（无限大气库）⇒ 吸收不改风速，只记账（见 `medium.rs`）。
+    pub absorbed: Vec3,
 }
 
+#[rustfmt::skip]
 impl AeroState {
-    pub fn new(cfg: AeroConfig) -> Self {
-        Self {
-            cfg,
-            forces: Vec::new(),
-            torques: Vec::new(),
-        }
-    }
+    pub fn new(cfg: AeroConfig) -> Self { Self { cfg, forces: Vec::new(), torques: Vec::new(), absorbed: Vec3::ZERO } }
 }
