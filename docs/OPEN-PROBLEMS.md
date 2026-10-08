@@ -2554,3 +2554,27 @@ loom、TSan、ASan、跨平台哈希比对上**全绿**（`gh run view 356728033
 ⚠️ **本机 `gate_all.sh` 全绿 ≠ CI 全绿**：它跑的是仓内自研门（`deps_lock.py` + 本地 typos 二进制），
 **与 CI 的 cargo-deny/zizmor 不是同一把尺**——这条差异本身值得记住（2026-09-22 踩到）。
 
+## P11 — 喷溅域"质量"两读未统一（⚠️ **登记边界，非缺陷**；2026-10-08 立）
+
+**现状**：同一颗高斯核在两处被当"质量"用，口径不同——
+
+1. 模块头与 `StateBridge`（`src/splat_access.rs`）按 **`opacity`**：`Splat::opacity` 的注释就是
+   "不透明度 / 权重（密度和中的系数；物理上 = 该核的质量）"；
+2. `flow.rs` 的**动量分摊**按 **`kernel_mass = ρ·(4/3)π·σx·σy·σz`**（1σ 椭球体积 × 介质密度），
+   它的注释写着"只是动量分摊的口径，不动核的几何"。
+
+⇒ 于是 `deposit` 注入的动量 `J` 满足 `Σ kernel_mass·Δv = J`，而 `BridgeState.momentum()` 算的是
+`Σ opacity·v` —— 两者**不是同一个账**（实测：同一场里 `opacity` 与 `kernel_mass` 相差数量级）。
+
+**为什么不在这片修**：改任一侧都会动到已落地的语义（`opacity` 是渲染/密度场的参数，
+`kernel_mass` 是动量守恒账），而"统一到哪一个"是**设计拍板**（属 splat ②"物理代理"那片：
+splat 当粒子域时，粒子质量与不透明度是两个概念还是一种？）⇒ 本轮选择**不静默改**，
+在 `CAPABILITIES.yaml` 的 `PHY-SCOPE-SPLAT` 里如实登记两读。
+
+**候选入口**：② 物理代理落地时，给 `Splat` 增一个显式质量字段（或声明 `opacity` 就是质量、
+把 `kernel_mass` 改成读它），并让 `deposit` 与 `BridgeState.mass` 走**同一口径**。
+
+**验收判据（缺一不可）**：① `Σ mᵢvᵢ`（桥的口径）与 `deposit` 的分摊账在**同一场**里逐位自洽；
+② 默认档（`two_way = false`）逐位不变（金样门）；③ 渲染桥导出的 `opacity` 语义不变
+（`export_splats` 的 5 元组逐值不变）。
+

@@ -53,7 +53,7 @@
 | 软体 | 粒子 + XPBD 距离/体积 | XPBD（SPEC §4.6） | `vxl-phys-soft` 参数骨架 |
 | 布料 | 三角网 + XPBD 三组约束 | XPBD + 面元气动（SPEC §4.7） | 同上 |
 | 液体 | 粒子（SPH/PBF）/ 网格（FLIP） | WCSPH → PBF/FLIP 分层（SPEC §4.8） | **`vxl-phys-fluid` WCSPH 已落地（0.3 切片 1：CPU 档驻留/体素边界/确定性；PLAN-0.3 §4）** |
-| **高斯喷溅（3DGS）** | 各向异性高斯集合 | **三层用法（本文新增，§3.1）** | ✅ **`vxl-phys-splat` 已建并接线**：隐式场 `GaussianSplatField` 实现 `ProviderColliders` / `MediumField`（`providers.rs` / `world_step/medium.rs`）+ 渲染桥 `export_splats`。⚠️ §3.1 三层里 **② "物理代理"（splat 当粒子域）仍缺** ⇒ 状态见 `CAPABILITIES.yaml` 的 `PHY-SCOPE-SPLAT` |
+| **高斯喷溅（3DGS）** | 各向异性高斯集合 | **三层用法（本文新增，§3.1）** | ✅ **`vxl-phys-splat` 已建并接线**：隐式场 `GaussianSplatField` 实现 `ProviderColliders` / `MediumField`（`providers.rs` / `world_step/medium.rs`）+ 渲染桥 `export_splats` + **状态桥**（`splat_access.rs`，2026-10-08：核中心导入/导出、速度槽登记）。⚠️ §3.1 三层里 **② "物理代理"（splat 当粒子域）仍缺** ⇒ 状态见 `CAPABILITIES.yaml` 的 `PHY-SCOPE-SPLAT` |
 | 风/气动 | 面元 + 速度场 | 面元气动力 + 可选尾流（SPEC §4.7/§4.10 同族） | `vxl-phys-aero` 骨架 |
 | 车辆 | 射线悬挂 + 刷子轮胎 | SPEC §4.10 | `vxl-phys-wheeled` 骨架 |
 | 机械/关节 | 约束族（铰链/齿轮/绳…） | SPEC §2.5 | `vxl-phys-mech` 骨架 |
@@ -66,7 +66,9 @@
 
 1. **渲染桥（`StateBridge`）**：物理状态（粒子/软体节点/顶点）→ splat 集导出，
    供渲染消费；反向导入用于"从扫描场景起步"（splat → 初始粒子/碰撞代理）。
-   代价低、价值高（消费方最常用），**先做**。
+   代价低、价值高（消费方最常用），**先做**。**2026-10-08：接口层两半都已落** ——
+   `GaussianSplatField` 实现 `StateBridge`（核中心导出/导入 + 速度/质量登记，见
+   `crates/vxl-phys-splat/src/splat_access.rs`）；渲染参数导出仍是 `export_splats`。
 2. **物理代理（粒子域）**：splat = 各向异性粒子（质量 + 半径 + 取向）⇒
    可当**颗粒/流体/软体**粒子求解（"高斯粒子"）；碰撞用各向异性椭球近似
    （GJK 椭球支集或 SDF 求和）。
@@ -139,6 +141,13 @@
 >   （`kind()` = `Mesh`；导入时**连 XPBD 的 `prev` 一起对齐**——只清速度不齐 `prev` 会让下一
 >   `step` 读出巨大隐式速度），判据 `crates/vxl-phys-soft/tests/cloth_state_bridge.rs`（同一套 5 条
 >   + 一条 `prev` 对齐）。⇒ "扫描起步"只差**splat→粒子的转换**那一步；
+> - **② 表示层 `StateBridge`（2026-10-08 升为"位置桥 + 状态桥"两档）** —— ✅ 状态桥：
+>   `BridgeState`（位置 + 速度 + 逐点质量）+ `handoff` 落在 core，流体 / 布片 / 喷溅三域各自实现；
+>   `import_state` 按"先校验长度、再写入"整体替换（空段 = 不动；长度不符 ⇒ 拒绝且一字不动），
+>   接口默认档**拒绝**带速度的快照（不许静默丢动量）。判据：`bridge_state_ledger.rs`（账 +
+>   默认档拒绝）、`state_inheritance.rs`（总动量 = M·u、绕质心角动量 = I·ω + 位置桥金丝雀）、
+>   `cloth_state_inheritance.rs`（速度一 tick 生效 + 钉住位不被质量导入解锁）、
+>   `splat_state_bridge.rs`（未开双向耦合时拒绝带速度的快照）；
 > - **提供者对偶（provider×provider）** 与 **高度场 × 提供者** —— 已登记为**不受理**，
 >   现状由 `crates/vxl-phys/tests/provider_pair_gaps.rs` **钉住**（做对偶解法那天那两条会红 ⇒ 翻面）；
 >   影响目前为零（都是静态 Marker ⇒ 求解器本就不产约束）。

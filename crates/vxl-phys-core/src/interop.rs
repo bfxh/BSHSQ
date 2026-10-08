@@ -15,6 +15,11 @@
 
 use crate::{Aabb, Quat, Vec3};
 
+// 状态数据的**载体**与域间交接入口（`BridgeState` / `handoff`）单独成文件：本文件受 god 门
+// file_lines 棘轮（只准减），接口面留在这里、数据结构挪到子模块。
+mod bridge_state;
+pub use bridge_state::{handoff, BridgeState};
+
 /// 表面查询结果（有向距离 ≥ 0 = 在表面外侧）。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SurfaceHit {
@@ -130,16 +135,14 @@ pub trait CollisionProvider {
         let mut any = false;
         for (k, local) in box_corners(half).into_iter().enumerate() {
             let p = pos + m.mul_vec3(local);
-            if let Some(hit) = self.closest_point(p) {
-                if hit.signed_dist < skin {
-                    out.push(InteropContact {
-                        point: hit.point,
-                        normal: hit.normal,
-                        depth: hit.depth(),
-                        feature: k as u32 + 1,
-                    });
-                    any = true;
-                }
+            if let Some(hit) = self.closest_point(p).filter(|h| h.signed_dist < skin) {
+                out.push(InteropContact {
+                    point: hit.point,
+                    normal: hit.normal,
+                    depth: hit.depth(),
+                    feature: k as u32 + 1,
+                });
+                any = true;
             }
         }
         any
@@ -278,6 +281,12 @@ pub trait MediumField {
 }
 
 /// 状态桥：表示转换与导出/导入（渲染、持久化、回放、扫描起步）。
+///
+/// **两档语义**（默认档零代际）：
+/// ① *位置桥*：`export_positions` / `import_positions`（旧口径，逐字未变）；
+/// ② *状态桥*：额外的 [`export_state`](StateBridge::export_state) /
+///    [`import_state`](StateBridge::import_state) 搬**速度与逐点质量**（[`BridgeState`]），
+///    默认实现退化为① —— 未实现②的域**拒绝**带速度的快照（fail-loud，不许静默丢动量）。
 pub trait StateBridge {
     /// 本桥的表示种类。
     fn kind(&self) -> BridgeKind;
@@ -288,6 +297,23 @@ pub trait StateBridge {
     /// 反向导入（可选；默认不支持）。返回是否成功。
     fn import_positions(&mut self, _src: &[Vec3]) -> bool {
         false
+    }
+
+    /// 导出**物理状态**（位置 + 速度 + 逐点质量）。默认 = 位置桥（速度/质量留空 ⇒ 旧语义不变）。
+    fn export_state(&self, out: &mut BridgeState) {
+        out.pos.clear();
+        out.vel.clear();
+        out.mass.clear();
+        self.export_positions(&mut out.pos);
+    }
+
+    /// 导入**物理状态**。默认只接受"速度/质量均未登记"的位置快照（= `import_positions` 旧语义）；
+    /// 带速度或质量的快照 ⇒ **拒绝**（返回 `false`）—— 静默丢动量的桥不许冒充状态桥。
+    fn import_state(&mut self, src: &BridgeState) -> bool {
+        if !src.vel.is_empty() || !src.mass.is_empty() {
+            return false;
+        }
+        self.import_positions(&src.pos)
     }
 }
 
