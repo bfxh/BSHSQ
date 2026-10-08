@@ -301,6 +301,14 @@ impl GaussianSplatField {
         true
     }
 
+    /// 整体平移所有核（`grid` 置脏 ⇒ 下次查询自动退回全扫 / 由调用方按需 `rebuild_grid`）。
+    pub fn translate(&mut self, delta: Vec3) {
+        for s in &mut self.splats {
+            s.center += delta;
+        }
+        self.grid = None;
+    }
+
     /// 单核二次型 α = Σⱼ((p−c)·uⱼ/sⱼ)²（各向异性轴对齐到 uⱼ）。
     #[inline]
     fn alpha(s: &Splat, ax: &[Vec3; 3], p: Vec3) -> f32 {
