@@ -587,11 +587,19 @@ jobs:
       - name: 跑门禁（dag/rayon/unwrap/unsafe/linelen/glob/todo/god/cyc/nest/args + selftest + probe）
         run: python scripts/local_gate.py
 
-  # ==================== 报告层：覆盖率（不阻断；产物供趋势观察） ====================
+  # ==================== 报告层：覆盖率（不阻断；只跑 main/手动，**不进 PR 关键路径**） ====================
+  # **为什么只跑 push/dispatch**（2026-10-08 实测）：逐 job 计时显示它是**最长的一条腿**
+  # （自己 28.6 min；同期 MSVC 编译 20.6 min、Clang 10.3、GCC 9.9），而 `gates-summary` 在
+  # 21.4 min 就出了**判定** ⇒ 它对"门"零贡献，只把每次 PR/主干 run 的**完成时刻**拖后 ~7 min。
+  # 报告层留在 main（产物供趋势观察）与手动补跑（`gh workflow run ci.yml`）足够。
+  # 与 `gold-sample` 的 `!= 'push'` 正好互补：一个 PR 侧报告、一个主干侧报告。
+  # 要恢复成"每次 PR 都跑"：删掉下面这行 `if:` 即可（判据/产物都不变）。
   coverage:
     name: 覆盖率 (报告)
     runs-on: ubuntu-latest
     continue-on-error: true
+    if: github.event_name != 'pull_request'
+    timeout-minutes: 40   # 只是防跑飞：**实测 28.6 min** ⇒ 别设得比它低（设 20 会把正常跑掐掉）
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
