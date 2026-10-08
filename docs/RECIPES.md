@@ -198,6 +198,7 @@ cargo test -p vxl-phys        --test wind_liquid    # 门面 A/B：顺风档 vs 
 cargo test -p vxl-phys-splat --test splat_mass      # 核质量 = 场的积分质量（144³ 中点法对拍）
 cargo test -p vxl-phys-splat --test splat_particles # 粒子域运动步：自由落体闭式 + 贴面静置 + 穿地金丝雀
 cargo test -p vxl-phys-splat --test splat_pressure  # 自场压力：互斥 + 动量守恒（不等质量也成立）+ 关档空操作
+cargo test -p vxl-phys-splat --test splat_viscosity # 自场黏性：等速度逐位不动 + 只耗散 + 动量守恒
 ```
 
 ⚠️ 阈值口径（`SurfaceDrag::surface_ratio = 0.9`）是**实测标定**的：内部残差亏 ≤1e-4·ρ0、
@@ -344,6 +345,35 @@ provider 通道"这条形状已被 `#105` 否证 —— `World::terrain` 是**�
 "浮到平衡"而不是某一瞬间的相位。与 `tests/fluid_coupling.rs` 的分工：那里判**方向**
 （浮/沉/干区对照），本档钉**数值**（同配方末态逐位可复现）。
 入口两处：本机 `bash scripts/gate_gold.sh`（十项）、CI 的 **determinism 档**。
+
+## 基准场景集（`arena_bench` 注册表：PhysArena 复刻 **67** + 本仓域 **9**；2026-10-08）
+
+```bash
+# 目录（按组；⚠️ = 与 arena 有差异注记 —— 运行时会把注记本身打出来）
+cargo run --release -q -p vxl-phys --example arena_bench -- --list
+# 单个场景：id 与 PhysArena 同名同参（同体数/同尺寸/同出生位姿/同材质；seed 20260915 的
+# RNG 已按 mulberry32 逐位复刻），协议与 arena 基准窗同口径（60 Hz 固定步长、30 预热 + 180 测量）
+cargo run --release -q -p vxl-phys --example arena_bench -- sphere-pyramid
+# 全量（67 arena + 9 本仓域；含 32k 粒 SPH 档，总时长数分钟——建议逐场景套循环隔离日志）
+cargo run --release -q -p vxl-phys --example arena_bench -- --all-arena
+```
+
+- **arena 复刻批（67）**：堆叠与结构 9 / 经典动力学 13 / 极端工况 12 / 碰撞形状 8 /
+  约束与关节 12 / 破坏与流体 13（`havoc.ts` 的"假水"按 arena 原样 = 低摩擦球堆，
+  **不是**本仓 WCSPH）。**与 arena 的偏差只有三类**，逐条在 `--list` 注记与运行时打印：
+  ① 本仓无逐体阻尼 / 无逐体 ccd 开关（炮击类场景按**全局阈值 20 m/s** 打开 CCD）；
+  ② 无 kinematic 体（`rotating-platform` 用「静态锚 + 转动马达 1.2 rad/s」等效，体数 +1）；
+  ③ 无 sensor（`sensor-field` 的触发面板**已省略**，该场景不与 arena 对表）。
+- **本仓域批（9，`dom-` 前缀）**：软体（布×风、绳×三角网）/ 流体（溃坝 504、浮箱 512、
+  SPH 32³ 规模）/ 喷溅（σ=0.5 平场上的盒球）/ 破坏（Voronoi 预断裂、冲击挖洞）/
+  耦合（刚-液-风三域溅水）。配方来源逐条写在注记里（对应仓内测试/示例，可直接对照）。
+  `dom-carve-impact` 走**专用计时窗**（每步都调 `apply_impact_destruction`；
+  通用 `bench()` 只调 `step()`，测不到破坏域）；弹速 12 m/s（源默认 8 压在阈值 8 上、
+  实测窗口只挖 1 块）。
+- 复刻口径两处**易错换算**已核对并在源码注释钉住：arena 的四元数分量写的是**半角**
+  （`[0, sin(half), 0, cos(half)]` 的实际转角 = 2×half —— `stack-arch`/`domino-circle`/
+  `stack-mixed-pile`/`destruct-fracture`），以及 `[sin(π/4), 0, 0, cos(π/4)]` 是**转角 π/2**
+  （`piston-bank`/`gear-train` 的车轮/曲柄）。
 
 ## 求解成本定位（每点开销）
 
