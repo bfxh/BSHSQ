@@ -298,6 +298,12 @@ capabilities:
         note: >
           跨表示交接（体素片 → 刚体、布片 → 喷溅等）与"与手工建体逐位退化"对拍仍未落地 ——
           那是 PLAN-CONVERSION 的交接策略片（属"换表示"），与本条已落地的"同表示状态搬运"分开登记。
+      - id: why_cross_representation_is_blocked
+        note: >
+          ⚠️ 2026-10-08 核查：跨表示交接**当前没有可继承的源状态** —— 转换窗口（V2）做的是
+          体素 provider → 网格 provider 的**静态几何**替换（`world_step/conversion.rs`），源与目标都
+          没有线/角速度；碎片路径的源是静态体素域，"继承撞击体半速"已被实测否证（能量源）。
+          ⇒ 要做 (ii) 档，先得出现"**动态体换表示**"的场景（源体带运动状态），否则只会重做否证路线。
     required_evidence:
       - implementation_path
       - tests
