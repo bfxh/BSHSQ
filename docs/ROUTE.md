@@ -124,10 +124,12 @@
 >   （均匀空气场：`density = air_density`、`velocity = wind`、`occupied = 1`），门面的 `aero_pass`
 >   把同一份空气场交给液面 —— **只对自由表面粒子**（密度亏超过阈值 `ρ < 0.9·ρ0`；实测内部残差亏
 >   ≤1e-4·ρ0、表面亏 ≥0.4·ρ0）施加 Bridson 线化阻力 `F = ½ρ_air·Cd·A·|u|·u`（`A = spacing²`），
->   反作用 `−F·dt` 沉积回 `AeroState::absorbed`。判据：`fluid/tests/wind_surface.rs`（单粒阻力
->   **解析对拍** + 内部粒子逐位不动 + 反作用等大反向）、`vxl-phys/tests/wind_liquid.rs`
->   （顺风档 vs 零风档 A/B + 表面领先内部）。⚠️ **未做**：大气不会因液面反作用而变慢
->   （风是运动学背景、只记账）—— 要让风场带状态（尾流/动量槽）是下一步；
+>   反作用 `−F·dt` 沉积回 `AeroState::absorbed`。**双向那一半（同日）**：`AeroConfig::air_mass`
+>   （默认 `0` = 运动学背景、不变慢；有限值 = 动量槽，`v = wind + absorbed/air_mass`）
+>   ⇒ 大气会因交出动量而**变慢**。判据：`fluid/tests/wind_surface.rs`（单粒阻力**解析对拍** +
+>   内部粒子逐位不动 + 反作用等大反向 + **动量闭合与总动能不增**）、`vxl-phys/tests/wind_liquid.rs`
+>   （顺风档 vs 零风档 A/B + 表面领先内部）。⚠️ **仍未做**：空间**尾流**（风场是均匀场 + 一个
+>   集中质量槽，不是逐点动量场）；
 > - **风 × 布（旗飘）** —— ✅ **门面已接通（2026-10-05）**：`World::set_aero` 把同一份风配置
 >   **下发**到每张布（`cloth.aero`），布的 `predict` 逐子步按面心施加面元力。判据
 >   `crates/vxl-phys/tests/cloth_wind_scene.rs`（竖直旗面顶边钉住：**无风对照**自由节点

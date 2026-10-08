@@ -30,6 +30,7 @@ fn scene(wind: [f32; 3]) -> World {
         drag_coefficient: 1.0,
         lift_slope: 5.0,
         wind,
+        air_mass: 0.0, // 运动学背景（本文件测单向那一半；双向账见 fluid 的 wind_surface.rs）
     });
     w
 }
