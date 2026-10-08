@@ -41,6 +41,8 @@ pub mod particles;
 /// **高斯粒子的自场压力**（②物理代理第二片）：Tait 斥力 + 逐对反对称（动量守恒）。
 pub mod pressure;
 mod splat_access;
+/// **高斯粒子的自场黏性**（②物理代理第三片）：XSPH 对称平滑（只耗散）。
+pub mod viscosity;
 
 /// `sdf()` 的**近场细化带**（米）：一阶值的绝对值超过它就直接返回一阶值、不做牛顿投影。
 /// 取 0.5 m 覆盖常见体半径与皮肤带量级（只在此带内接触才需要"真距离"）。
@@ -286,6 +288,17 @@ impl GaussianSplatField {
     #[inline]
     pub fn splats(&self) -> &[Splat] {
         &self.splats
+    }
+
+    /// **覆盖逐核速度**（回放/判据/外场用；`len` 必须等于核数，否则整体拒绝）。
+    /// 与 `set_two_way` 的区别：这里**显式建槽**（空 = 未登记 → 有登记）。
+    pub fn set_kernel_velocities(&mut self, vs: &[Vec3]) -> bool {
+        if vs.len() != self.splats.len() {
+            return false;
+        }
+        self.kern_vel.clear();
+        self.kern_vel.extend_from_slice(vs);
+        true
     }
 
     /// 单核二次型 α = Σⱼ((p−c)·uⱼ/sⱼ)²（各向异性轴对齐到 uⱼ）。
