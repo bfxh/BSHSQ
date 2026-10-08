@@ -48,6 +48,15 @@ bash scripts/vocab_scan.sh . > /tmp/vocab.log 2>&1; echo "vocab=$?"
 job 全在 7 分钟内收口。⇒ 等 CI 的正确姿势是**事件驱动**，不是按分钟切片睡觉：
 `Start-Sleep 720` 一跳 12 分钟，CI 早就收口了人还在睡，26 分钟能等到 40 分钟。
 
+**2026-10-08 复测（run 37746191756，main push 全量；逐 job 时长）**：整轮 28.6 min，
+**门在 21.4 min 就出结果了**（`汇总（提交门）` 08:14:20 完成，只等最慢的承重 job），
+之后的 7 分钟是**报告层尾巴**。关键路径 = **MSVC release 编译 20.6 min**；覆盖率 job 自己跑
+**28.6 min**（全 workspace + llvm-cov）。其余：Clang 10.3 / GCC 9.9 / debug 档 7.5 /
+确定性四档 ≤2.3 / 静态层 ≤1.2 / ASan·TSan·loom·miri ≤1。
+⇒ **结论：不要为这 7 分钟去动 CI**（覆盖率不进任何门，`continue-on-error`；砍它只省尾巴，
+不缩短判定）。真要缩短判定，得动 **MSVC 那条 release 编译**（20.6 min）—— 那是"门要覆盖哪几个
+编译器"的设计取舍，不是配置调参。数据留档，等有明确收益诉求再动。
+
 ```bash
 cd "/d/KF/BSHSQ"
 gh pr checks <PR号> --watch                 # 收口即返回（默认 10s 刷新；-i 可调）
