@@ -1,38 +1,16 @@
-//! **高斯粒子域的运动步判据**（`ROUTE.md` §3.1 ②「物理代理」第一片，2026-10-08）。
+//! **高斯粒子域的运动步判据**（②物理代理第一片，2026-10-08）。
 //!
-//! 判据链：
-//! ① **自由落体解析对拍**：无 provider ⇒ 半隐式欧拉的**离散闭式** `Δy = −g·dt²·N(N+1)/2`；
-//! ② **贴面静置**：各向异性核落在平面上，静置高度 = 沿法线的**椭球支撑半径**（不是最大半轴、
-//!    也不是 0），且**不穿透**、速度收敛；金丝雀 = 同一场景传空 `ids`（纯弹道）必须穿下去；
-//! ③ **支撑半径口径**：沿各轴的取值 = 对应半轴，斜向落在两者之间，`max_radius` = 最大半轴；
-//! ④ **确定性**：同场景两跑逐位一致。
+//! 判据链（**碰撞的落地判据在门面侧**：`crates/vxl-phys/tests/splat_dynamics_scene.rs` 用真体素
+//! 地板；本文件只测不依赖世界几何的部分）：
+//! ① **自由落体解析对拍**：`ids` 空 ⇒ 纯弹道，半隐式欧拉的**离散闭式** `Δy = −g·dt²·N(N+1)/2`；
+//! ② **支撑半径口径**：沿各轴 = 对应半轴、45° = `√((σx²+σy²)/2)`、`max_radius` = 最大半轴；
+//! ③ **确定性**：同场景两跑逐位一致。
 //!
 //! ⚠️ 本文件不许出现 `unwrap` / `expect` / `panic!` / `.clone()`（新文件零基线）。
-use vxl_phys_core::interop::{CollisionProvider, SurfaceHit};
-use vxl_phys_core::{Aabb, Mat3, Vec3};
+use vxl_phys_core::interop::NoProviders;
+use vxl_phys_core::{Mat3, Vec3};
 use vxl_phys_splat::particles::{step_particles, ParticleStep};
 use vxl_phys_splat::{GaussianSplatField, Splat};
-
-/// 平面地板 `y = y0`（法线 +Y；`signed_dist = p.y − y0`，与提供者约定一致）。
-struct Floor {
-    y: f32,
-}
-
-impl CollisionProvider for Floor {
-    fn bounds(&self) -> Aabb {
-        Aabb {
-            min: Vec3::new(-50.0, self.y - 1.0, -50.0),
-            max: Vec3::new(50.0, self.y, 50.0),
-        }
-    }
-    fn closest_point(&self, p: Vec3) -> Option<SurfaceHit> {
-        Some(SurfaceHit {
-            point: Vec3::new(p.x, self.y, p.z),
-            normal: Vec3::Y,
-            signed_dist: p.y - self.y,
-        })
-    }
-}
 
 fn one(scale: Vec3, y: f32) -> GaussianSplatField {
     let mut f = GaussianSplatField::new(0.5);
@@ -53,7 +31,7 @@ fn free_fall_matches_the_discrete_closed_form() {
     let y0 = f.splats()[0].center.y;
     let mut hits = 0usize;
     for _ in 0..n {
-        hits += step_particles(&mut f, dt, &[], ParticleStep::default());
+        hits += step_particles(&mut f, dt, &NoProviders, &[], ParticleStep::default());
     }
     assert_eq!(hits, 0, "空 ids = 纯弹道，不该有接触");
     // 半隐式欧拉：v_k = k·g·dt、y_N = y0 − g·dt²·Σ_{k=1..N}k = y0 − g·dt²·N(N+1)/2
@@ -71,39 +49,6 @@ fn free_fall_matches_the_discrete_closed_form() {
 }
 
 #[test]
-fn anisotropic_splat_rests_at_its_ellipsoid_support_radius() {
-    let mut f = one(Vec3::new(0.1, 0.25, 0.1), 1.0);
-    let floor = Floor { y: 0.0 };
-    let mut hits = 0usize;
-    for _ in 0..240 {
-        hits += step_particles(&mut f, 1.0 / 60.0, &[&floor], ParticleStep::default());
-    }
-    assert!(hits > 0, "落地过程必须有接触投影");
-    let c = f.splats()[0].center;
-    assert!(
-        (c.y - 0.25).abs() < 0.02,
-        "静置高度应 = 沿 +Y 的椭球支撑半径 0.25：y={}",
-        c.y
-    );
-    assert!(c.y > 0.0, "不许穿地：y={}", c.y);
-    assert!(
-        f.kernel_velocities()[0].length() < 0.05,
-        "应已收敛（|v|={}）",
-        f.kernel_velocities()[0].length()
-    );
-    // **金丝雀**：同场景不传 provider ⇒ 纯弹道、必须穿下去（否则判据测的不是碰撞）
-    let mut free = one(Vec3::new(0.1, 0.25, 0.1), 1.0);
-    for _ in 0..240 {
-        step_particles(&mut free, 1.0 / 60.0, &[], ParticleStep::default());
-    }
-    assert!(
-        free.splats()[0].center.y < -1.0,
-        "空 ids 应穿过地板：y={}",
-        free.splats()[0].center.y
-    );
-}
-
-#[test]
 fn support_radius_follows_the_axes() {
     let s = Splat {
         center: Vec3::ZERO,
@@ -115,8 +60,8 @@ fn support_radius_follows_the_axes() {
     assert_eq!(s.radius_along(Vec3::X), 0.1);
     assert_eq!(s.radius_along(Vec3::Y), 0.3);
     assert_eq!(s.radius_along(Vec3::Z), 0.5);
-    let diag = s.radius_along(Vec3::new(1.0, 1.0, 0.0).normalize());
     // 轴对齐椭球：r(n) = ‖(σx·nₓ, σy·n_y, σz·n_z)‖ ⇒ 45° 方向 = √((0.1² + 0.3²)/2)
+    let diag = s.radius_along(Vec3::new(1.0, 1.0, 0.0).normalize());
     let want = ((0.1f32 * 0.1 + 0.3 * 0.3) / 2.0).sqrt();
     assert!(
         (diag - want).abs() < 1e-6,
@@ -130,9 +75,14 @@ fn support_radius_follows_the_axes() {
 fn particle_step_is_deterministic() {
     let run = || {
         let mut f = one(Vec3::new(0.12, 0.18, 0.12), 2.0);
-        let floor = Floor { y: 0.0 };
         for _ in 0..180 {
-            step_particles(&mut f, 1.0 / 60.0, &[&floor], ParticleStep::default());
+            step_particles(
+                &mut f,
+                1.0 / 60.0,
+                &NoProviders,
+                &[],
+                ParticleStep::default(),
+            );
         }
         (f.splats()[0].center, f.kernel_velocities()[0])
     };

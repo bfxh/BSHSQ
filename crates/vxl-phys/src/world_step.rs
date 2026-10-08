@@ -8,6 +8,7 @@ pub(crate) mod destruction;
 pub(crate) mod fluid_stepper;
 mod medium;
 pub(crate) mod narrow_tier;
+mod splat_dynamics;
 
 impl World {
     /// 推进一个固定 60Hz tick（内部按 config.substeps 细分，§4.2）。
@@ -265,9 +266,9 @@ impl World {
         let t0 = vxl_phys_core::probe::start();
         self.fields.apply(&mut self.bodies);
         self.medium_pass(dt);
-        // 面元气动（T4）：`set_aero` 显式开启才生效（Option 槽 ⇒ 未开启首行短路、逐位不变）。
-        // 与介质/重力同段位 = **逐子步**施加（力累加器的已钉契约，§8.4.28）。
+        // 面元气动（T4）与"高斯粒子域"（②物理代理）：都只在显式开档时跑、同段位 = 逐子步。
         self.aero_pass(dt);
+        splat_dynamics::pass(self, dt);
         // 2b（Akinci 边界粒子）反作用：与 2a 同段位（体子步开始处、积分之前），
         // 只对 2b 注册的流体生效 ⇒ 未开的场景零成本、逐位不变。
         self.fluid_reaction_pass();

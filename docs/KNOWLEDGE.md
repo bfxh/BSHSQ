@@ -384,3 +384,19 @@
 **要真做加速**得先改 **bin 口径**（按局部核半径/密度自适应），再用同一份扫描重测。
 **保留的判据**：`splat_grid_parity.rs` 的"网格 vs 全扫**逐位一致**"（对循环若吃到已有网格，必须
 同结果）——否证留下的不是代码而是量具。
+
+### J. 门面接线的两条硬约束：接口要带"探针半径"、所有权要"借出"
+
+1. **接口选型看谁真的实现了它**：粒子步要按**粒子半径**查询世界几何 ⇒ 必须走
+   `ProviderColliders::contacts_point(id, p, **skin**, …)`。另一条 `CollisionProvider::closest_point`
+   不带 skin：全仓只有 `VoxelVolume` 实现了它，网格/高度场都只实现带 skin 的那条 ⇒ 走它等于把
+   绝大多数几何挡在门外。（我第一版就是走 `closest_point`，接门面时才发现供不上。）
+2. **"场住在 providers 里、查询又需要整套 providers"** ⇒ `&mut field` 与 `&providers` 不能同时借。
+   解法：**把场临时借出**（`std::mem::replace(entry, 占位)` → 拿 `&w.providers` 查询 → 放回），
+   并在 id 表里**排除本场自己**（自己的隐式场不参与自己的碰撞 —— 那是自场压力的活）。
+   这比"改 trait 加一层视图类型"便宜，也不用涨 `providers.rs` 的方法账。
+3. **门面没有公开的"读喷溅场"入口**，而加一个方法会涨 `World` 的 god 门债务（只准减）⇒ 场景判据
+   写成 **crate 内测试**（`src/tests/splat_dynamics.rs`，有 `src/tests/splat.rs` 先例），用
+   `w.providers.splat(id)` 读回。**扩展 trait 是留给"要长期公开的 API"的**，测试夹具不必为它花账。
+4. 判据必须走 `World::step()` 而不是直接调 crate API —— 接线本身（段位、借出/放回、id 表排除自己）
+   才是这一片要守的东西；只测 crate 函数等于没测接线。

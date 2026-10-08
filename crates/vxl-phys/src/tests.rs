@@ -1,5 +1,4 @@
 //! tests：从 `lib.rs` 拆出的单元测试（纯搬移 + 去一层缩进）。
-
 //!
 //! 2026-10-05 拆：本文件原 967 行（全仓仅剩的两个 >800 行文件之一）⇒ 27 个用例按域分到
 //! `tests/` 四个子模块（`providers` / `splat` / `mesh_carve` / `solver_misc`），两个共用夹具留本文件。
@@ -30,3 +29,4 @@ mod mesh_carve;
 mod providers;
 mod solver_misc;
 mod splat;
+mod splat_dynamics;
