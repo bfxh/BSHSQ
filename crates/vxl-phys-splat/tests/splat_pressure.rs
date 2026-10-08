@@ -8,6 +8,9 @@
 //! ④ **动量守恒**：`Σ m_k·Δv_k ≈ 0`（逐对反对称构造；残差只来自求和序），且**不等质量**时
 //!    轻的核分到更大 |Δv|（金丝雀：证明质量真的进了力）；
 //! ⑤ **关档**（`sound_speed = 0`）⇒ 空操作；⑥ 两跑逐位一致。
+//! ⑦ **扫距判据（内聚为何不在此口径内）**：全带宽 `(0, 4σ)` 上两核**只会互相推开**（或无力）——
+//!    P11 质量口径让孤立核自密度恒 = ρ0、任何邻居都把 ρ 抬高 ⇒ `p = B((ρ/ρ0)^7−1) ≥ 0` 恒成立
+//!    ⇒ **没有"稀疏带吸引"**；要做内聚/表面张力得**另立机制**（见 `KNOWLEDGE.md` §K）。
 //!
 //! ⚠️ 本文件不许出现 `unwrap` / `expect` / `panic!` / `.clone()`（新文件零基线）。
 use vxl_phys_core::interop::MediumField as _;
@@ -127,4 +130,30 @@ fn zero_sound_speed_is_a_no_op_and_step_is_deterministic() {
         )
     };
     assert_eq!(run(), run(), "同场景两跑逐位一致");
+}
+
+/// **扫距判据**：分离度 `d/σ ∈ (0, 4)` 全带上，两核的**相对速度永远不减小**（推开或无力）。
+/// 这把"内聚/表面张力需要另立机制"钉成证据，而不是一句代数断言。
+#[test]
+fn pressure_pair_is_never_attractive_across_the_whole_band() {
+    let sigma = 0.2f32;
+    let mut worst = 0.0f32; // 带内最负的相对速度变化（若为负 ⇒ 存在吸引支）
+    let mut nearest = 0.0f32;
+    for k in 1..40 {
+        let d = sigma * (k as f32) * 0.1; // 0.1σ .. 3.9σ
+        let mut f = field(&[Vec3::ZERO, Vec3::new(d, 0.0, 0.0)], &[1.0, 1.0]);
+        apply_self_pressure(&mut f, 1.0 / 60.0, SelfPressure::default());
+        let v = f.kernel_velocities();
+        // 相对速度（右减左）沿 +x：>0 = 推开、=0 = 无力、<0 = 吸引
+        let rel = v[1].x - v[0].x;
+        if rel < worst {
+            worst = rel;
+            nearest = d;
+        }
+    }
+    println!("扫距：带内最负相对速度 = {worst:.3e}（出现在 d={nearest:.4}）");
+    assert!(
+        worst >= 0.0,
+        "全带内不许出现吸引（最负 {worst:.3e} @ d={nearest}）"
+    );
 }
