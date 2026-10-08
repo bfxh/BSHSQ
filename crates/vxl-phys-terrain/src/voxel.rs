@@ -17,6 +17,7 @@ mod voxel_contacts;
 mod voxel_hier;
 mod voxel_provider;
 mod voxel_volume;
+mod voxel_voronoi;
 pub use self::{voxel_contacts::*, voxel_volume::*};
 // ↑ 子模块顶层条目再导出（impl-only 模块不入 glob，避免 unused）
 pub use self::surface::{surface_mesh, SurfaceMesh};
@@ -81,8 +82,7 @@ mod tests {
         // **逐面发射**（2026-09-15 起）：每张「带内样本数 > 0」的面各自发点；
         // 共享角点会在相邻面里重复出现，因此断言改为：
         //  ① 贴地面的 5 点（面号 3 ⇒ feature 48..52）必须在，且深度 ≈0.1、法线 +Y；
-        //  ② 其它面只允许出现**角点**（feature % 16 != 0）——面心样本只有真贴着
-        //     的底面才有（窄相据此在多面候选里排除"只有角点的伪面"）。
+        //  ② 其它面只允许出现**角点**（feature % 16 != 0）——面心样本只有真贴着的底面才有。
         let bottom: Vec<_> = out
             .iter()
             .filter(|c| (48..53).contains(&c.feature))

@@ -317,33 +317,9 @@ impl VoxelVolume {
         max: Vec3,
         seeds: &[Vec3],
     ) -> Vec<(usize, Vec<(Vec3, Vec3)>)> {
-        if seeds.is_empty() {
-            return Vec::new();
-        }
-        let (origin, step) = (self.origin, self.step);
-        let mut out = Vec::new();
-        for (si, &seed) in seeds.iter().enumerate() {
-            let boxes = self.extract_where(min, max, |ix, iy, iz| {
-                let c =
-                    origin + Vec3::new(ix as f32 + 0.5, iy as f32 + 0.5, iz as f32 + 0.5) * step;
-                let d_me = (c - seed).length_squared();
-                // 并列取序号小者：只有「更近」或「并列且序号更小」才归我
-                for (sj, &other) in seeds.iter().enumerate() {
-                    if sj == si {
-                        continue;
-                    }
-                    let d_o = (c - other).length_squared();
-                    if d_o < d_me || (d_o == d_me && sj < si) {
-                        return false;
-                    }
-                }
-                true
-            });
-            if !boxes.is_empty() {
-                out.push((si, boxes));
-            }
-        }
-        out
+        // 单轮划分的**唯一实现**搬到 `voxel_voronoi.rs`（一遍归属图 ⇒ 去掉"逐种子再逐种子"的
+        // 第二重循环）：本函数只剩委派，语义/输出逐位不变（判据见 `tests/voronoi_parity.rs`）。
+        self.voronoi_blocks(min, max, seeds)
     }
 
     /// **确定性抖动种子**（Voronoi 预断裂用）：`n` 个种子按立方根网格铺开 + 整数
