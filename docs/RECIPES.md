@@ -165,6 +165,21 @@ bash scripts/ab_perf.sh HEAD~1 5 'ns/点' \
 | T4 碎片雨 | `cargo run --release -p vxl-phys --example m1_islands` | 解算扩展 ≥3×（实测 4.39×）+ 串行/并行末态哈希逐位一致。**别加 `--` 参数**：会被当成第一个位置参数（clusters），4000 会跑到 ticks 上 |
 | **默认档长跑稳定性**（新增 2026-09-20） | `cargo test --release -p vxl-phys --test default_tier_stability` | 两个测试：① 冻结读数 `top_y 2.7285 / Σv² 1.8124 / awake 216 / manifolds 919`（6×6×6、3000 步、默认档，两次连跑逐位一致；**2026-09-21 换代**，旧世代 `2.7223 / 2.1488 / 216 / 835`）；② **金丝雀**——降到 4 扫掠必须明显不同（实测流形 919→455、Σv²→2.2089、清醒→188、top_y→2.7347），否则场景不灵敏、门无效。**为什么要它**：金样配方自带 `16` 迭代 ⇒ 默认档（6 扫掠）的改动**金样门看不见**（`EXPERIMENTS` 记过的覆盖缺口）。改动默认档时更新那四个冻结值并按 ADR 0004 记换代理由；`--nocapture` 可读实际读数 |
 
+**状态继承判据（2026-10-08 立；四文件九条，纯 CPU、秒级）**：位置桥 → 状态桥
+（位置 + 速度 + 逐点质量）的验收，不需要 GPU 也不需要金样门：
+
+```bash
+cargo test -p vxl-phys-core  --test bridge_state_ledger      # 账：M·u / I·ω / 空段 = 未登记
+cargo test -p vxl-phys-fluid --test state_inheritance        # 流体：解析对拍 + handoff 逐位 + 金丝雀
+cargo test -p vxl-phys-soft  --test cloth_state_inheritance  # 布片：速度一 tick 生效 + 钉住位不被解锁
+cargo test -p vxl-phys-splat --test splat_state_bridge       # 喷溅：核中心搬运 + 速度槽口径
+```
+
+⚠️ 三条读法（对应实测踩过的坑）：① **求和量**（总质量/动量）只能给相对容差 ——
+逐点累加与 `n·m` 差 1 ulp；② 对称场景的**横向角动量**是 f32 抵消残差（~1e-9）⇒ 给绝对容差，
+别拿合成向量算相对误差；③ "位置桥清速度 ⇒ 动量为 0"是**金丝雀**（它必须与状态桥可分辨，
+否则动量判据恒真）。细节见 `KNOWLEDGE.md` 的 2026-10-08 段。
+
 **2026-09-15 参与式降点换代**（`vxl_phys_solver::point_reduce_after = 3`）：
 `0x6219d186…` / `0x63e5eb35…` / `0xd8601988…`（当前）←
 `0x4dcf5d46…` / `0x1e855f89…` / `0x3a8c778e…`（旧世代；把 `point_reduce_after`

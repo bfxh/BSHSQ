@@ -269,25 +269,41 @@ capabilities:
     title: 状态继承（换表示 / 换域时，物理状态从旧状态接过来）
     scope: included
     implementation: partial
-    implementation_path: crates/vxl-phys-soft/src/cloth_access.rs
+    implementation_path: crates/vxl-phys-core/src/interop/bridge_state.rs
     evidence:
       - id: state_bridge
         note: >
-          StateBridge 家族已落地一部分：布片的导出/导入（cloth_access.rs，2026-10-06；与流体侧
-          同口径，导入连 prev 一起对齐），另有 splat 渲染桥 export_splats。
+          StateBridge 家族分两档：位置桥（流体的 fluid_access/state.rs、布片的 cloth_access.rs，
+          2026-10-06 落地；导入连 prev 一起对齐）与状态桥（位置 + 速度 + 逐点质量：
+          BridgeState + handoff 在 core，2026-10-08 落地），流体/布片/喷溅三域各自实现。
+      - id: splat_bridge
+        note: >
+          喷溅侧补上接口层的导出/导入与反向导入（splat_access.rs；此前只有渲染用的
+          export_splats 单向拷贝）。
+      - id: momentum_criteria
+        note: >
+          动量连续性判据已落地：总动量 = M·u、绕质心角动量 = I·ω（独立用惯量张量算）、
+          长度不符整体拒绝且一字不动、位置桥清速度的金丝雀（判据非恒真）。
+          见 core/tests/bridge_state_ledger.rs、fluid/tests/state_inheritance.rs、
+          soft/tests/cloth_state_inheritance.rs、splat/tests/splat_state_bridge.rs。
       - id: conflicting_record
         note: >
           PLAN-CONVERSION §3.3 的"交接策略三档"（(ii) 速度/角速度继承 + 质心修正、(iii) warm
           残量）在 2026-10-03 被标注为"按用户口径剔除"。⚠️ 这与用户 2026-10-08 的口述
-          （"你只搞状态继承"）相反 —— 本条按**最新口述**登记为 included，细化前先确认。
+          （"你只搞状态继承"）相反；本条按最新口述登记为 included，(ii) 已落地，(iii) 仍未做。
+      - id: gap_cross_representation
+        note: >
+          跨表示交接（体素片 → 刚体、布片 → 喷溅等）与"与手工建体逐位退化"对拍仍未落地 ——
+          那是 PLAN-CONVERSION 的交接策略片（属"换表示"），与本条已落地的"同表示状态搬运"分开登记。
     required_evidence:
-      - user_confirmation
-      - momentum_continuity_criteria
+      - implementation_path
+      - tests
     decision_id: null
     owner: maintainer
     notes: >
-      若要落地，PLAN-CONVERSION §3.3 已有现成判据草案：|Δp| ≤ ε_m·|p|、|ΔL| ≤ ε_L·|L|、
-      E_new ≤ E_old + ε，外加"(ii) 档与手工建体逐位退化"。先确认口径再动工。
+      判据草案（PLAN-CONVERSION §3.3）：|Δp| ≤ ε_m·|p|、|ΔL| ≤ ε_L·|L|、E_new ≤ E_old + ε，
+      外加"与手工建体逐位退化"。本片做到"同表示的状态搬运"：动量位级往返 + 解析对拍
+      （M·u / I·ω）；跨表示的质心修正与 warm 残量仍未做。
 
   - id: PHY-SCOPE-INTEROP-COUPLING
     title: 域间作用（跨域耦合 / interop）
@@ -324,12 +340,19 @@ capabilities:
           实现 ProviderColliders 与 MediumField ⇒ 接触提供者与介质场都已接线
           （providers.rs / world_step/medium.rs）。
       - id: bridge
-        note: 渲染桥 export_splats（零拷贝导出）；flow.rs 另有流场侧。
+        note: >
+          渲染桥 export_splats（零拷贝导出）+ 接口层状态桥（splat_access.rs，2026-10-08：
+          核中心导出/导入、速度槽登记、未开双向耦合时拒绝带速度的快照）；flow.rs 另有流场侧。
       - id: gap_layers
         note: >
-          ROUTE §3.1 的"三层用法"里：① 渲染桥 已落、③ 隐式场（Provider / MediumField）已落、
-          ② 物理代理（splat 当粒子域：质量 + 半径 + 取向，走颗粒/流体/软体求解）**未落地**；
+          ROUTE §3.1 的"三层用法"里：① 渲染桥与反向导入 已落、③ 隐式场（Provider / MediumField）
+          已落、② 物理代理（splat 当粒子域：质量 + 半径 + 取向，走颗粒/流体/软体求解）**未落地**；
           CATALOG 另记"均匀网格/BVH 加速待办"。
+      - id: mass_reading_gap
+        note: >
+          质量有两读：模块头与桥按 opacity（密度和系数 = 核质量），flow.rs 的动量分摊按
+          ρ·(4/3)π·σx·σy·σz（kernel_mass）。两读未统一 —— 本片按 opacity 登记（不静默改 flow），
+          留给②物理代理那片拍板（见 OPEN-PROBLEMS P11）。
     required_evidence:
       - implementation_path
       - tests

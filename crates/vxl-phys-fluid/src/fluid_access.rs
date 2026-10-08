@@ -1,11 +1,14 @@
 //! fluid_access：从 lib.rs 按域拆出（纯搬移，语义未改）。**公开**（`pub mod`）是为了让
 //! `from_positions`（扫描点云建流体）可被外部消费方调用 —— 私有模块里的 `pub fn` 判 dead_code。
 use super::*;
-use vxl_phys_core::interop::{BridgeKind, StateBridge};
 
 // 晶格初始化原语：单开文件让本文件**净缩**（`new` 从这里拿回 4 行写法的两行声明）。
 #[path = "fluid_access/lattice.rs"]
 mod lattice;
+// **状态桥**（`StateBridge` 实现）搬到子模块：本文件受 god 门 file_lines 棘轮（只准减），
+// 而"位置桥 → 状态桥"这次要加两个方法（速度/逐粒质量）⇒ 净账靠外迁保住。
+#[path = "fluid_access/state.rs"]
+mod state;
 use lattice::{lattice_positions, lattice_w_sum};
 
 /// **按给定位置建流体系统**（`ROUTE.md` §4「扫描场景起步」的落点）：点云/扫描件先经
@@ -184,24 +187,5 @@ impl FluidSystem {
 
     pub fn set_boundaries(&mut self, ids: &[u32]) {
         self.boundaries = ids.to_vec();
-    }
-}
-
-/// **状态桥（`StateBridge`）**：流体粒子段的导出/导入 —— `ROUTE.md` §5 ②表示层的**第一个**真实现
-/// （此前该 trait 全仓**零实现**）。
-///
-/// `export_positions` 按索引序只写**流体段**（2b 边界粒子每 tick 由门面重建，不算流体状态）；
-/// `import_positions` 长度必须**恰好**等于流体段，否则**拒绝且一字不动**（返回 `false`）；
-/// 成功后**同时清速度** —— 导入的语义是"把粒子放到给定位置"，不是凭空注入动能。
-// 紧凑写法（god 门文件行数棘轮）：`#[rustfmt::skip]` 保持单行 fn，本仓既有先例。
-#[rustfmt::skip]
-impl StateBridge for FluidSystem {
-    fn kind(&self) -> BridgeKind { BridgeKind::Particle }
-    fn export_positions(&self, out: &mut Vec<Vec3>) { out.extend_from_slice(&self.pos[..self.n_fluid]); }
-    fn import_positions(&mut self, src: &[Vec3]) -> bool {
-        if src.len() != self.n_fluid { return false; }
-        self.pos[..self.n_fluid].copy_from_slice(src);
-        self.vel[..self.n_fluid].fill(Vec3::ZERO);
-        true
     }
 }

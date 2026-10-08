@@ -34,6 +34,9 @@ use vxl_phys_core::interop::{InteropContact, ProviderColliders};
 use vxl_phys_core::{Aabb, Mat3, Vec3};
 
 mod flow;
+// **状态桥**（`StateBridge` 实现）单开文件：本文件在 god 门 file_lines 基线上（695 行），
+// 加模块声明这一行的账由 `rebuild_grid` 的循环不变量外提（截断半径 `r` 每核只算一次）换回。
+mod splat_access;
 
 /// `sdf()` 的**近场细化带**（米）：一阶值的绝对值超过它就直接返回一阶值、不做牛顿投影。
 /// 取 0.5 m 覆盖常见体半径与皮肤带量级（只在此带内接触才需要"真距离"）。
@@ -198,9 +201,8 @@ impl GaussianSplatField {
         let mut bins: Vec<Vec<u32>> = vec![Vec::new(); n_bins as usize];
         let inv_bin = 1.0 / bin;
         for (i, s) in self.splats.iter().enumerate() {
-            let r = max_s * self.cut.sqrt();
-            let lo = s.center - Vec3::splat(r);
-            let hi = s.center + Vec3::splat(r);
+            let lo = s.center - Vec3::splat(bin);
+            let hi = s.center + Vec3::splat(bin);
             let c0 = (
                 (((lo.x - b.min.x) * inv_bin).floor().max(0.0)) as u32,
                 (((lo.y - b.min.y) * inv_bin).floor().max(0.0)) as u32,
