@@ -12,7 +12,12 @@
 //! - `−∇W` 取**对称化**形式 `(W̄/ℓ²)·r`：`W̄ = (w_k(c_j) + w_j(c_k))/2`（各向异性也对称）、
 //!   `ℓ = (r_k(r̂) + r_j(r̂))/2`（两核沿连线方向的支撑半径均值）、`r = c_k − c_j`
 //!   ⇒ `m_k·dv_k = −m_j·dv_j` **逐对精确**。
-//! - **只做斥力**（`p ≥ 0`）：没有内聚项 ⇒ 远距离核与孤立核都不受力（判据里的金丝雀）。
+//! - **压力恒为斥力**：P11 质量口径下孤立核自密度 = ρ0、邻居只会抬高 ρ ⇒ `p ≥ 0` 恒成立，
+//!   没有"稀疏带"（见 `OPEN-PROBLEMS` P12 与扫距判据）⇒ 远距离核与孤立核都不受力。
+//! - **内聚 = 显式吸引偏置**（`cohesion`，Pa；默认 0 = 关）：在对循环里把 EOS 压力**减去**
+//!   `cohesion` 再代入同一个对称式 ⇒ `p < cohesion` 的稀疏侧转成吸引、近距仍被斥力顶住，
+//!   **平衡密度由 `p(ρ) = cohesion` 定义**（= 平衡间距可解析算）。它仍是**逐对反对称**的
+//!   ⇒ 动量守恒照旧；`cohesion = 0` 走另一条分支 ⇒ **逐位不变**。
 //! - `medium_density ≤ 0` / `sound_speed ≤ 0` / `dt ≤ 0` / 核数 < 2 ⇒ 空操作。
 //! - 确定性：核按注册序枚举对（用既有的候选迭代）、无 HashMap、无浮点归约顺序变化。
 use crate::GaussianSplatField;
@@ -25,6 +30,9 @@ pub struct SelfPressure {
     pub rest_density: f32,
     /// 声速 c（m/s）：`B = c²ρ0/γ` —— 压力的硬软旋钮。
     pub sound_speed: f32,
+    /// **内聚偏置**（Pa；0 = 关 = 只斥力）。压力 `p < cohesion` 的粒子对之间转成吸引，
+    /// **平衡密度**由 `p(ρ) = cohesion` 给出 ⇒ 平衡间距是解析可算的（判据扫距找符号翻转）。
+    pub cohesion: f32,
 }
 
 impl Default for SelfPressure {
@@ -32,6 +40,7 @@ impl Default for SelfPressure {
         Self {
             rest_density: 1000.0,
             sound_speed: 1.0,
+            cohesion: 0.0,
         }
     }
 }
@@ -68,7 +77,7 @@ pub fn apply_self_pressure(field: &mut GaussianSplatField, dt: f32, cfg: SelfPre
         field.kern_vel.clear();
         field.kern_vel.resize(n, Vec3::ZERO);
     }
-    let dv = pair_impulses(field, &rho, &press, &mass, dt);
+    let dv = pair_impulses(field, &rho, &press, &mass, dt, cfg.cohesion);
     let mut impulse = Vec3::ZERO;
     for k in 0..n {
         field.kern_vel[k] += dv[k];
@@ -116,6 +125,7 @@ fn pair_impulses(
     press: &[f32],
     mass: &[f32],
     dt: f32,
+    cohesion: f32,
 ) -> Vec<Vec3> {
     let n = field.splats.len();
     let mut dv = vec![Vec3::ZERO; n];
@@ -142,9 +152,15 @@ fn pair_impulses(
             if ell.is_nan() || ell <= 0.0 {
                 continue;
             }
-            let coef = (press[k] / (rho[k] * rho[k]) + press[j] / (rho[j] * rho[j]))
-                * (w / (ell * ell))
-                * dt;
+            // 对称系数：压力项恒 ≥0（斥力）；`cohesion > 0` 时减去偏置 ⇒ 稀疏侧转吸引。
+            // `cohesion = 0` 走另一分支 ⇒ 与"只斥力"逐位相同。
+            let num = if cohesion > 0.0 {
+                (press[k] - cohesion) / (rho[k] * rho[k])
+                    + (press[j] - cohesion) / (rho[j] * rho[j])
+            } else {
+                press[k] / (rho[k] * rho[k]) + press[j] / (rho[j] * rho[j])
+            };
+            let coef = num * (w / (ell * ell)) * dt;
             let a = r * coef; // 单位质量冲量方向项
             dv[k] += a * mass[j];
             dv[j] -= a * mass[k];

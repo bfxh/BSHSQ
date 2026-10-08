@@ -197,7 +197,7 @@ cargo test -p vxl-phys-fluid --test wind_surface    # 单粒解析对拍 + 内�
 cargo test -p vxl-phys        --test wind_liquid    # 门面 A/B：顺风档 vs 零风档 + 表面领先内部
 cargo test -p vxl-phys-splat --test splat_mass      # 核质量 = 场的积分质量（144³ 中点法对拍）
 cargo test -p vxl-phys-splat --test splat_particles # 粒子域运动步：自由落体闭式 + 贴面静置 + 穿地金丝雀
-cargo test -p vxl-phys-splat --test splat_pressure  # 自场压力：互斥/动量守恒/关档 + **扫距**（全带无吸引）
+cargo test -p vxl-phys-splat --test splat_pressure  # 自场压力：互斥/动量守恒/关档 + 扫距 + **内聚**（平衡点对拍）
 cargo test -p vxl-phys-splat --test splat_viscosity # 自场黏性：等速度逐位不动 + 只耗散 + 动量守恒
 cargo test -p vxl-phys-splat --test splat_grid_parity # 候选网格 vs 全扫逐位一致（+ 拐点扫描，只报数）
 cargo test -p vxl-phys --lib splat_dynamics          # 门面接线：真体素地板静置 + 关档逐位不动 + 确定性
