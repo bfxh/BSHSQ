@@ -13,8 +13,9 @@
 //!    ⇒ **没有"稀疏带吸引"**；要做内聚/表面张力得**另立机制**（见 `KNOWLEDGE.md` §K）。
 //!
 //! ⚠️ 本文件不许出现 `unwrap` / `expect` / `panic!` / `.clone()`（新文件零基线）。
-use vxl_phys_core::interop::MediumField as _;
+use vxl_phys_core::interop::{MediumField as _, NoProviders};
 use vxl_phys_core::{Mat3, Vec3};
+use vxl_phys_splat::particles::{step_particles, ParticleStep};
 use vxl_phys_splat::pressure::{apply_self_pressure, SelfPressure};
 use vxl_phys_splat::{GaussianSplatField, Splat};
 
@@ -156,4 +157,100 @@ fn pressure_pair_is_never_attractive_across_the_whole_band() {
         worst >= 0.0,
         "全带内不许出现吸引（最负 {worst:.3e} @ d={nearest}）"
     );
+}
+
+/// 内聚档（`cohesion = 2300 Pa`）——量级锚：`B = c²ρ0/γ = 1000/7 ≈ 142.9 Pa`，
+/// 目标平衡 **密度比 1.5**（`ρ_eq/ρ0 = (1 + cohesion/B)^{1/7} = 1.5`）⇒ 解析平衡间距
+/// `d_eq = σ·√(−2 ln 0.5) ≈ 1.177σ`（σ = 0.2 ⇒ 0.2354）。
+fn cohesion_cfg() -> SelfPressure {
+    SelfPressure {
+        cohesion: 2300.0,
+        ..SelfPressure::default()
+    }
+}
+
+/// **解析平衡 vs 实测符号翻转**：`p(ρ) = cohesion` 给出的平衡间距两侧，净力必须异号。
+/// 这条把"内聚有界且可标定"钉住（不是"找个系数看起来像"）。
+#[test]
+fn cohesion_equilibrium_matches_the_analytic_density() {
+    let sigma = 0.2f32;
+    let b = 1.0f32 * 1.0 * 1000.0 / 7.0; // sound_speed²·ρ0/γ
+    let ratio = (1.0 + 2300.0 / b).powf(1.0 / 7.0); // ρ_eq/ρ0（= 1.5）
+    let e = ratio - 1.0;
+    let d_eq = sigma * (-2.0 * e.ln()).sqrt();
+    assert!(
+        (ratio - 1.5).abs() < 1e-3,
+        "量级锚：平衡密度比应 ≈1.5，得 {ratio}"
+    );
+
+    let rel_at = |d: f32| {
+        let mut f = field(&[Vec3::ZERO, Vec3::new(d, 0.0, 0.0)], &[1.0, 1.0]);
+        apply_self_pressure(&mut f, 1.0 / 240.0, cohesion_cfg());
+        let v = f.kernel_velocities();
+        v[1].x - v[0].x
+    };
+    let inside = rel_at(d_eq * 0.9);
+    let outside = rel_at(d_eq * 1.1);
+    println!("内聚平衡：d_eq={d_eq:.4} | 0.9·d_eq 相对速度={inside:.3e} | 1.1·d_eq={outside:.3e}");
+    assert!(
+        inside > 0.0,
+        "平衡点内侧必须是**斥力**（实得 {inside:.3e}）"
+    );
+    assert!(
+        outside < 0.0,
+        "平衡点外侧必须是**吸引**（实得 {outside:.3e}）"
+    );
+}
+
+/// **自由演化收敛**：两核从平衡点外侧出发（零重力、每步阻尼 0.95）⇒ 间距收敛到 `d_eq` 附近、
+/// 速度收敛、无 NaN（内聚是**有界**的：近距仍被压力顶住，不会塌成一点）。
+#[test]
+fn cohesion_pair_converges_to_the_equilibrium() {
+    let sigma = 0.2f32;
+    let d_eq = sigma * 1.176_7;
+    let mut f = field(&[Vec3::ZERO, Vec3::new(d_eq * 1.6, 0.0, 0.0)], &[1.0, 1.0]);
+    let cfg = cohesion_cfg();
+    let step = ParticleStep {
+        gravity: Vec3::ZERO,
+        damping: 0.95,
+    };
+    for _ in 0..900 {
+        apply_self_pressure(&mut f, 1.0 / 240.0, cfg);
+        step_particles(&mut f, 1.0 / 240.0, &NoProviders, &[], step);
+    }
+    let d = (f.splats()[1].center.x - f.splats()[0].center.x).abs();
+    let v = f.kernel_velocities();
+    println!(
+        "内聚收敛：d={d:.4}（目标 {d_eq:.4}）| |v|={:.3e}",
+        v[0].length()
+    );
+    assert!(d.is_finite() && d > 0.0, "间距必须有限：d={d}");
+    assert!(
+        (d - d_eq).abs() < 0.25 * d_eq,
+        "应收敛到平衡间距附近：d={d:.4} vs d_eq={d_eq:.4}"
+    );
+    assert!(v[0].length() < 0.05, "应已收敛：|v|={}", v[0].length());
+}
+
+/// **动量守恒**（内聚档、不等质量）：`Δp = 0` 仍是逐对构造出来的（与斥力同一套反对称写法）。
+#[test]
+fn cohesion_preserves_momentum_with_unequal_masses() {
+    let mut f = field(&[Vec3::ZERO, Vec3::new(0.35, 0.0, 0.0)], &[0.5, 1.5]);
+    let (m0, m1) = (
+        f.splats()[0].mass(f.medium_density),
+        f.splats()[1].mass(f.medium_density),
+    );
+    let p0 = f.kernel_velocities().first().copied().unwrap_or(Vec3::ZERO) * m0
+        + f.kernel_velocities().get(1).copied().unwrap_or(Vec3::ZERO) * m1;
+    let imp = apply_self_pressure(&mut f, 1.0 / 240.0, cohesion_cfg());
+    let v = f.kernel_velocities();
+    let p1 = v[0] * m0 + v[1] * m1;
+    let scale = p1.length().max(1e-12);
+    assert!(
+        (p1 - p0).length() / scale < 1e-6,
+        "内聚档动量仍须守恒：Δp={:?}",
+        p1 - p0
+    );
+    assert!(imp.length() / scale < 1e-6, "净冲量≈0：{imp:?}");
+    assert!(v[1].x < v[0].x, "外侧核应被拉向内侧（吸引）：v={v:?}");
 }

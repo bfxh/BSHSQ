@@ -370,7 +370,10 @@ capabilities:
           **门面接线**：`dynamics::SplatDynamics` 挂在场上，`World::step` 的体子步跑
           `world_step/splat_dynamics::pass`（借出场 → 跑 → 放回；接口 = 带 skin 的
           `ProviderColliders`），判据 `src/tests/splat_dynamics.rs`（真体素地板静置 / 关档逐位不动）；
-          **仍未做**：内聚/表面张力、更快的候选结构（已否证，见 KNOWLEDGE §I）、id 表缓存；
+          同日第五片 **内聚**：`SelfPressure::cohesion`（Pa，默认 0 = 关；显式吸引偏置，平衡密度
+          `p(ρ) = cohesion` 解析可算），判据见 `tests/splat_pressure.rs`（0.9/1.1·d_eq 符号翻转 +
+          自由演化收敛到 d_eq + 不等质量动量守恒）；
+          **仍未做**：更快的候选结构（已否证，见 KNOWLEDGE §I）、id 表缓存；
           CATALOG 另记"均匀网格/BVH 加速待办"。
       - id: mass_reading_gap
         note: >
