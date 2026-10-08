@@ -76,29 +76,11 @@ impl VoxelVolume {
 
     /// 单轮核：在 `[min,max]` 内按 `seeds` 逐种子提取（每格恰属一个种子；并列取序号小者）。
     fn extract_blocks(&mut self, min: Vec3, max: Vec3, seeds: &[Vec3]) -> Vec<Vec<(Vec3, Vec3)>> {
-        let (origin, step) = (self.origin, self.step);
-        let mut out = Vec::new();
-        for (si, &seed) in seeds.iter().enumerate() {
-            let boxes = self.extract_where(min, max, |ix, iy, iz| {
-                let c =
-                    origin + Vec3::new(ix as f32 + 0.5, iy as f32 + 0.5, iz as f32 + 0.5) * step;
-                let d_me = (c - seed).length_squared();
-                for (sj, &other) in seeds.iter().enumerate() {
-                    if sj == si {
-                        continue;
-                    }
-                    let d_o = (c - other).length_squared();
-                    if d_o < d_me || (d_o == d_me && sj < si) {
-                        return false;
-                    }
-                }
-                true
-            });
-            if !boxes.is_empty() {
-                out.push(boxes);
-            }
-        }
-        out
+        // 与单轮 `fracture_voronoi` **共用**一份划分实现（`voxel_voronoi.rs`）；这里只丢掉种子序号。
+        self.voronoi_blocks(min, max, seeds)
+            .into_iter()
+            .map(|(_, boxes)| boxes)
+            .collect()
     }
 }
 
