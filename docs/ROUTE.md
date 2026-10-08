@@ -53,7 +53,7 @@
 | 软体 | 粒子 + XPBD 距离/体积 | XPBD（SPEC §4.6） | `vxl-phys-soft` 参数骨架 |
 | 布料 | 三角网 + XPBD 三组约束 | XPBD + 面元气动（SPEC §4.7） | 同上 |
 | 液体 | 粒子（SPH/PBF）/ 网格（FLIP） | WCSPH → PBF/FLIP 分层（SPEC §4.8） | **`vxl-phys-fluid` WCSPH 已落地（0.3 切片 1：CPU 档驻留/体素边界/确定性；PLAN-0.3 §4）** |
-| **高斯喷溅（3DGS）** | 各向异性高斯集合 | **三层用法（本文新增，§3.1）** | ❌ 未建 |
+| **高斯喷溅（3DGS）** | 各向异性高斯集合 | **三层用法（本文新增，§3.1）** | ✅ **`vxl-phys-splat` 已建并接线**：隐式场 `GaussianSplatField` 实现 `ProviderColliders` / `MediumField`（`providers.rs` / `world_step/medium.rs`）+ 渲染桥 `export_splats`。⚠️ §3.1 三层里 **② "物理代理"（splat 当粒子域）仍缺** ⇒ 状态见 `CAPABILITIES.yaml` 的 `PHY-SCOPE-SPLAT` |
 | 风/气动 | 面元 + 速度场 | 面元气动力 + 可选尾流（SPEC §4.7/§4.10 同族） | `vxl-phys-aero` 骨架 |
 | 车辆 | 射线悬挂 + 刷子轮胎 | SPEC §4.10 | `vxl-phys-wheeled` 骨架 |
 | 机械/关节 | 约束族（铰链/齿轮/绳…） | SPEC §2.5 | `vxl-phys-mech` 骨架 |
