@@ -9,8 +9,9 @@
 //! `extract_where` 的扫描序与 +X/+Y/+Z 贪心扩展方向不变 ⇒ 盒列表逐位相同（单测用**朴素实现**
 //! 当陪测，端到端证据 = `m3_collapse` 金样哈希不变 —— 它覆盖整条破坏管线）。
 //!
-//! **复杂度**：归属 `O(格数 × 种子数)` + 每种子一次区域扫描（谓词 = 一次查表）`O(格数 × 种子数)`
-//! ⇒ 合计 `O(格数 × 种子数)`（旧实现含一个额外的 `× 种子数` 因子）。
+//! **复杂度**：归属 `O(格数 × 种子数)` + 每种子只在**保守 AABB** 内扫描（见 `seed_box`）+
+//! 裁剪本身 `O(种子数²)` ⇒ 合计 `O(格数 × 种子数)`（旧实现含一个额外的 `× 种子数` 因子，
+//! 且每种子要扫**整个区域**）。
 //!
 //! 新文件不用 glob 导入（`glob-gate` 对新文件零基线）⇒ 下面显式 `use`。
 use super::voxel_volume::VoxelVolume;
@@ -54,13 +55,61 @@ impl VoxelVolume {
         let owner = self.owner_map(min, max, seeds);
         let mut out = Vec::new();
         for (si, _) in seeds.iter().enumerate() {
-            let boxes =
-                self.extract_where(min, max, |ix, iy, iz| owner.at(ix, iy, iz) == si as u32);
+            // 只在**保守 AABB** 内提取（P13）：盒必然包含该种子的 Voronoi 胞 ⇒ 盒列表逐位不变，
+            // 但每次扫描从"全区域"降到"该种子的邻域"。
+            let (lo, hi) = self.seed_box(min, max, si, seeds);
+            let boxes = self.extract_where(lo, hi, |ix, iy, iz| owner.at(ix, iy, iz) == si as u32);
             if !boxes.is_empty() {
                 out.push((si, boxes));
             }
         }
         out
+    }
+
+    /// 种子的**保守 AABB**：把外区域盒用与其余种子的**二分面半空间**逐次裁剪
+    /// （`|p−sᵢ|² ≤ |p−sⱼ|²` ⇔ `2p·(sⱼ−sᵢ) ≤ |sⱼ|²−|sᵢ|²`，是线性不等式）。
+    ///
+    /// 每轴只做"**另一轴取最大贡献**"的保守收缩（不引线性规划）：对轴 `i` 与 `aᵢ > 0`，
+    /// `pᵢ ≤ (b − Σ_{j≠i} max(a_j p_j)) / aᵢ`；`aᵢ < 0` 时同式给出下界（除负号翻转）。
+    /// 最后**向外扩一格**并夹回外区域 —— ① 保住"盒 ⊇ 胞"；② `extract_where` 用 `floor` 取格，
+    /// 扩一格保证边界格不被漏掉。种子自身恒满足所有约束 ⇒ 盒非空。
+    fn seed_box(&self, min: Vec3, max: Vec3, si: usize, seeds: &[Vec3]) -> (Vec3, Vec3) {
+        let (mut lo, mut hi) = (min, max);
+        let s = seeds[si];
+        let s2 = s.length_squared();
+        for (sj, &other) in seeds.iter().enumerate() {
+            if sj == si {
+                continue;
+            }
+            let a = (other - s) * 2.0;
+            let b = other.length_squared() - s2;
+            // 其余轴一律取**最小贡献**才是保守界（写反会把盒缩得比胞还小 ⇒ 提取全空）：
+            //   `aᵢ > 0` 时 `pᵢ ≤ (b − T)/aᵢ`，取 `T = min T` 得最大上界；
+            //   `aᵢ < 0` 时 `pᵢ ≥ (b − T)/aᵢ`，同样取 `T = min T` 得**最小**（最宽松）下界。
+            let mn = |aj: f32, lo_j: f32, hi_j: f32| if aj > 0.0 { aj * lo_j } else { aj * hi_j };
+            let (mnx, mny, mnz) = (
+                mn(a.x, lo.x, hi.x),
+                mn(a.y, lo.y, hi.y),
+                mn(a.z, lo.z, hi.z),
+            );
+            if a.x > 0.0 {
+                hi.x = hi.x.min((b - (mny + mnz)) / a.x);
+            } else if a.x < 0.0 {
+                lo.x = lo.x.max((b - (mny + mnz)) / a.x);
+            }
+            if a.y > 0.0 {
+                hi.y = hi.y.min((b - (mnx + mnz)) / a.y);
+            } else if a.y < 0.0 {
+                lo.y = lo.y.max((b - (mnx + mnz)) / a.y);
+            }
+            if a.z > 0.0 {
+                hi.z = hi.z.min((b - (mnx + mny)) / a.z);
+            } else if a.z < 0.0 {
+                lo.z = lo.z.max((b - (mnx + mny)) / a.z);
+            }
+        }
+        let e = Vec3::splat(self.step());
+        ((lo - e).max(min), (hi + e).min(max))
     }
 
     /// 一遍归属：占据格取 `(d², 序号)` 最小的种子（与旧判据**逐字同规则**）。
