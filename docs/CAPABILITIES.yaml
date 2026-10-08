@@ -359,9 +359,11 @@ capabilities:
           CATALOG 另记"均匀网格/BVH 加速待办"。
       - id: mass_reading_gap
         note: >
-          质量有两读：模块头与桥按 opacity（密度和系数 = 核质量），flow.rs 的动量分摊按
-          ρ·(4/3)π·σx·σy·σz（kernel_mass）。两读未统一 —— 本片按 opacity 登记（不静默改 flow），
-          留给②物理代理那片拍板（见 OPEN-PROBLEMS P11）。
+          质量口径**已定案（2026-10-08，P11 关闭）**：质量 = 介质密度场的**积分质量**
+          `ρ_medium·opacity·(2π)^{3/2}·σx·σy·σz`（`Splat::mass`，flow 的动量分摊与状态桥
+          共用这一处）；`opacity` 回到"密度场权重"的身份。判据：桥的动量账 == 沉积账、
+          144³ 数值积分对拍解析值、派生量篡改被拒、默认档逐位不变。
+          ⇒ ②物理代理的**前置口径不再阻塞**（粒子质量有了单一来源）。
     required_evidence:
       - implementation_path
       - tests

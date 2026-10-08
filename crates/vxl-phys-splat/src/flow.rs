@@ -45,15 +45,12 @@ impl GaussianSplatField {
         self.absorbed
     }
 
-    /// 核质量口径：`ρ·(4/3)π·σx σy σz`（1σ 椭球体积 × 介质密度）。σ 下限与 `alpha` 同（1e-4）。
+    /// 核质量口径：**单一来源在 [`Splat::mass`]**（介质密度场的积分质量，P11 定案）。
+    /// 这里的 `.max(1e-9)` 只是**除零下限**（`medium_density = 0` 的场仍可开 two_way，
+    /// 分摊公式不能出 NaN）—— 不是第二套质量口径。
+    #[inline]
     fn kernel_mass(&self, k: usize) -> f32 {
-        let s = self.splats[k];
-        let vol = (4.0 / 3.0)
-            * std::f32::consts::PI
-            * s.scale.x.max(1e-4)
-            * s.scale.y.max(1e-4)
-            * s.scale.z.max(1e-4);
-        (self.medium_density * vol).max(1e-9)
+        self.splats[k].mass(self.medium_density).max(1e-9)
     }
 
     /// 核速度的 e 加权插值（`MediumField::sample` 的速度项；two_way 关 ⇒ 常值回落）。

@@ -186,6 +186,7 @@ cargo test -p vxl-phys-splat --test splat_state_bridge       # 喷溅：核中�
 cargo test -p vxl-phys-aero  --test medium_field    # 空气 `MediumField`：均匀/关档/运动学 + 动量槽
 cargo test -p vxl-phys-fluid --test wind_surface    # 单粒解析对拍 + 内部逐位不动 + 双向账
 cargo test -p vxl-phys        --test wind_liquid    # 门面 A/B：顺风档 vs 零风档 + 表面领先内部
+cargo test -p vxl-phys-splat --test splat_mass      # 核质量 = 场的积分质量（144³ 中点法对拍）
 ```
 
 ⚠️ 阈值口径（`SurfaceDrag::surface_ratio = 0.9`）是**实测标定**的：内部残差亏 ≤1e-4·ρ0、

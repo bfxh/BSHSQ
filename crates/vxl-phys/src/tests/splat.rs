@@ -290,11 +290,11 @@ fn drifting_medium_bounds_follow_kernels() {
         f.damping = 1.0; // 不衰减：本判据量的是"几何跟随"，把动力学因素取直
         w.add_splat_field(f);
         let bb0 = w.provider_bounds[0]; // 注册时快照
-                                        // 直接给核注入 −y 动量（经 `MediumField::deposit`；不依赖体动力学。核质量
-                                        // ≈3.0·(4/3)π·0.125 ≈ 1.57 kg ⇒ J_y = −2.36 给 ≈1.5 m/s）
+                                        // 直接给核注入 −y 动量（不依赖体动力学）：J = −1.5·m（质量取单一来源）。
         if let Some(fm) = w.providers.splat_mut(0) {
             use vxl_phys_core::interop::MediumField as _;
-            fm.deposit(Vec3::ZERO, Vec3::new(0.0, -2.36, 0.0), 0.0, 0.0);
+            let j = -1.5 * fm.splats()[0].mass(fm.medium_density);
+            fm.deposit(Vec3::ZERO, Vec3::new(0.0, j, 0.0), 0.0, 0.0);
         }
         for _ in 0..60 {
             w.step(); // 平流 1 s

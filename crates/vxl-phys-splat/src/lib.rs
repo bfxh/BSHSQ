@@ -78,6 +78,25 @@ impl Splat {
             self.rot.mul_vec3(Vec3::Z),
         ]
     }
+
+    /// **核的物理质量**（P11 定案，2026-10-08）：介质密度场 `σ(p) = opacity·exp(−½α)` 里
+    /// 这一颗核的**积分质量**
+    ///   `m = ρ_medium·opacity·(2π)^{3/2}·σx σy σz`
+    /// （`∫ρ·opacity·exp(−½α)dV` 的解析值；σ 下限与 `alpha` 同，1e-4）。
+    ///
+    /// **单一来源**：`flow.rs` 的动量分摊（`Σ m·Δv = J`）与 `StateBridge` 导出的质量都调它 ⇒
+    /// 桥的动量账与介质的沉积账**是同一本账**（此前一处按 `opacity`、一处按椭球体积 ⇒ P11）。
+    /// `medium_density <= 0` ⇒ 返回 0（该场没声明介质质量，桥侧按"未登记"处理）。
+    pub fn mass(&self, medium_density: f32) -> f32 {
+        let (sx, sy, sz) = (
+            self.scale.x.max(1e-4),
+            self.scale.y.max(1e-4),
+            self.scale.z.max(1e-4),
+        );
+        // (2π)^{3/2} = 2π·√(2π)：只用乘/开方（不引 powf 的平台差异）。
+        let tau = std::f32::consts::TAU;
+        medium_density * self.opacity * (tau * tau.sqrt()) * sx * sy * sz
+    }
 }
 
 /// 均匀网格（密集 `Vec<Vec<u32>>`；按注册序登记 ⇒ 格内索引自然升序。
