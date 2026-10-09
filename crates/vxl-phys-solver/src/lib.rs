@@ -27,15 +27,15 @@ mod cfg;
 mod constraint;
 mod helpers;
 mod island;
+mod shock_budget;
 mod solver_impl;
 mod stats;
 mod types;
 mod warm;
 mod warm_data;
+pub(crate) use self::shock_budget::island_shock_budget;
 pub use self::{cfg::*, stats::*, types::*};
 pub(crate) use self::{constraint::*, helpers::*, island::*, warm::*, warm_data::*};
-// ↑ 子模块顶层条目再导出（impl-only 模块不入 glob，避免 unused）
-
 #[cfg(test)]
 mod tests {
     use super::*;

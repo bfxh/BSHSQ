@@ -134,8 +134,11 @@ r4 = g["R4_penetration_distribution"]
 chk("R4", "deep_gt_4skin_samples", r4["deep_gt_4skin_samples"] == 0, f"{r4['deep_gt_4skin_samples']} = 0")
 chk("R4", "depth_p99_m", r4["depth_p99_m"] <= 0.06, f"{r4['depth_p99_m']:.5f} ≤ 0.06")
 
+# 2026-10-09 自适应 shock 扫掠修掉"重压轻"不收敛后，first_fail_ratio 从 20 提到
+# 1000（比 ≤100 全过）。门阈值同步从 20 收到 100：留住 10× 余量（不把上界当判据），
+# 但下次退化回 20 会红。
 r5 = g["R5_mass_ratio_stack2"]
-chk("R5", "first_fail_ratio", r5["first_fail_ratio"] >= 20, f"{r5['first_fail_ratio']} ≥ 20")
+chk("R5", "first_fail_ratio", r5["first_fail_ratio"] >= 100, f"{r5['first_fail_ratio']} ≥ 100")
 nan_rows = [row["ratio"] for row in r5.get("rows", []) if row.get("nan")]
 chk("R5", "rows_nan", not nan_rows, f"nan 行={nan_rows}")
 
