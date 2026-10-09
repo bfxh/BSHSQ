@@ -11,8 +11,7 @@
 //!    —— 与 SPH 核同形（都是各向同性/异性核叠加），故该场可直接复用作介质采样源。
 //!
 //! 确定性：全部遍历按 splat 注册序；无 HashMap/无浮点归约顺序变化。
-//! 性能边界：点查询 O(#splats·cut)（√cut·σ 外截断）；加速结构（均匀网格/BVH）见
-//! CATALOG「待办」——当前档位面向演示与中等规模（≤ 数千颗）。
+//! 性能边界：无网格时点查询 O(#splats)；`rebuild_grid` 后只扫所在格候选——收益取决于**局部性**（判据见 `tests/splat_grid_parity.rs` / KNOWLEDGE §I）。
 //!
 //! ## 截断半径的**余量规则**（2026-09-21，P6 根因修复；`cut` 是基础参数，别单独改它）
 //!
@@ -25,8 +24,8 @@
 //! ⇒ **规则**：`σ·(√cut − 1.31) ≳ 最大查询偏移`（球半径 / 盒半长 + 皮肤带），
 //! 默认据此取 `cut = 16`（4σ ⇒ σ=0.5 时余量 0.69 m）。
 //! **耦合面**（改 `cut` 必须同时改这三处，否则网格会漏核、界盒会截断场）：
-//! ① `density_grad` 的逐核截断；② `rebuild_grid` 的 bin 与逐核登记范围；
-//! ③ `world_bounds` 的外包盒。三者都按 `√cut·σ` 计算。
+//! ① `density_grad` 的逐核截断；② `rebuild_grid` 的 bin 尺度与逐核登记范围（bin = 中位 σ·√cut，
+//! 登记 = 每核自己的 √cut·σ，覆盖前提只靠后者）；③ `world_bounds` 的外包盒。三者都按 `√cut·σ` 计算。
 
 #![forbid(unsafe_code)]
 
@@ -189,8 +188,7 @@ impl GaussianSplatField {
             splats: Vec::new(),
             dynamics: None,
             iso,
-            // 4σ 截断（模块头"余量规则"）：3σ 时等值面上方只剩 0.19·σ 余量，
-            // 撑不住常见体半径 ⇒ 体心落进死区、永不静置（实测见 P6/splat_rest_probe）。
+            // 4σ 截断（模块头"余量规则"）：3σ 时上方余量不足 0.19·σ ⇒ 体心落进死区、永不静置（P6/splat_rest_probe）。
             cut: 16.0,
             grid: None,
             grid_min_splats: 64,
@@ -217,29 +215,26 @@ impl GaussianSplatField {
         self.grid = None; // 脏（下次查询退回全扫；需要时重建）
     }
 
-    /// 建/重建均匀网格（格边长 = 3·max(尺度)；超限或核数不足则建空）。
-    /// 幂等：重复调用结果相同（确定性）。
+    /// 建/重建均匀网格（格边长 = √cut·**中位**核半径；超限或核数不足则建空）。
+    /// **覆盖前提**：核 k 的 AABB = `center ± √cut·σ_k`，登记覆盖到的**所有**格 ⇒ 被 k 覆盖的查询点所在格必已登记 k（与单格查询配对 ⇒ 不丢核、逐位一致）。幂等；bin 只影响表密度。
     pub fn rebuild_grid(&mut self) {
         self.grid = None;
-        let n = self.splats.len();
-        if n < self.grid_min_splats {
+        if self.splats.len() < self.grid_min_splats || self.splats.is_empty() {
             return;
         }
-        let mut max_s = 0.0f32;
-        for s in &self.splats {
-            max_s = max_s.max(s.scale.x).max(s.scale.y).max(s.scale.z);
-        }
-        // bin 与登记半径都跟 `cut` 走（模块头"耦合面"②）：bin = 最大截断半径 ⇒
-        // 单格查询即可覆盖"覆盖查询点"的核；逐核登记 `center ± √cut·σ` 的盒子。
-        let bin = max_s * self.cut.sqrt();
-        if bin <= 1e-6 {
+        let rc = self.cut.sqrt();
+        let mut s: Vec<f32> = self.splats.iter().map(|k| k.max_radius()).collect();
+        s.sort_by(|a, b| a.total_cmp(b));
+        let bin = s[s.len() / 2] * rc;
+        if !bin.is_finite() || bin <= 1e-6 {
             return;
         }
         let b = self.world_bounds();
+        let d = |v: f32| (v / bin).ceil() as u32 + 1;
         let dims = (
-            ((b.max.x - b.min.x) / bin).ceil() as u32 + 1,
-            ((b.max.y - b.min.y) / bin).ceil() as u32 + 1,
-            ((b.max.z - b.min.z) / bin).ceil() as u32 + 1,
+            d(b.max.x - b.min.x),
+            d(b.max.y - b.min.y),
+            d(b.max.z - b.min.z),
         );
         let n_bins = dims.0 as u64 * dims.1 as u64 * dims.2 as u64;
         if n_bins == 0 || n_bins > GRID_MAX_BINS {
@@ -248,17 +243,19 @@ impl GaussianSplatField {
         let mut bins: Vec<Vec<u32>> = vec![Vec::new(); n_bins as usize];
         let inv_bin = 1.0 / bin;
         for (i, s) in self.splats.iter().enumerate() {
-            let lo = s.center - Vec3::splat(bin);
-            let hi = s.center + Vec3::splat(bin);
+            // 逐核半径（各轴不同）：登记范围必须用**核自己的**半径，否则大核会漏。
+            let r = Vec3::new(s.scale.x, s.scale.y, s.scale.z) * rc;
+            let lo = (s.center - r - b.min) * inv_bin;
+            let hi = (s.center + r - b.min) * inv_bin;
             let c0 = (
-                (((lo.x - b.min.x) * inv_bin).floor().max(0.0)) as u32,
-                (((lo.y - b.min.y) * inv_bin).floor().max(0.0)) as u32,
-                (((lo.z - b.min.z) * inv_bin).floor().max(0.0)) as u32,
+                lo.x.floor().max(0.0) as u32,
+                lo.y.floor().max(0.0) as u32,
+                lo.z.floor().max(0.0) as u32,
             );
             let c1 = (
-                (((hi.x - b.min.x) * inv_bin).ceil() as u32).min(dims.0 - 1),
-                (((hi.y - b.min.y) * inv_bin).ceil() as u32).min(dims.1 - 1),
-                (((hi.z - b.min.z) * inv_bin).ceil() as u32).min(dims.2 - 1),
+                (hi.x.ceil() as u32).min(dims.0 - 1),
+                (hi.y.ceil() as u32).min(dims.1 - 1),
+                (hi.z.ceil() as u32).min(dims.2 - 1),
             );
             for cx in c0.0..=c1.0 {
                 for cy in c0.1..=c1.1 {
@@ -694,6 +691,10 @@ mod tests {
         // 全扫基线（未建网格）
         let brute: Vec<(f32, Vec3)> = pts.iter().map(|&p| f.density_grad(p)).collect();
         f.rebuild_grid();
+        assert!(
+            f.grid.is_some(),
+            "网格必须真建起来（否则逐位一致是平凡成立）"
+        );
         for (i, &p) in pts.iter().enumerate() {
             let g = f.density_grad(p);
             assert_eq!(g.0.to_bits(), brute[i].0.to_bits(), "σ 不一致 @{i}");
