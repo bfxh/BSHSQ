@@ -449,6 +449,185 @@ fn fluid_volume(ticks: usize) {
     );
 }
 
+/// 邻居计数的"满格"参考：spacing 晶格在半径 h 内的邻居数（不含自身）。
+/// 体内粒子 = 邻居数 ≥ 满格数；其余 = 自由面/近壁。
+fn full_support_count(spacing: f32, h: f32) -> usize {
+    let r = (h / spacing).floor() as i32;
+    let mut c = 0;
+    for i in -r..=r {
+        for j in -r..=r {
+            for k in -r..=r {
+                let d2 = (i * i + j * j + k * k) as f32 * spacing * spacing;
+                if i == 0 && j == 0 && k == 0 {
+                    continue;
+                }
+                if d2 <= h * h {
+                    c += 1;
+                }
+            }
+        }
+    }
+    c
+}
+
+/// 粒子所在格坐标（与 `UniformGrid::bin_of` 同公式，钳边）。
+fn bin_of(ng: &vxl_phys_fluid::NeighborGrid<'_>, p: Vec3) -> (u32, u32, u32) {
+    let f = |o: f32, v: f32, n: u32| -> u32 {
+        (((v - o) * ng.inv).floor().max(0.0) as u32).min(n - 1)
+    };
+    (
+        f(ng.min.x, p.x, ng.dims.0),
+        f(ng.min.y, p.y, ng.dims.1),
+        f(ng.min.z, p.z, ng.dims.2),
+    )
+}
+
+/// 流体粒子 `i` 在 27 邻域内（r ≤ h）的流体-流体邻居数。
+fn count_fluid_neighbors(
+    ng: &vxl_phys_fluid::NeighborGrid<'_>,
+    pos: &[Vec3],
+    n: usize,
+    h2: f32,
+    i: usize,
+) -> usize {
+    let pi = pos[i];
+    let (bx, by, bz) = bin_of(ng, pi);
+    let mut c = 0usize;
+    for dz in -1i32..=1 {
+        let z = bz as i32 + dz;
+        if z < 0 || z >= ng.dims.2 as i32 {
+            continue;
+        }
+        for dy in -1i32..=1 {
+            let y = by as i32 + dy;
+            if y < 0 || y >= ng.dims.1 as i32 {
+                continue;
+            }
+            for dx in -1i32..=1 {
+                let x = bx as i32 + dx;
+                if x < 0 || x >= ng.dims.0 as i32 {
+                    continue;
+                }
+                let idx = ((x as usize * ng.dims.1 as usize) + y as usize) * ng.dims.2 as usize
+                    + z as usize;
+                let lo = ng.start[idx] as usize;
+                let hi = ng.start[idx + 1] as usize;
+                for &j in &ng.items[lo..hi] {
+                    let j = j as usize;
+                    if j == i || j >= n {
+                        continue;
+                    }
+                    if (pi - pos[j]).length_squared() <= h2 {
+                        c += 1;
+                    }
+                }
+            }
+        }
+    }
+    c
+}
+
+/// 按"邻居数 ≥ `full`"把粒子分成内部/自由面，返回
+/// `(n_total, n_interior, ρ̄/ρ₀_all, ρ̄/ρ₀_interior, ρ̄/ρ₀_surface)`。
+fn split_density_stats(
+    ng: &vxl_phys_fluid::NeighborGrid<'_>,
+    pos: &[Vec3],
+    dens: &[f32],
+    h2: f32,
+    full: usize,
+    rho0: f32,
+) -> (usize, usize, f64, f64, f64) {
+    let n = dens.len();
+    let mut s_all = 0.0f64;
+    let mut s_int = 0.0f64;
+    let mut s_surf = 0.0f64;
+    let (mut n_int, mut s_int_n, mut s_surf_n) = (0usize, 0u64, 0u64);
+    for i in 0..n {
+        s_all += dens[i] as f64;
+        if count_fluid_neighbors(ng, pos, n, h2, i) >= full {
+            n_int += 1;
+            s_int += dens[i] as f64;
+            s_int_n += 1;
+        } else {
+            s_surf += dens[i] as f64;
+            s_surf_n += 1;
+        }
+    }
+    let per = |s: f64, m: u64| if m > 0 { s / m as f64 / rho0 as f64 } else { 0.0 };
+    (
+        n,
+        n_int,
+        s_all / n.max(1) as f64 / rho0 as f64,
+        per(s_int, s_int_n),
+        per(s_surf, s_surf_n),
+    )
+}
+
+/// R7i —— R7 的口径分离版：把"自由面核截断"与"内部真误差"分开报。
+///
+/// 背景：R7 溃坝 `|ΔV/V|max = 68.7%`、`ρ̄/ρ₀_end = 0.7999` 是**合数**——
+/// 自由面粒子的支持域被截断、SPH 密度天然偏低，于是"体积"被系统性高估。
+/// 修不修 68.7% 之前必须先**分离口径**：本探针分别报内部/自由面两档密度均值与占比。
+///
+/// 判据：
+/// - 内部粒子 = 流体-流体邻居数 ≥ `full_support_count`（晶格满格参考，**0.05/0.1 ⇒ 32**）。
+///   静置深水柱实测 ρ/ρ₀ ≈ 0.99–1.01（核归一化正确），溃坝薄片全程 maxN ≤ 29 ⇒ 无内部。
+/// - 同时仍报"全粒子" ρ̄/ρ₀ 与粒子数守恒，与 R7 对照。
+///
+/// 输出字段全部机器无关（邻居/密度是 SPH 标定的确定函数，与 CPU/OS/编译器无关）。
+fn fluid_volume_split(ticks: usize) {
+    let mut w = World::new(PhysConfig::default());
+    let mut vol =
+        vxl_phys_terrain::voxel::VoxelVolume::new(Vec3::new(-1.25, 0.0, -1.25), 0.5, 5, 3, 5);
+    vol.fill_box(Vec3::new(-1.25, 0.0, -1.25), Vec3::new(1.25, 1.0, 1.25));
+    for ix in 0..5u32 {
+        for iz in 0..5u32 {
+            if ix == 0 || ix == 4 || iz == 0 || iz == 4 {
+                vol.set(ix, 2, iz, true);
+            }
+        }
+    }
+    let vid = w.add_voxel(vol);
+    let sys = vxl_phys_fluid::FluidSystem::new(
+        vxl_phys_fluid::FluidConfig::default(),
+        Vec3::new(-0.73, 1.05, -0.125),
+        [6, 6, 14],
+        0.05,
+    );
+    w.add_fluid(sys, &[vid]);
+    let spacing = 0.05f32;
+    let h = 0.1f32;
+    let h2 = h * h;
+    let full = full_support_count(spacing, h);
+    let mut snapshot = (0usize, 0usize, 0.0f64, 0.0f64, 0.0f64); // (n_total, n_interior, mean_all, mean_int, mean_surf)
+    w.step();
+    let _ = ticks;
+    for tick in 0..ticks {
+        w.step();
+        let Some((s, ..)) = w.fluids().first() else { return };
+        let rho0 = s.config().rest_density;
+        let d = s.densities();
+        let pos = s.positions();
+        let ng = s.neighbor_grid();
+        let (n, n_int, mean_all, mean_int, mean_surf) =
+            split_density_stats(&ng, pos, d, h2, full, rho0);
+        if tick == ticks - 1 {
+            snapshot = (n, n_int, mean_all, mean_int, mean_surf);
+        }
+    }
+    let (n_total, n_int, mean_all, mean_int, mean_surf) = snapshot;
+    println!(
+        "{{\"probe\":\"R7i_fluid_volume_split\",\"ticks\":{ticks},\"particles_total\":{n_total},\
+         \"interior_count\":{n_int},\"interior_frac_pct\":{:.3},\
+         \"mean_rho_over_rho0_all\":{:.4},\"mean_rho_over_rho0_interior\":{:.4},\
+         \"mean_rho_over_rho0_surface\":{:.4},\"full_support_ref\":{full}}}",
+        100.0 * n_int as f64 / n_total.max(1) as f64,
+        mean_all,
+        mean_int,
+        mean_surf,
+    );
+}
+
 fn main() {
     free_flight(300);
     elastic_bounce(900);
@@ -457,4 +636,5 @@ fn main() {
     mass_ratio(600);
     joint_chain(10, 600);
     fluid_volume(400);
+    fluid_volume_split(400);
 }
