@@ -4,7 +4,7 @@ use super::*;
 impl DefaultNarrowPhase {
     /// 注册凸体外壳（点云，局部坐标）→ id；配 `Shape::ConvexHull { hull, .. }` 使用。
     pub fn add_hull(&mut self, points: Vec<Vec3>) -> u32 {
-        self.hulls.add(points)
+        std::sync::Arc::make_mut(&mut self.hulls).add(points)
     }
 
     /// 外壳点云（局部坐标；空切片 = id 无效）。
@@ -17,7 +17,7 @@ impl DefaultNarrowPhase {
 
     /// 注册复合体（子形状 = 形状 + 局部平移/旋转）→ id；配 `Shape::Compound { compound, .. }`。
     pub fn add_compound(&mut self, children: Vec<CompoundChild>) -> u32 {
-        self.compounds.add(children)
+        std::sync::Arc::make_mut(&mut self.compounds).add(children)
     }
 
     /// 复合体子形状表（局部；空切片 = id 无效）。
@@ -51,9 +51,9 @@ impl DefaultNarrowPhase {
 
     pub fn new(skin: f32) -> Self {
         Self {
-            hulls: HullStore::default(),
-            compounds: CompoundStore::default(),
-            meshes: MeshStore::default(),
+            hulls: std::sync::Arc::new(HullStore::default()),
+            compounds: std::sync::Arc::new(CompoundStore::default()),
+            meshes: std::sync::Arc::new(MeshStore::default()),
             kids_buf: Vec::new(),
             predict_dt: 0.0,
             min_point_sep: (skin * 2.0).max(0.01),

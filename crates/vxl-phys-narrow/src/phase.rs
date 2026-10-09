@@ -104,12 +104,12 @@ pub struct ProbeCounters {
 
 #[derive(Clone)]
 pub struct DefaultNarrowPhase {
-    /// 凸体外壳仓库（多边形域；点云注册后由 shape 引用）。
-    pub(crate) hulls: HullStore,
-    /// 复合体仓库（子形状表；由 `Shape::Compound { compound, .. }` 引用）。
-    pub(crate) compounds: CompoundStore,
-    /// 三角网仓库（薄壳：布片/薄板/碎片；支持矩阵见 `docs/SURVEY-SHAPE-SUPPORT-MATRIX.md`）。
-    pub(crate) meshes: MeshStore,
+    /// 凸体外壳仓库（多边形域；点云注册后由 shape 引用）。**`Arc` = 并行 clone 的只读面**，理由与读数见 `PERF-REVIEW-2026-09-27.md` §1.4。
+    pub(crate) hulls: std::sync::Arc<HullStore>,
+    /// 复合体仓库（子形状表；由 `Shape::Compound { compound, .. }` 引用）。`Arc` 理由同上。
+    pub(crate) compounds: std::sync::Arc<CompoundStore>,
+    /// 三角网仓库（薄壳：布片/薄板/碎片；支持矩阵见 `docs/SURVEY-SHAPE-SUPPORT-MATRIX.md`）。`Arc` 理由同上。
+    pub(crate) meshes: std::sync::Arc<MeshStore>,
     /// 子形状表 scratch（`kids_take`/`kids_put` 借出，避开 `&self`/`&mut self` 借用冲突）。
     pub(crate) kids_buf: Vec<CompoundChild>,
     pub(crate) skin: f32,
