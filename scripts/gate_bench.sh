@@ -121,7 +121,9 @@ chk("R1", "rot_KE_max_rel_drift_pct", r1["rot_KE_max_rel_drift_pct"] <= 0.001, f
 r2 = g["R2_elastic_bounce_e1"]
 apex = r2.get("energy_retained_ratio_per_apex") or [0.0]
 chk("R2", "nan", r2["nan"] is False, f"nan={r2['nan']}")
-chk("R2", "apex0_retained", apex[0] >= 0.5, f"{apex[0]:.4f} ≥ 0.5")
+# 2026-10-09 修掉"回弹被 speculative 预算吃掉"后，默认档首弹从 0.72 升到 0.95
+# ⇒ 阈值同步收紧（不然下次退化到 0.5 也照样绿）。
+chk("R2", "apex0_retained", apex[0] >= 0.85, f"{apex[0]:.4f} ≥ 0.85")
 
 r3 = g["R3_resting_contact_force"]
 chk("R3", "mean_Fn_over_mg", abs(r3["mean_Fn_over_mg"] - 1.0) <= 0.01, f"{r3['mean_Fn_over_mg']:.6f} ≈ 1")
