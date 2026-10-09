@@ -111,6 +111,10 @@ step deps_lock 0 python scripts/deps_lock.py
 # CI 形状锁：硬门、汇总门 needs、安全/成本基线、action 钉 SHA 不被悄悄退役
 step ci_shape 0 bash scripts/ci_shape_lock.sh .
 step typos 0 /c/vxl-wl-tools/typos.exe .
+# 真实性基准门（R1–R7）：跑 bench/realism-probe，与基线比关键不变量。
+# 为什么它能进 CI 而计时门不能：这七个量**机器无关**（2026-10-09 跨 Windows/Linux 逐字一致）；
+# 体数扫描（bench/sweep_scale.py）是 E-REF 上的报告项，不在本门里判。
+step bench 0 bash scripts/gate_bench.sh .
 
 echo "-- 行为门（三命令）"
 # **计时类门必须独占**：determinism / m0_gates / m1_islands / 金样门的判据都含时间，同机
