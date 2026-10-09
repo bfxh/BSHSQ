@@ -202,6 +202,7 @@ cargo test -p vxl-phys-splat --test splat_viscosity # 自场黏性：等速度�
 cargo test -p vxl-phys-splat --test splat_grid_parity # 候选网格 vs 全扫逐位一致（含混合尺度对抗 + 动力学档；稠密/局部两场景扫描只报数）
 cargo test -p vxl-phys --lib splat_dynamics          # 门面接线：真体素地板静置 + 关档逐位不动 + 确定性
 cargo test -p vxl-phys-terrain --test voronoi_parity # 快速销毁：归属图 vs 朴素逐位一致 + 成本扫描（只报数）
+cargo test -p vxl-phys --test determinism_flag_inert # §4.14 契约：strict_determinism=false 不改变行为
 ```
 
 **真实性基准（R1–R7，2026-10-09 落地；机器无关 ⇒ 进 CI 判据）**：
