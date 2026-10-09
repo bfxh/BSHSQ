@@ -133,7 +133,8 @@
 - **vxl-phys-splat**（域模块·新）：高斯喷溅隐式场 `GaussianSplatField`——
   密度 `σ(p)=Σw·exp(−½α(p))`（各向异性二次型）、距离 `(τ−σ)/|∇σ|`、法线 `−∇σ/|∇σ|`；
   实现 `ProviderColliders`（点/盒/球三查）。**物理参数 = 渲染参数**（无第二套表示），
-  渲染桥 `export_splats` 零拷贝导出。热路径 O(#核) 且 3σ 截断；均匀网格/BVH 加速待办。
+  渲染桥 `export_splats` 零拷贝导出。热路径 O(#核) 且 4σ 截断；均匀网格**已落地**
+  （2026-10-09：bin = √cut·中位核半径 + 逐核各向异性登记；收益取决于局部性，见 `KNOWLEDGE.md` §I）。
 - **vxl-phys-narrow/gjk.rs**（窄相·热路径）：`ConvexHull` 支撑 + GJK（单纯形 Voronoi
   分类，距离收敛判据）+ EPA（地平线重建；退化 → 6 轴 SAT）+ `clip_halfspace` +
   `fracture_voronoi_hull`。**当前每对重建支撑体（O(n) 拷贝）**——外壳数量上量后
