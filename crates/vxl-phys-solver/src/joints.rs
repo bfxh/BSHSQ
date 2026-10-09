@@ -16,7 +16,9 @@
 //!   姿态偏置时，旧姿态的累积冲量打到新姿态上会注入能量。要热启动必须先给
 //!   角行加姿态偏置 + 位姿突变门（接触通道的热启动正是靠特征匹配 + 距离门
 //!   才成立）；
-//! - 角行**无姿态偏置**（只消相对角速度，不修正相对转角漂移）；
+//! - 角行**有姿态偏置**（2026-10-10）：相对旋转的旋转向量按 `β/dt·e` 进 RHS
+//!   ⇒ 消相对角速度的同时修正相对转角的**漂移**（此前只消角速度，转角误差只靠
+//!   速度级间接收敛）。转动关节只投影到两个锁定轴。这条同时是上面"热启动"的前置件。
 //! - 轴的定义为**体局部轴对**（`axis_a`/`axis_b`），转动/棱柱的"自由轴"
 //!   即该轴；其余 5 个自由度按类型锁死。
 //!
@@ -26,9 +28,11 @@
 use vxl_phys_core::{BodySet, Mat3, PhysConfig, Vec3};
 
 // ── 按域拆出的子模块（子目录 joints/）
+mod ang;
 mod linalg;
 mod solve;
 mod types;
+pub(crate) use self::ang::angular_rows;
 pub(crate) use self::linalg::*;
 pub use self::types::*;
 // ↑ 子模块顶层条目再导出（impl-only 模块不入 glob，避免 unused）
@@ -406,11 +410,10 @@ mod tests {
                 bodies.linvel[1].y -= 9.81 * dt; // 重力与限位/马达同向，加严
                 set.solve(&mut bodies, &cfg, dt);
                 integrate(&mut bodies, dt);
-                let (pa, qa) = bodies.pose(0);
+                let pa = bodies.pose(0).0; // 锚点偏移 = ZERO ⇒ 世界锚点 = 体心
                 let (pb, qb) = bodies.pose(1);
-                let wa = pa + Mat3::from_quat(qa).mul_vec3(Vec3::ZERO);
                 let wb = pb + Mat3::from_quat(qb).mul_vec3(Vec3::new(0.0, 0.4, 0.0));
-                let s = (wb - wa).y;
+                let s = (wb - pa).y;
                 let over = (lo - s).max(s - hi);
                 worst = worst.max(over);
                 last_over = over;

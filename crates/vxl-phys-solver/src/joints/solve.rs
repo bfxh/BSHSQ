@@ -159,49 +159,6 @@ fn linear_rows(
     }
 }
 
-/// 角行：固定/棱柱锁 3 轴、转动锁垂直于自由轴的 2 轴；返回更新后的最大修正。
-fn angular_rows(
-    j: &Joint,
-    bodies: &mut BodySet,
-    qa: Quat,
-    ai: usize,
-    bi: usize,
-    mut max_dv: f32,
-) -> f32 {
-    let k_ang = ang_k(bodies, ai, bi);
-    match j.kind {
-        JointKind::Fixed | JointKind::Prismatic => {
-            let wrel = bodies.angvel(bi) - bodies.angvel(ai);
-            if let Some(lambda) = solve3(k_ang, -wrel) {
-                apply_ang_pair(bodies, ai, bi, lambda);
-                max_dv = max_dv.max(lambda.length());
-            }
-        }
-        JointKind::Revolute => {
-            let axis_w = Mat3::from_quat(qa).mul_vec3(j.axis_a).normalize();
-            let [t1, t2] = perp_basis(axis_w);
-            let wrel = bodies.angvel(bi) - bodies.angvel(ai);
-            let (k11, k12, k22) = (
-                proj(k_ang, t1, t1),
-                proj(k_ang, t1, t2),
-                proj(k_ang, t2, t2),
-            );
-            let det = k11 * k22 - k12 * k12;
-            if det.abs() >= 1e-12 {
-                let r1 = -wrel.dot(t1);
-                let r2 = -wrel.dot(t2);
-                let l1 = (r1 * k22 - r2 * k12) / det;
-                let l2 = (r2 * k11 - r1 * k12) / det;
-                apply_ang_pair(bodies, ai, bi, t1 * l1 + t2 * l2);
-                max_dv = max_dv.max(l1.abs().max(l2.abs()));
-            }
-        }
-        _ => {}
-    }
-
-    max_dv
-}
-
 /// 马达行（速度级）：把自由轴上的相对速度驱到 `motor_target`，冲量按 `max_force·dt` 上钳。
 #[allow(clippy::too_many_arguments)]
 fn motor_rows(
@@ -365,7 +322,7 @@ pub(crate) fn solve_joint(j: &mut Joint, bodies: &mut BodySet, sp: &JointParams)
     let mut max_dv = linear_rows(j, bodies, ai, bi, qa, ra, rb, err, sp);
 
     // ---- 角行（固定/棱柱锁 3 轴；转动锁垂直于 `axis_a` 的 2 轴）----
-    max_dv = angular_rows(j, bodies, qa, ai, bi, max_dv);
+    max_dv = angular_rows(j, bodies, ai, bi, sp, max_dv);
     // ---- 马达行（转动/棱柱；`motor_max_force <= 0` 直接跳过 ⇒ 无马达时逐位不变）----
     // 速度级马达：把自由轴上的相对速度驱到 `motor_target`，冲量按 `max_force·dt` 上钳。
     // **必须排在限位行之前**：限位是更硬的约束，要最后说话——否则马达会把限位刚
