@@ -287,7 +287,7 @@ fn soft_contact(
         DA_SPEC.fetch_add((spec.max(0.0) * 1000.0) as u64, Relaxed);
         DA_BIAS.fetch_add((bias * 1000.0) as u64, Relaxed);
     }
-    let rhs = bias - spec + bounce;
+    let rhs = bias + if bounce > 0.0 { bounce } else { bounce - spec };
     // 正则化：穿透接触 cfm=1（硬投影，支撑刚性）；speculative 接触 cfm<1
     // （等效柔度 ω/ζ，限制迭代增益，深堆不依赖跨层链收敛——金样定标结论）。
     let cfm = if depth >= 0.0 {
