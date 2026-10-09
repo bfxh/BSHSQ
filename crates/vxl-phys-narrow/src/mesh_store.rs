@@ -128,7 +128,7 @@ impl MeshStore {
 impl DefaultNarrowPhase {
     /// 注册**三角网**（顶点 + 三角，局部坐标）→ mesh id；配 `Shape::TriMesh { mesh, .. }` 使用。
     pub fn add_mesh(&mut self, points: Vec<Vec3>, tris: Vec<[u32; 3]>) -> u32 {
-        self.meshes.add(points, tris)
+        std::sync::Arc::make_mut(&mut self.meshes).add(points, tris)
     }
 
     /// 三角网顶点（局部坐标；空切片 = id 无效）。
