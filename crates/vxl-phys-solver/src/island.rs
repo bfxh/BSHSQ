@@ -53,8 +53,7 @@ pub(crate) fn point_reduce_after() -> u32 {
     3
 }
 
-/// 顺序冲量解算一条约束；返回本次扫掠施加的**最大速度级修正**（m/s，
-/// 法向 + 摩擦通道的最大值），供收敛早退判据使用。
+/// 顺序冲量解算一条约束；返回本次扫掠施加的**最大速度级修正**（m/s），供收敛早退判据使用。
 #[allow(clippy::too_many_arguments)] // 热路径内联目标：避免打包结构体的构造成本
 pub(crate) fn solve_constraint(
     c: &mut ContactConstraint,
@@ -205,12 +204,13 @@ fn iterate_island_constraints(
     im: &[f32],
     iters: u32,
     normal_inner: u32,
-) {
+) -> f32 {
     let eps = early_exit_eps();
     let min_iters = early_min_iters();
     let reduce_after = point_reduce_after();
+    let mut resid = 0.0f32;
     for it in 0..iters {
-        let mut resid = 0.0f32;
+        resid = 0.0;
         // **参与式降点**：从第 `reduce_after` 轮起，跳过"至今零冲量"的浅缝接触点
         // （判据见 `point_reduce_after`）。前几轮全点参与 ⇒ 需要承载的点已经
         // 载上，之后跳过它们只是省下空转。
@@ -248,6 +248,7 @@ fn iterate_island_constraints(
             break;
         }
     }
+    resid
 }
 
 /// 准静态「安座」趟：把浅接触（`|vn| < max_vn` 且 `depth0 ≤ 0.05`）的法向相对速度归零。
@@ -431,12 +432,11 @@ pub(crate) fn solve_island_group(
         // 堆叠期（金字塔/砖墙的稳态段）12 次外层纯属浪费；判据只依赖状态，
         // 同状态必在同一迭代退出 ⇒ 确定性不受影响。
         let t_it = ISLAND_SEG_PROBE.then(vxl_phys_core::probe::start);
-        iterate_island_constraints(cbuf, lv, av, local_of, iw, im, iters, normal_inner);
-        // 堆叠 shock 附加迭代（M1 稳定性；Jolt shock propagation 同思路）：
-        // 反序再过一遍约束，使「底层承载」的载荷沿约束图反向传播一次——
-        // 深层堆叠的正向迭代需 ≈ 2×层数 次才能收敛，反序一遍等效多收敛若干层。
-        // 确定性：反序为固定次序、纯数据驱动，与线程数无关。
-        for _ in 0..shock_iterations {
+        let resid = iterate_island_constraints(cbuf, lv, av, local_of, iw, im, iters, normal_inner);
+        // 堆叠 shock 反序扫掠（M1）：把底层承载反向传播一次。**自适应**（R5）：仅当
+        // "岛内质量比大 且 主迭代没收敛"才追加（见 `shock_budget`）⇒ 均匀岛恒同旧行为。
+        let extra = island_shock_budget(bodies, isl, shock_iterations, sp.max_corr > 0.0, resid);
+        for _ in 0..extra {
             for c in cbuf.iter_mut().rev() {
                 let _ = solve_constraint(c, lv, av, local_of, iw, im, true, normal_inner, false);
             }

@@ -434,8 +434,9 @@ capabilities:
       - id: quantified_defects
         note: >-
           这组量把三条**已量化**的真实性缺陷钉成可回归数字：R2 e=1 首弹能量保留（2026-10-09
-          已修，0.7247 → 0.9531）；R5 高质量比静默互穿（r≥30 上下盒同位，pos_err 1.000 m 且
-          nan=0）；R7 溃坝 Σm/ρ 体积瞬态偏 68.7%。R2 修掉后基线换代，R5/R7 进 OPEN-PROBLEMS。
+          已修，0.7247 → 0.9531）；R5 高质量比静默互穿（2026-10-09 已修：first_fail_ratio
+          20 → 1000，零换代）；R7 溃坝 Σm/ρ 体积瞬态偏 68.7%（口径待分离）。R2/R5 修掉后
+          基线换代，R7 进 OPEN-PROBLEMS。
     required_evidence:
       - implementation_path
       - ci_verification_path
