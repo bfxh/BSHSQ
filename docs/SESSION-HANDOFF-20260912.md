@@ -44,7 +44,8 @@
 6. **diag_bvh.rs**：宽相验收用临时诊断 → 保留并升级为常驻回归（加树高断言）。
 7. M1 出口剩余（见 SPEC V1.2 §12.2）：60Hz 打穿、Criterion 基准（未开始）、
    10万+10万 场景、Rapier 金样对照（未开始）、LOD 框架（§4.13，未做）、
-   §4.14 完整开关（`strict_determinism: true` 已入默认配置，完整度待补）。
+   §4.14 完整开关（`strict_determinism: true` 已入默认配置；⚠️ 2026-10-09 对账：该字段是**预留位**、
+   无读取点 ⇒ 置 `false` 不改变行为，契约判据见 `crates/vxl-phys/tests/determinism_flag_inert.rs`）。
 8. 推送 + PR（`feat/m1-part1` 未推远端）。
 9. 低优先：确认 "AE-ENGINE" 状态（含义待向用户确认）；Mimosa 安全审计补跑
    （提交时扫描器未取得完整结论，兼容策略放行）。
