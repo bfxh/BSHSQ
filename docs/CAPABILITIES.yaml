@@ -31,7 +31,7 @@
 #    编辑后用解析器验一遍：
 #      python -c "import yaml;yaml.safe_load(open('docs/CAPABILITIES.yaml',encoding='utf-8'))"
 version: 1
-updated: "2026-10-08"
+updated: "2026-10-09"
 
 capabilities:
   # ── 面元力矩：刚体侧与布料侧是两件事，分开登记（文档点名的例子） ──
@@ -409,3 +409,38 @@ capabilities:
     decision_id: null
     owner: maintainer
     notes: 用户 2026-10-08 点名"多边形…这些也是要搞的"。
+
+  # ── 验证能力：真实性基准不是"某个物理域"，但同样是本仓要长期守的能力 ──
+  - id: PHY-SCOPE-REALISM-BENCH
+    title: 真实性基准（R1–R7：能量 / 弹性 / 接触力 / 穿透 / 质量比 / 关节 / 流体体积）
+    scope: included
+    implementation: implemented
+    implementation_path: bench/realism-probe/src/bin/probe.rs
+    evidence:
+      - id: why_in_ci
+        note: >-
+          七个量初看是浮点量（不该进 CI），但实跑证明它们**跨 OS / CPU / 编译器逐字一致**
+          （Windows 开发机与 Linux 沙箱双环境、rustc 1.97→1.99）⇒ 判据不依赖参考硬件，
+          才收进 CI。顺序不可反：先在本机逐字复现外部基线，再拿它当基线；复现不了只能当报告项。
+      - id: two_tiers
+        note: >-
+          不变量档（15 项阈值，守真实性不退化）进 PR 门；逐字档（--strict，与基线逐行相等）
+          既做复现验证、又是"机器无关"这条前提的持续体检。计时类基准（bench/sweep_scale.py）
+          不进 CI —— 那是 E-REF 报告项，与 gate_scale.sh 的 SCALE_TIME_REPORT 同口径。
+      - id: gate
+        note: >-
+          scripts/gate_bench.sh（不变量 + 逐字）+ bench/baselines/realism.jsonl 基线；
+          已接入 gate_all.sh 与 ci.yml 的 realism-bench job（进汇总门）。
+      - id: quantified_defects
+        note: >-
+          这组量把三条**已量化**的真实性缺陷钉成可回归数字：R2 e=1 首弹能量保留（2026-10-09
+          已修，0.7247 → 0.9531）；R5 高质量比静默互穿（r≥30 上下盒同位，pos_err 1.000 m 且
+          nan=0）；R7 溃坝 Σm/ρ 体积瞬态偏 68.7%。R2 修掉后基线换代，R5/R7 进 OPEN-PROBLEMS。
+    required_evidence:
+      - implementation_path
+      - ci_verification_path
+    decision_id: null
+    owner: maintainer
+    notes: >-
+      这不是"某个物理域"，而是跨域的验证能力；放在本表是为了让"真实性有没有自动门"这件事
+      只有一个事实源。R1–R7 的定义与逐条读数见 bench/realism-probe 与 docs/KNOWLEDGE.md §M。
