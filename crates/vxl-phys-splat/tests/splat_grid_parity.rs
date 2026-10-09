@@ -14,7 +14,9 @@
 //! 任何网格都不可能加速（求 σ 本就等于全和），这正是旧场景测不出收益的结构性原因。
 //!
 //! ⚠️ 本文件不许出现 `unwrap` / `expect` / `panic!` / `.clone()`（新文件零基线）。
+use vxl_phys_core::interop::NoProviders;
 use vxl_phys_core::{Mat3, Vec3};
+use vxl_phys_splat::dynamics::{step_dynamics, SplatDynamics};
 use vxl_phys_splat::pressure::{apply_self_pressure, SelfPressure};
 use vxl_phys_splat::viscosity::{apply_self_viscosity, SelfViscosity};
 use vxl_phys_splat::{GaussianSplatField, Splat};
@@ -164,7 +166,14 @@ fn mixed_scale_grid_never_drops_kernels() {
 
 /// 单点读数：`rounds` 轮、两臂**交替**跑（奇偶轮换先后）+ 报极差。本仓 A/B 纪律——
 /// 均值之差 ≤ 两臂极差就标"测不出"，不看单跑。
-fn bench_one(label: &str, scene: Scene, n: usize, steps: usize, rounds: usize) {
+fn bench_one(
+    label: &str,
+    scene: Scene,
+    n: usize,
+    steps: usize,
+    rounds: usize,
+    run_fn: fn(usize, Arm, usize, Scene) -> Vec<u32>,
+) {
     let mut grid = Vec::new();
     let mut brute = Vec::new();
     for r in 0..rounds {
@@ -175,7 +184,7 @@ fn bench_one(label: &str, scene: Scene, n: usize, steps: usize, rounds: usize) {
         };
         for arm in arms {
             let t = std::time::Instant::now();
-            let _ = run(n, arm, steps, scene);
+            let _ = run_fn(n, arm, steps, scene);
             let ms = t.elapsed().as_secs_f64() * 1e3;
             match arm {
                 Arm::GridPerStep => grid.push(ms),
@@ -208,7 +217,55 @@ fn grid_speedup_microbench_report_only() {
     // 只报数不判（时间类断言在 CI 上不稳）。
     for (label, scene) in [("稠密云", Scene::Dense), ("局部云", Scene::Local)] {
         for n in [200usize, 400, 800, 1600] {
-            bench_one(label, scene, n, 10, 4);
+            bench_one(label, scene, n, 10, 4, run);
+        }
+    }
+}
+
+/// 走**完整动力学档**（压力 → 黏性 → 重力积分）`steps` 步，返回末态逐核速度（位模式比较用）。
+/// `GridPerStep` 臂靠 `step_dynamics` 内部**每步** `rebuild_grid`；`Brute` 臂把门槛设成
+/// `usize::MAX` ⇒ 重建短路 ⇒ 全扫。
+fn run_dynamics(n: usize, arm: Arm, steps: usize, scene: Scene) -> Vec<u32> {
+    let grid_min_splats = if arm == Arm::GridPerStep {
+        0
+    } else {
+        usize::MAX
+    };
+    let mut f = scene_field(scene, n, grid_min_splats);
+    let cfg = SplatDynamics {
+        pressure: Some(SelfPressure::default()),
+        viscosity: Some(SelfViscosity::default()),
+        ..SplatDynamics::default()
+    };
+    let providers = NoProviders;
+    for _ in 0..steps {
+        step_dynamics(&mut f, 1.0 / 120.0, &providers, &[], cfg);
+    }
+    f.kernel_velocities()
+        .iter()
+        .flat_map(|v| [v.x.to_bits(), v.y.to_bits(), v.z.to_bits()])
+        .collect()
+}
+
+/// **世界路径判据**：`step_dynamics` 每步重建候选表后，压力/黏性与全扫**逐位一致**。
+/// 若重建漏掉某核（覆盖前提坏了），这条直接红。
+#[test]
+fn dynamics_grid_matches_brute_force_bitwise() {
+    let grid = run_dynamics(120, Arm::GridPerStep, 8, Scene::Local);
+    let brute = run_dynamics(120, Arm::Brute, 8, Scene::Local);
+    assert_eq!(grid.len(), brute.len());
+    assert_eq!(grid, brute, "动力学档：候选网格与全扫必须逐位一致");
+    assert!(grid.iter().any(|b| *b != 0), "用例非平凡：速度确实变了");
+}
+
+/// 世界路径读数：完整动力学步（含每步重建）的两臂耗时。
+/// ⚠️ 稠密云在动力学档下会**发散**（σ=0.3 核重叠 ⇒ 压力爆炸）⇒ `world_bounds` 到天文数字、
+/// 网格按格数上限退回全扫 ⇒ 读数 ≈1.00×。该场景只作"发散不 panic"的健壮性证据；收益读局部云。
+#[test]
+fn dynamics_speedup_microbench_report_only() {
+    for (label, scene) in [("稠密云", Scene::Dense), ("局部云", Scene::Local)] {
+        for n in [400usize, 800, 1600] {
+            bench_one(label, scene, n, 10, 4, run_dynamics);
         }
     }
 }

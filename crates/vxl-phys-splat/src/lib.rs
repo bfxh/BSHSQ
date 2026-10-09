@@ -129,7 +129,7 @@ impl Splat {
 struct Grid {
     origin: Vec3,
     inv_bin: f32,
-    dims: (u32, u32, u32),
+    dims: [u32; 3],
     bins: Vec<Vec<u32>>,
 }
 
@@ -230,13 +230,14 @@ impl GaussianSplatField {
             return;
         }
         let b = self.world_bounds();
-        let d = |v: f32| (v / bin).ceil() as u32 + 1;
-        let dims = (
+        // 饱和运算：核飞散时 `world_bounds` 到天文数字 ⇒ `as u32` 饱和上限 ⇒ `+1`/三轴相乘会在 debug 档 panic（release 下 wrap）；溢出给 `u64::MAX` > 上限 ⇒ 退回全扫。
+        let d = |v: f32| ((v / bin).ceil() as u32).saturating_add(1);
+        let dims = [
             d(b.max.x - b.min.x),
             d(b.max.y - b.min.y),
             d(b.max.z - b.min.z),
-        );
-        let n_bins = dims.0 as u64 * dims.1 as u64 * dims.2 as u64;
+        ];
+        let n_bins = dims.iter().fold(1u64, |a, &x| a.saturating_mul(x as u64));
         if n_bins == 0 || n_bins > GRID_MAX_BINS {
             return;
         }
@@ -253,14 +254,14 @@ impl GaussianSplatField {
                 lo.z.floor().max(0.0) as u32,
             );
             let c1 = (
-                (hi.x.ceil() as u32).min(dims.0 - 1),
-                (hi.y.ceil() as u32).min(dims.1 - 1),
-                (hi.z.ceil() as u32).min(dims.2 - 1),
+                (hi.x.ceil() as u32).min(dims[0] - 1),
+                (hi.y.ceil() as u32).min(dims[1] - 1),
+                (hi.z.ceil() as u32).min(dims[2] - 1),
             );
             for cx in c0.0..=c1.0 {
                 for cy in c0.1..=c1.1 {
                     for cz in c0.2..=c1.2 {
-                        let idx = ((cx * dims.1 + cy) * dims.2 + cz) as usize;
+                        let idx = ((cx * dims[1] + cy) * dims[2] + cz) as usize;
                         bins[idx].push(i as u32);
                     }
                 }
@@ -416,8 +417,7 @@ impl GaussianSplatField {
         (self.iso - s) / gl // 内部 σ > iso ⇒ 负 ✓（外层负号在 caller 展开）
     }
 
-    /// 场外包盒（`√cut·σ + margin`；空场 = 退化盒）。
-    /// 注意与 `ProviderColliders::bounds(id)` 同名不同签名 ⇒ 这里用独立名避免遮蔽。
+    /// 场外包盒（`√cut·σ + margin`；空场 = 退化盒）。注意与 `ProviderColliders::bounds(id)` 同名不同签名 ⇒ 用独立名避免遮蔽。
     pub fn world_bounds(&self) -> Aabb {
         let mut lo = Vec3::splat(f32::INFINITY);
         let mut hi = Vec3::splat(f32::NEG_INFINITY);
