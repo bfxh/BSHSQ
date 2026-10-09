@@ -703,6 +703,29 @@ jobs:
             scale-gate.log
             islands.txt
 
+  # ==================== 真实性基准（R1–R7）：七个**机器无关**量 ====================
+  # 为什么它能进 CI 而计时门不能：这七个量跨 OS / CPU / 编译器**逐字一致**（2026-10-09 在
+  # Windows 开发机与 Linux 沙箱双环境复现）⇒ 判据不需要参考硬件。体数扫描（bench/sweep_scale.py）
+  # 是 E-REF 上的报告项，不进这道门。判据与基线：scripts/gate_bench.sh / bench/baselines/。
+  realism-bench:
+    name: 真实性基准 (R1-R7)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: bench/realism-probe
+      # 两档都跑：不变量档（守真实性不退化）+ 逐字档（跨机复现同一组数字）。
+      # 逐字档在 CI 上是**承重**的——它正是"这些量机器无关"这条前提的持续验证。
+      - name: 真实性基准门（不变量 + 逐字）
+        run: |
+          bash scripts/gate_bench.sh .
+          bash scripts/gate_bench.sh . --strict
+
   # ==================== 汇总门：任一前置门未成功 → 红（Free 私有仓无必需检查，单状态即分支门） ====================
   gates-summary:
     name: 汇总（提交门）
@@ -721,6 +744,7 @@ jobs:
       - hash-compare
       - ratchet
       - scale
+      - realism-bench
     if: always()
     runs-on: ubuntu-latest
     steps:

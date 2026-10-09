@@ -1,5 +1,7 @@
 /target
 /out
+# 独立 bench crate 自己的 target（它不是主 workspace 成员 ⇒ 不吃上面的 /target）
+/bench/realism-probe/target
 /.cargo/config.toml
 **/*.rs.bk
 ~$*

@@ -204,6 +204,18 @@ cargo test -p vxl-phys --lib splat_dynamics          # 门面接线：真体素�
 cargo test -p vxl-phys-terrain --test voronoi_parity # 快速销毁：归属图 vs 朴素逐位一致 + 成本扫描（只报数）
 ```
 
+**真实性基准（R1–R7，2026-10-09 落地；机器无关 ⇒ 进 CI 判据）**：
+
+```bash
+bash scripts/gate_bench.sh .            # 15 项不变量判据（CI 同款；首次编译后每次约 2 s）
+bash scripts/gate_bench.sh . --strict   # 与 bench/baselines/realism.jsonl 逐字对拍（跨机复现验证）
+python3 bench/sweep_scale.py target/release/examples/m1_scale 1 600 16 20 \
+        10 50 100 500 1000 2500 5000    # 体数扫描 10→5000（E-REF 报告项，不判红）
+```
+
+⚠️ 基线换代必须成对改 `bench/baselines/realism.jsonl`，并在 PR 里写清"旧值 → 新值 + 原因"
+（这七个量是**真实性回归门**，基线静默漂移等于门失效）。
+
 ⚠️ 阈值口径（`SurfaceDrag::surface_ratio = 0.9`）是**实测标定**的：内部残差亏 ≤1e-4·ρ0、
 表面亏 ≥0.4·ρ0；严格 `ρ < ρ0` 会把整块当表面（实测退化成整体拖拽 0.108 m/60 tick）。
 **双向那一半**（`AeroConfig::air_mass > 0`）的判据是两条账：`ΣΔp_水 + M·Δv_大气 = 0`
