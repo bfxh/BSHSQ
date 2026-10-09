@@ -10,10 +10,10 @@
 //! - **`sample` 的速度项（介质→体）**：two_way 时读**核速度的 e 加权插值**
 //!   （无近核 ⇒ 回落常值 `medium_velocity`）；
 //! - **`advance(dt)`（域轮次加一格）**：逐核**平流**（`center += v·dt`）后按 `damping` 衰减；
-//!   核一动均匀网格即脏（`grid = None` ⇒ 查询自动退回全扫，与网格逐位一致；需要加速由
-//!   消费者再 `rebuild_grid()`）。⚠️ 已知边界（切片 3 候选）：世界侧的提供者包围盒
-//!   （`provider_bounds`）与 `world_bounds` **不随核漂移刷新**——核漂出注册时的包围盒后，
-//!   介质采样与宽相 AABB 不覆盖新位置。
+//!   核一动均匀网格即脏（`grid = None` ⇒ 查询自动退回全扫，与网格逐位一致；`step_dynamics`
+//!   每步开头重建一次 ⇒ 世界路径的压力/黏性吃到候选表）。提供者 AABB **随核漂移刷新**
+//!   （`world_step/medium.rs` 对双向场每子步写回 `provider_bounds`；判据
+//!   `tests/splat.rs::drifting_medium_bounds_follow_kernels`）。
 //!
 //! **默认关（`two_way = false`）**：`sample` 速度恒为常值、`deposit`/`advance` 空操作
 //! ⇒ 默认档逐位不变（金样/四哈希守门）。确定性：候选走与 `density_grad` 同一
