@@ -150,6 +150,15 @@ r7 = g["R7_fluid_volume_wcsph"]
 chk("R7", "particles_conserved", r7["particles_end"] == r7["particles_t1"], f"{r7['particles_end']} = {r7['particles_t1']}")
 chk("R7", "volume_max_abs_rel_err_pct", r7["volume_max_abs_rel_err_pct"] <= 80.0, f"{r7['volume_max_abs_rel_err_pct']:.3f} ≤ 80")
 
+# 2026-10-09 P16：R7 溃坝全程 interior=0 ⇒ 68.7% 全部是「自由面核截断」的口径。
+# 这条是**报告型判据**：把现状钉成事实，不是修。退化方向只有「自由面贡献升高
+# 或内部贡献出现异常」，所以阈值取「不变量」而不是「越低越好」。
+r7i = g.get("R7i_fluid_volume_split")
+if r7i is not None:
+    chk("R7i", "interior_frac_pct", r7i["interior_frac_pct"] <= 0.5, f"{r7i['interior_frac_pct']:.3f} ≤ 0.5")
+    chk("R7i", "mean_rho_over_rho0_all", 0.6 <= r7i["mean_rho_over_rho0_all"] <= 1.05, f"{r7i['mean_rho_over_rho0_all']:.4f} ∈ [0.6, 1.05]")
+    chk("R7i", "mean_rho_over_rho0_surface", 0.5 <= r7i["mean_rho_over_rho0_surface"] <= 0.95, f"{r7i['mean_rho_over_rho0_surface']:.4f} ∈ [0.5, 0.95]")
+
 fails = [(n, d) for n, ok, d in checks if not ok]
 for name, ok, detail in checks:
     print(f"  {'✅' if ok else '❌'} {name}: {detail}")
