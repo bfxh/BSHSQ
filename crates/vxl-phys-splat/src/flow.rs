@@ -154,10 +154,10 @@ impl GaussianSplatField {
                     (empty, false)
                 } else {
                     let (cx, cy, cz) = (cx as u32, cy as u32, cz as u32);
-                    if cx >= g.dims.0 || cy >= g.dims.1 || cz >= g.dims.2 {
+                    if cx >= g.dims[0] || cy >= g.dims[1] || cz >= g.dims[2] {
                         (empty, false)
                     } else {
-                        let i = ((cx * g.dims.1 + cy) * g.dims.2 + cz) as usize;
+                        let i = ((cx * g.dims[1] + cy) * g.dims[2] + cz) as usize;
                         (g.bins[i].as_slice(), false)
                     }
                 }

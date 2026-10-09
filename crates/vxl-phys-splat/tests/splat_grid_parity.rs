@@ -259,6 +259,8 @@ fn dynamics_grid_matches_brute_force_bitwise() {
 }
 
 /// 世界路径读数：完整动力学步（含每步重建）的两臂耗时。
+/// ⚠️ 稠密云在动力学档下会**发散**（σ=0.3 核重叠 ⇒ 压力爆炸）⇒ `world_bounds` 到天文数字、
+/// 网格按格数上限退回全扫 ⇒ 读数 ≈1.00×。该场景只作"发散不 panic"的健壮性证据；收益读局部云。
 #[test]
 fn dynamics_speedup_microbench_report_only() {
     for (label, scene) in [("稠密云", Scene::Dense), ("局部云", Scene::Local)] {
