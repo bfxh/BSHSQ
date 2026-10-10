@@ -1,21 +1,45 @@
-# Security Policy
+# 安全策略
 
-## Supported Versions
+## 支持范围
 
-Use this section to tell people about which versions of your project are
-currently being supported with security updates.
+BSHSQ（`vxl_phys`）是**在研的预 1.0 纯 Rust 物理引擎**，**没有发布分支**。
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 5.1.x   | :white_check_mark: |
-| 5.0.x   | :x:                |
-| 4.0.x   | :white_check_mark: |
-| < 4.0   | :x:                |
+**唯一受安全维护的版本 = `main` 的最新提交**。不提供对任何历史 tag / 分支 / 快照的安全支持
+（此前这里贴的是 GitHub 模板的 5.1.x / 4.0.x 表格，那些版本在本仓**根本不存在** —— 2026-10-10
+安全审计报告 v1 指出的对外信息错误，已改）。
 
-## Reporting a Vulnerability
+## 报告漏洞
 
-Use this section to tell people how to report a vulnerability.
+- **优先**：走 GitHub 的 **Private vulnerability reporting**（仓库 Security 页 → "Report a
+  vulnerability"）。适合会造成崩溃/状态污染的输入，或任何你不希望立即公开的内容。
+- 若该通道在你的账号下不可用，就**开一个 issue** 并附**最小复现**（场景构造 + 期望 vs 实际 +
+  构建档；本仓 `main` 是唯一的受支持版本，所以 issue 里请写清 commit）。
 
-Tell them where to go, how often they can expect to get an update on a
-reported vulnerability, what to expect if the vulnerability is accepted or
-declined, etc.
+报告请尽量给出：**触发输入 → 调用链 → 期望行为 → 实际行为**。本仓的判据文化是"**可复现 +
+有判据**"，一条能落成回归测试的复现，比一段描述有用得多。
+
+## 威胁模型（当前形态，据 2026-10-10 安全审计报告 v1）
+
+**没有**的输入面（因此不构成攻击面）：序列化 / 存档、网络同步、脚本 / 插件 / 热重载。
+`vxl-phys-ffi` 目前是**空壳**（恒返回 `NotReady`）；全仓 `unsafe` **只有一处**
+（`vxl-phys-narrow/src/simd.rs` 的 SSE2 内建块，已逐行审过）。
+
+**有**的输入面 = **公共 Rust API**：`World` 的 `add_*` / `spawn_*` / `add_joint` / `step`，
+`PhysConfig` 的公开字段，以及几何资产构造（`TriMesh::new` / `ClothSheet::new` /
+`HeightField::flat` / `VoxelVolume::new` / `add_hull` / `add_compound`）。
+**这些入口的合法性与配置正确性由集成方负责**（`World.bodies` 是公开 SoA，可直接写位置与速度）；
+若关卡 / Mod / 存档 / 同步数据会直通这些 API，则上述问题对集成方就是**可远程触发的 DoS
+或同步分叉**。
+
+## 本仓的修复立场
+
+1. **入口拒绝、内核保留断言**。坏输入（非法尺寸、越界体号、坏索引）在**构造当场**响亮拒绝，
+   而不是一路带进内核再 panic，更**不是**把索引改成 `get()` 后静默跳过 —— 那只是把可见崩溃
+   换成更隐蔽的逻辑错误。
+2. **尺寸算术先转 `usize` 再乘**。网格/体素/高度场的维度是 `u32`，在 `u32` 里乘完再
+   `as usize` 会在 release 静默回绕（分配偏小、写错格）——见审计 S2 簇。
+3. **确定性门优先**。同机同编译器的逐位一致（`determinism` / 金样）与本仓的跨平台哈希比对
+   是承重判据；威胁到它们的缺陷（如 SIMD 与标量实现语义漂移）按最高优先级处理。
+
+已修复与待办逐条列在 PR 历史与 `docs/` 台账里；审计报告本体（含 91 场景与 300 万组差分探针的
+原始证据）由报告方保管。
