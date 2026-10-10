@@ -40,7 +40,10 @@ impl VoxelVolume {
 
     #[inline]
     pub(crate) fn index(&self, ix: u32, iy: u32, iz: u32) -> usize {
-        (ix + self.nx * (iy + self.ny * iz)) as usize
+        // **先转 `usize` 再乘**（与 `new` 的分配口径同源）：在 `u32` 里乘完再转，release 会
+        // 静默回绕 —— 实测 `nx·ny·nz > 2³²` 时 `set(0, 4096, 0)` 会改写 `(0, 0, 0)`，静默
+        // 改坏地形与断裂结果（2026-10-10 安全审计 F-02）。
+        ix as usize + self.nx as usize * (iy as usize + self.ny as usize * iz as usize)
     }
 
     #[inline]

@@ -31,7 +31,7 @@ impl HeightField {
             nx,
             nz,
             spacing,
-            heights: vec![height; (nx * nz) as usize],
+            heights: vec![height; nx as usize * nz as usize],
         }
     }
 
@@ -53,12 +53,12 @@ impl HeightField {
 
     #[inline]
     pub fn height_ix(&self, ix: u32, iz: u32) -> f32 {
-        self.heights[(iz * self.nx + ix) as usize]
+        self.heights[iz as usize * self.nx as usize + ix as usize]
     }
 
     #[inline]
     pub fn set_height(&mut self, ix: u32, iz: u32, h: f32) {
-        self.heights[(iz * self.nx + ix) as usize] = h;
+        self.heights[iz as usize * self.nx as usize + ix as usize] = h;
     }
 
     /// 双线性采样：返回 (高度，法线)。法线由解析梯度给出。
@@ -92,7 +92,7 @@ impl HeightField {
             as u32;
         let iz = (((z - self.origin_z) / self.spacing).floor() as i32).clamp(0, self.nz as i32 - 1)
             as u32;
-        let i = (iz * self.nx + ix) as usize;
+        let i = iz as usize * self.nx as usize + ix as usize;
         self.heights[i] -= depth;
         true
     }

@@ -53,12 +53,14 @@ impl SeedGrid {
             (((max.y - min.y) * inv_bin).floor() as i32 + 1).max(1),
             (((max.z - min.z) * inv_bin).floor() as i32 + 1).max(1),
         );
-        let mut bins: Vec<Vec<u32>> = vec![Vec::new(); (dims.0 * dims.1 * dims.2) as usize];
+        let mut bins: Vec<Vec<u32>> =
+            vec![Vec::new(); dims.0 as usize * dims.1 as usize * dims.2 as usize];
         for (si, &s) in seeds.iter().enumerate() {
             let ix = (((s.x - min.x) * inv_bin).floor() as i32).clamp(0, dims.0 - 1);
             let iy = (((s.y - min.y) * inv_bin).floor() as i32).clamp(0, dims.1 - 1);
             let iz = (((s.z - min.z) * inv_bin).floor() as i32).clamp(0, dims.2 - 1);
-            bins[((ix * dims.1 + iy) * dims.2 + iz) as usize].push(si as u32);
+            bins[(ix as usize * dims.1 as usize + iy as usize) * dims.2 as usize + iz as usize]
+                .push(si as u32);
         }
         // 逐环壳偏移（r = 0 = 单格；r ≥ 1 = 该切比雪夫半径的六个面）
         let r_max = dims.0.max(dims.1).max(dims.2);
