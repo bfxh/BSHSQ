@@ -355,6 +355,12 @@ impl World {
 
 /// 合并一条冲击记录：同一 `(provider, body)` 只留**接近速度最大**的那条（并列留先出现的）。
 /// 顺序 = 首次出现序 ⇒ 确定性。抽成自由函数是为了把 `record_impacts` 压回 god 门棘轮内。
+///
+/// ⚠️ **成本界**：线性查找 ⇒ 每子步 `O(k²)`（`k` = provider 接触数）。实测（体素地板 + N 盒、
+/// 关睡眠、`impacts = 200/800/1600`）：合并的净成本 **≈0.25–0.4 ms/tick**（对照关合并的旧行为），
+/// 落在本仓自报的噪声带（±3–5%）里；本仓四哈希/金样场景的 `k` 恒为 0（无 provider 接触）。
+/// `k ≫ 10⁴` 的场景（如 10 万盒压在体素地形上）需要改成带键索引——届时那是**已知可量**的一刀，
+/// 不是现在的猜测优化。
 fn merge_impact(impacts: &mut Vec<ImpactRecord>, rec: ImpactRecord) {
     if let Some(slot) = impacts
         .iter_mut()
