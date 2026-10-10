@@ -11,8 +11,7 @@ impl World {
     pub fn with_broadphase(config: PhysConfig, broad: Box<dyn BroadPhase>) -> Self {
         let mut fields = FieldRegistry::new();
         fields.add(Box::new(GravityField { g: config.gravity }));
-        let skin = config.contact_skin;
-        let mut bodies = BodySet::new();
+        let (skin, mut bodies) = (config.contact_skin, BodySet::new());
         bodies.materials[0] = Material::new(config.friction, config.restitution); // 默认材质（槽 0；逐材质用 add_material 覆盖）
                                                                                   // §6 调度注入：threads ≤ 1 → 串行（默认，回归对照基准）。
         let jobs: Box<dyn JobSystem> = if config.threads > 1 {
@@ -131,13 +130,20 @@ impl World {
     /// 锚点/轴均为体局部量；返回关节 id（关节序即求解序 ⇒ 确定性）。
     /// 限位与马达**均已接线**（2026-09-27 更正原"v1 未接"）；见 `vxl_phys_solver::joints`。
     pub fn add_joint(&mut self, joint: Joint) -> u32 {
+        let n = self.bodies.len() as u32; // 入口拒绝（安全审计 F-03）：越界体号旧实现要到下一次 step() 才 panic
+        assert!(
+            joint.a < n && joint.b < n,
+            "关节端点体号越界：a={} b={}（体数 {n}）",
+            joint.a,
+            joint.b
+        );
         self.joints.add(joint)
     }
 
     /// 由 provider marker 体（[`Self::add_voxel`]/`add_mesh`/`add_splat_field`
     /// 返回的静态体）反查 provider id（流体边界列表用，见 [`Self::add_fluid`]）。
     pub fn provider_id_of(&self, body: BodyId) -> Option<u32> {
-        match &self.bodies.shape[body as usize] {
+        match self.bodies.shape.get(body as usize)? {
             Shape::Provider(id) => Some(*id),
             _ => None,
         }
