@@ -412,10 +412,10 @@ capabilities:
 
   # ── 验证能力：真实性基准不是"某个物理域"，但同样是本仓要长期守的能力 ──
   - id: PHY-SCOPE-REALISM-BENCH
-    title: 真实性基准（R1–R9：能量 / 弹性 / 接触力 / 穿透 / 质量比 / 关节 / 流体体积 / 睡眠位置 / 破坏触发）
+    title: 真实性基准（R1–R10：能量 / 弹性 / 接触力 / 穿透 / 质量比 / 关节 / 流体体积 / 睡眠位置 / 破坏触发 / 堆叠载荷）
     scope: included
     implementation: implemented
-    implementation_path: bench/realism-probe/src/bin/probe.rs
+    implementation_path: bench/realism-probe/src/bin/probe/main.rs
     evidence:
       - id: why_in_ci
         note: >-
@@ -424,7 +424,7 @@ capabilities:
           才收进 CI。顺序不可反：先在本机逐字复现外部基线，再拿它当基线；复现不了只能当报告项。
       - id: two_tiers
         note: >-
-          不变量档（25 项阈值，守真实性不退化）进 PR 门；逐字档（--strict，与基线逐行相等）
+          不变量档（28 项阈值，守真实性不退化）进 PR 门；逐字档（--strict，与基线逐行相等）
           既做复现验证、又是"机器无关"这条前提的持续体检。计时类基准（bench/sweep_scale.py）
           不进 CI —— 那是 E-REF 报告项，与 gate_scale.sh 的 SCALE_TIME_REPORT 同口径。
       - id: gate
@@ -447,6 +447,9 @@ capabilities:
           被解掉 ⇒ 默认 2 子步下 12 m/s 撞击**一块碎块都挖不出**（1 子步档却挖 108 块——
           破坏结果取决于子步数）。改为**按 tick 取峰值**；R9 钉"解析触发 tick 对得上 +
           两档子步逐值相同 + 都挖得出 + 亚阈不触发"四条。
+          **R10 多体堆叠的层间载荷方差**（2026-10-10，评审 §1.5 的 MISSING）：逐点冲量不暴露，
+          改用"逐盒净力（速度差分）+ 逐层望远镜求和"拿层间载荷 ⇒ 稳住的 3 层堆均值误差
+          0.0033%、波动 0.161%，而预热只给 2 s 时波动 12.79%（沉降时间这条特征一并钉住）。
     required_evidence:
       - implementation_path
       - ci_verification_path
@@ -454,5 +457,5 @@ capabilities:
     owner: maintainer
     notes: >-
       这不是"某个物理域"，而是跨域的验证能力；放在本表是为了让"真实性有没有自动门"这件事
-      只有一个事实源。R1–R8 的定义与逐条读数见 bench/realism-probe 与 docs/KNOWLEDGE.md
-      §M（R8 另见 §R）。
+      只有一个事实源。R1–R10 的定义与逐条读数见 bench/realism-probe（R8–R10 在
+      `src/bin/probe/`）与 docs/KNOWLEDGE.md §M（R8/§R、R9/§T、R10/§U）。
