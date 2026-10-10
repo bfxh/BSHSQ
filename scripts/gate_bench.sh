@@ -102,6 +102,7 @@ probes = [
     "R7_fluid_volume_wcsph",
     "R8_sleep_position_error",
     "R9_destruction_trigger_tick",
+    "R10_stack_load_steadiness",
 ]
 missing = [p for p in probes if p not in g]
 if missing:
@@ -183,6 +184,19 @@ if r9 is not None:
     chk("R9", "carves", r9["debris_pieces"] > 0 and r9["debris_pieces_substeps1"] > 0,
         f"碎块 {r9['debris_pieces']} / {r9['debris_pieces_substeps1']} > 0")
     chk("R9", "sub_threshold_pieces", r9["sub_threshold_pieces"] == 0, f"{r9['sub_threshold_pieces']} = 0")
+
+# 2026-10-10 R10：**多体堆叠的层间载荷方差**（评审 §1.5 标 MISSING）。逐点冲量不暴露，但
+# 层间载荷 = 其上方各盒净接触力之和（望远镜求和），逐盒净力用速度差分测（R3 同招）。
+# 判据：稳住后（预热 10 s）载荷均值对齐理论与波动有界；另要**非空洞**——预热只给 2 s 时
+# 场景必须仍在明显波动（否则"稳"是假的，比如堆根本没受力）。
+r10 = g.get("R10_stack_load_steadiness")
+if r10 is not None:
+    chk("R10", "mean_err_pct_settled", r10["mean_err_pct_settled"] <= 0.05,
+        f"{r10['mean_err_pct_settled']:.4f}% ≤ 0.05%")
+    chk("R10", "std_over_load_pct_settled", r10["std_over_load_pct_settled_10s"] <= 0.5,
+        f"{r10['std_over_load_pct_settled_10s']:.4f}% ≤ 0.5%")
+    chk("R10", "non_vacuous_early_window", r10["std_over_load_pct_early_2s"] > 1.0,
+        f"2 s 窗口 {r10['std_over_load_pct_early_2s']:.3f}% > 1%（证明场景真在演化）")
 
 fails = [(n, d) for n, ok, d in checks if not ok]
 for name, ok, detail in checks:
