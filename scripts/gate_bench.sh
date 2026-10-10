@@ -101,6 +101,7 @@ probes = [
     "R6_spherical_chain_violation",
     "R7_fluid_volume_wcsph",
     "R8_sleep_position_error",
+    "R9_destruction_trigger_tick",
 ]
 missing = [p for p in probes if p not in g]
 if missing:
@@ -168,6 +169,20 @@ if r8 is not None:
     chk("R8", "all_slept", r8["slept_a"] == r8["dynamic"], f"{r8['slept_a']}/{r8['dynamic']} 入睡")
     chk("R8", "pos_dev_max_m", r8["pos_dev_max_m"] <= 0.02, f"{r8['pos_dev_max_m']:.5f} ≤ 0.02")
     chk("R8", "ang_dev_max_deg", r8["ang_dev_max_deg"] <= 1.0, f"{r8['ang_dev_max_deg']:.5f} ≤ 1.0")
+
+# 2026-10-10 R9：破坏触发的**步精度与子步不变性**。旧实现每子步 clear 重记 ⇒ tick 级
+# 快照只剩最后一个子步（快撞在那儿已被解掉）⇒ 默认 2 子步下 12 m/s 撞击一块碎块都挖不出。
+# 判据四条：解析预测对得上、两档子步**结果相同**（不变性，就是那个 bug）、都要挖得出、亚阈不触发。
+r9 = g.get("R9_destruction_trigger_tick")
+if r9 is not None:
+    chk("R9", "trigger_matches_analytic", abs(r9["trigger_tick"] - r9["analytic_tick"]) <= 1,
+        f"{r9['trigger_tick']} ≈ {r9['analytic_tick']}")
+    chk("R9", "substep_invariant", r9["trigger_tick"] == r9["trigger_tick_substeps1"]
+        and r9["debris_pieces"] == r9["debris_pieces_substeps1"],
+        f"2 子步 {r9['trigger_tick']} tick/{r9['debris_pieces']} 块 = 1 子步 {r9['trigger_tick_substeps1']} tick/{r9['debris_pieces_substeps1']} 块")
+    chk("R9", "carves", r9["debris_pieces"] > 0 and r9["debris_pieces_substeps1"] > 0,
+        f"碎块 {r9['debris_pieces']} / {r9['debris_pieces_substeps1']} > 0")
+    chk("R9", "sub_threshold_pieces", r9["sub_threshold_pieces"] == 0, f"{r9['sub_threshold_pieces']} = 0")
 
 fails = [(n, d) for n, ok, d in checks if not ok]
 for name, ok, detail in checks:
