@@ -173,6 +173,11 @@ struct Perf {
     p50: f64,
     avg: f64,
     p95: f64,
+    /// p99 与**标准差**（评审 §1.5 标 MISSING 的两项；`gate_scale.sh` 早已报 p95/p99，
+    /// 这里补齐同一把刻度）。标准差 = 总体 σ（除以 n，不是 n−1）——它是"这份测量跑批"的
+    /// 离散度读数，不当事后推断用。
+    p99: f64,
+    sd: f64,
     min: f64,
     max: f64,
 }
@@ -180,13 +185,33 @@ struct Perf {
 fn perf(rep: &RunReport) -> Perf {
     let mut s = rep.per_tick_ms.clone();
     s.sort_by(f64::total_cmp);
+    let avg = rep.per_tick_ms.iter().sum::<f64>() / rep.per_tick_ms.len() as f64;
+    let var = rep
+        .per_tick_ms
+        .iter()
+        .map(|x| (x - avg) * (x - avg))
+        .sum::<f64>()
+        / rep.per_tick_ms.len() as f64;
     Perf {
         p50: percentile(&s, 0.50),
-        avg: rep.per_tick_ms.iter().sum::<f64>() / rep.per_tick_ms.len() as f64,
+        avg,
         p95: percentile(&s, 0.95),
+        p99: percentile(&s, 0.99),
+        sd: var.sqrt(),
         min: s[0],
         max: *s.last().unwrap(),
     }
+}
+
+/// `perf_ms` 的 JSON 片段（两个场景**共用**一把刻度：p50/avg/p95/p99/σ/min/max）。
+/// 抽成函数有两个理由：两处不再各写一份格式（少一处漂移面），且 `build_json` 的形参表缩短
+/// ⇒ 它回到 god 门棘轮内。
+fn perf_json(p: &Perf) -> String {
+    format!(
+        "{{\"p50\": {:.4}, \"avg\": {:.4}, \"p95\": {:.4}, \"p99\": {:.4}, \"sd\": {:.4}, \
+         \"min\": {:.4}, \"max\": {:.4}}}",
+        p.p50, p.avg, p.p95, p.p99, p.sd, p.min, p.max
+    )
 }
 
 /// 门槛场景的完整评估：跑轮 + 双跑对拍 + 各项判据。
@@ -265,8 +290,8 @@ fn print_gate_report(e: &GateEval) {
         e.boxes
     );
     println!(
-        "  每 tick 毫秒：p50 {:.3} | 均值 {:.3} | p95 {:.3} | 最小 {:.3} | 最大 {:.3}",
-        gp.p50, gp.avg, gp.p95, gp.min, gp.max
+        "  每 tick 毫秒：p50 {:.3} | 均值 {:.3} | p95 {:.3} | p99 {:.3} | σ {:.3} | 最小 {:.3} | 最大 {:.3}",
+        gp.p50, gp.avg, gp.p95, gp.p99, gp.sd, gp.min, gp.max
     );
     println!(
         "  健康：NaN={} 末态深穿透={}（瞬态 {} tick）最大深度={:.4} 末态活跃={} 最大睡醒翻转={}（≈{:.2} 次/秒/体，SPEC §3 阈值 <1 ⇒ {}）",
@@ -327,9 +352,11 @@ fn print_stress_report(s: &StressEval) {
         s.boxes
     );
     println!(
-        "  每 tick 毫秒：p50 {:.1} | 均值 {:.1} | 最大 {:.1}｜健康：NaN={} 末态深穿透={} 最大深度={:.3} 末态活跃={}",
+        "  每 tick 毫秒：p50 {:.1} | 均值 {:.1} | p99 {:.1} | σ {:.1} | 最大 {:.1}｜健康：NaN={} 末态深穿透={} 最大深度={:.3} 末态活跃={}",
         sp.p50,
         sp.avg,
+        sp.p99,
+        sp.sd,
         sp.max,
         if sr.nan_seen { "有" } else { "0" },
         sr.deep_final,
@@ -354,7 +381,7 @@ fn build_json(e: &GateEval, s: &StressEval) -> String {
             "  \"gate_scene\": {{\n",
             "    \"form\": \"v1_10k_static_plus_1k_dynamic\",\n",
             "    \"boxes\": {}, \"ticks\": {}, \"warmup\": {},\n",
-            "    \"perf_ms\": {{\"p50\": {:.4}, \"avg\": {:.4}, \"p95\": {:.4}, \"min\": {:.4}, \"max\": {:.4}}},\n",
+            "    \"perf_ms\": {},\n",
             "    \"health\": {{\"nan_seen\": {}, \"deep_final\": {}, \"deep_ticks\": {}, \"max_depth\": {:.5}, \"awake_final\": {}, \"max_wake_flips\": {}, \"max_wake_rate_per_s\": {:.3}}},\n",
             "    \"hash\": {{\"final_tick\": {}, \"final\": \"0x{:032x}\", \"twin_match\": {}}},\n",
             "    \"arena\": {{\"capacity\": {}, \"high_water_first\": {}, \"high_water_last\": {}, \"allocs\": {}, \"overflows\": {}, \"stable\": {}}},\n",
@@ -363,7 +390,7 @@ fn build_json(e: &GateEval, s: &StressEval) -> String {
             "  \"stress_scene\": {{\n",
             "    \"form\": \"all_dynamic_20x20x25_stack\", \"report_only\": true,\n",
             "    \"boxes\": {}, \"ticks\": {},\n",
-            "    \"perf_ms\": {{\"p50\": {:.4}, \"avg\": {:.4}, \"max\": {:.4}}},\n",
+            "    \"perf_ms\": {},\n",
             "    \"health\": {{\"nan_seen\": {}, \"deep_final\": {}, \"max_depth\": {:.5}, \"awake_final\": {}}},\n",
             "    \"hash\": {{\"final_tick\": {}, \"final\": \"0x{:032x}\"}}\n",
             "  }},\n",
@@ -375,11 +402,7 @@ fn build_json(e: &GateEval, s: &StressEval) -> String {
         e.boxes,
         GATE_TICKS,
         WARMUP_TICKS,
-        gp.p50,
-        gp.avg,
-        gp.p95,
-        gp.min,
-        gp.max,
+        perf_json(gp),
         gr.nan_seen,
         gr.deep_final,
         gr.deep_ticks,
@@ -402,9 +425,7 @@ fn build_json(e: &GateEval, s: &StressEval) -> String {
         e.pass,
         s.boxes,
         STRESS_TICKS,
-        sp.p50,
-        sp.avg,
-        sp.max,
+        perf_json(sp),
         sr.nan_seen,
         sr.deep_final,
         sr.max_depth,
