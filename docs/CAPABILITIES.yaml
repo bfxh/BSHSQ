@@ -412,7 +412,7 @@ capabilities:
 
   # ── 验证能力：真实性基准不是"某个物理域"，但同样是本仓要长期守的能力 ──
   - id: PHY-SCOPE-REALISM-BENCH
-    title: 真实性基准（R1–R8：能量 / 弹性 / 接触力 / 穿透 / 质量比 / 关节 / 流体体积 / 睡眠位置）
+    title: 真实性基准（R1–R9：能量 / 弹性 / 接触力 / 穿透 / 质量比 / 关节 / 流体体积 / 睡眠位置 / 破坏触发）
     scope: included
     implementation: implemented
     implementation_path: bench/realism-probe/src/bin/probe.rs
@@ -424,7 +424,7 @@ capabilities:
           才收进 CI。顺序不可反：先在本机逐字复现外部基线，再拿它当基线；复现不了只能当报告项。
       - id: two_tiers
         note: >-
-          不变量档（21 项阈值，守真实性不退化）进 PR 门；逐字档（--strict，与基线逐行相等）
+          不变量档（25 项阈值，守真实性不退化）进 PR 门；逐字档（--strict，与基线逐行相等）
           既做复现验证、又是"机器无关"这条前提的持续体检。计时类基准（bench/sweep_scale.py）
           不进 CI —— 那是 E-REF 报告项，与 gate_scale.sh 的 SCALE_TIME_REPORT 同口径。
       - id: gate
@@ -442,6 +442,11 @@ capabilities:
           入睡率/唤醒率、不测"睡眠把体冻在哪儿"；R8 两档同输入（睡眠开 / `sleep_time=+∞`）
           比末态逐体位置与姿态，并**要求 32 体全部入睡**（非空洞）。实测 32/32 入睡、
           max 9.66 mm / 0.214°。
+          **R9 破坏触发的步精度与子步不变性**（2026-10-10，修的是一处真缺陷）：`impacts`
+          旧实现每子步 `clear` 重记 ⇒ tick 级快照只剩**最后一个子步**，而快撞在第 1 个子步就
+          被解掉 ⇒ 默认 2 子步下 12 m/s 撞击**一块碎块都挖不出**（1 子步档却挖 108 块——
+          破坏结果取决于子步数）。改为**按 tick 取峰值**；R9 钉"解析触发 tick 对得上 +
+          两档子步逐值相同 + 都挖得出 + 亚阈不触发"四条。
     required_evidence:
       - implementation_path
       - ci_verification_path

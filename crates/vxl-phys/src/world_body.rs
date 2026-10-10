@@ -175,11 +175,17 @@ impl World {
         &self.impacts
     }
 
-    /// 窄相之后、求解之前：把「动体 × provider」对的接近速度与接触点快照进
-    /// `self.impacts`（本子步重记 ⇒ 每次 `step` 结束时是**最后一个子步**的接触
-    /// 快照，与"读末态流形"的旧语义对齐，但速度是解算前的）。
-    pub(crate) fn record_impacts(&mut self) {
-        self.impacts.clear();
+    /// 窄相之后、求解之前：把「动体 × provider」对的接近速度与接触点快照进 `self.impacts`。
+    ///
+    /// **口径 = 本 tick 的峰值，不是最后一个子步的瞬时值**（2026-10-10 更正）：旧实现每子步
+    /// `clear` 重记，而快撞通常在第 1 个子步就被解掉 ⇒ 末子步只剩 ~0.1–0.2 m/s ⇒ 按"每次
+    /// `step` 之后调用"设计的破坏管线在默认 2 子步下**一块碎块都挖不出**（实测 12 m/s 撞击：
+    /// `substeps=1` 108 块 vs 默认 **0** 块）。现在首子步清空、其余子步**取峰值**（见
+    /// `merge_impact`）；速度仍是各子步**解算前**的值。判据 `destruction_substep_invariance`。
+    pub(crate) fn record_impacts(&mut self, first_substep: bool) {
+        if first_substep {
+            self.impacts.clear();
+        }
         for m in &self.manifolds {
             let (sa, sb) = (
                 self.bodies.shape[m.a as usize],
@@ -205,13 +211,16 @@ impl World {
             for p in m.points.iter() {
                 c += p.point;
             }
-            self.impacts.push(ImpactRecord {
-                provider: prov,
-                body: other,
-                point: c * (1.0 / n),
-                approach,
-                velocity: v,
-            });
+            merge_impact(
+                &mut self.impacts,
+                ImpactRecord {
+                    provider: prov,
+                    body: other,
+                    point: c * (1.0 / n),
+                    approach,
+                    velocity: v,
+                },
+            );
         }
     }
 
@@ -342,4 +351,19 @@ impl World {
         self.arenas.hash.reset();
         h
     }
+}
+
+/// 合并一条冲击记录：同一 `(provider, body)` 只留**接近速度最大**的那条（并列留先出现的）。
+/// 顺序 = 首次出现序 ⇒ 确定性。抽成自由函数是为了把 `record_impacts` 压回 god 门棘轮内。
+fn merge_impact(impacts: &mut Vec<ImpactRecord>, rec: ImpactRecord) {
+    if let Some(slot) = impacts
+        .iter_mut()
+        .find(|r| r.provider == rec.provider && r.body == rec.body)
+    {
+        if rec.approach > slot.approach {
+            *slot = rec;
+        }
+        return;
+    }
+    impacts.push(rec);
 }

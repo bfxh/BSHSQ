@@ -1,8 +1,9 @@
 //! BSHSQ 真实性补测探针（外部只读调用公共 API，不改引擎代码）。
 //! 输出一行一个 JSON 对象，供 CI 解析。
 //!
-//! 探针 R1–R8 覆盖：能量漂移 / 弹性碰撞守恒 / 静置接触力连续性 / 穿透深度分布 /
-//! 质量比极限 / 关节约束违反 / 流体体积守恒（R7 及口径分离 R7i）/ **睡眠的位置代价（R8）**。
+//! 探针 R1–R9 覆盖：能量漂移 / 弹性碰撞守恒 / 静置接触力连续性 / 穿透深度分布 /
+//! 质量比极限 / 关节约束违反 / 流体体积守恒（R7 及口径分离 R7i）/ **睡眠的位置代价（R8）** /
+//! **破坏触发的步精度与子步不变性（R9）**。
 //! **全部量机器无关**（跨 OS / CPU / 编译器逐字一致，2026-10-09 在 Windows + Linux 沙箱
 //! 双环境复现）⇒ 可以直接做 CI 判据。
 //!
@@ -639,6 +640,80 @@ fn main() {
     fluid_volume(400);
     fluid_volume_split(400);
     sleep_position_error(600);
+    destruction_trigger_tick(120);
+}
+
+/// R9 —— **破坏触发的步精度**：解析预测的撞击 tick 必须与实际触发 tick 一致。
+///
+/// 仓里已有"碎块数 / 末态哈希可复现"的判据（`tests/destruction_tiered.rs`），但没有
+/// **触发时刻**的判据——而触发时刻正是历史 bug 出没过的地方：`record_impacts` 曾经读
+/// "解算后速度"，子步解算已经把冲击吃掉了 ⇒ 炮弹打上去不挖洞。本探针把它钉成数字。
+///
+/// 口径：关重力 ⇒ 弹道是直线；弹体从 `GAP` 处以 `V` 沿 +x 飞向体素墙。窄相的**投机
+/// 皮肤带**（`contact_skin`）先于几何接触生成流形 ⇒ 解析触发时刻 = `(GAP − skin)/V`，
+/// 换算成 tick 再上取整。**判据 = 实际触发 tick 与解析值相差 ≤1**（时间离散 + 记录
+/// 相位允许一 tick）。另一条是反向的精度判据：**亚阈冲击一次都不许触发**。
+fn destruction_trigger_tick(ticks: usize) {
+    const V: f32 = 12.0;
+    const GAP: f32 = 0.8;
+    /// 亚阈档的阈值：远高于 `V` ⇒ 不该有任何触发。
+    const SUB_THRESHOLD: f32 = 5.0 * V;
+    /// 触发一记毁伤所需的接近速度阈值（现实值；`12 m/s` 撞击显然该过）。
+    const THRESHOLD: f32 = 5.0;
+    let build = |substeps: u32| -> (World, u32, u32) {
+        let cfg = PhysConfig {
+            gravity: Vec3::ZERO,
+            substeps,
+            ..PhysConfig::default()
+        };
+        let mut w = World::new(cfg);
+        // 一块厚 2.4 m 的体素块（x ∈ [0, 2.4)）——**必须够厚**：弹坑球半径最大 0.9 m、
+        // 球心落在接触点内侧 1.05r，薄墙（0.3 m）会让整颗球落在材料外、挖不出碎块。
+        let mut vol =
+            vxl_phys_terrain::voxel::VoxelVolume::new(Vec3::new(0.0, 0.0, -1.0), 0.1, 24, 20, 20);
+        vol.fill_box(Vec3::new(0.0, 0.0, -1.0), Vec3::new(2.4, 2.0, 1.0));
+        let vid = w.add_voxel(vol);
+        let bullet = w.add_dynamic(
+            Shape::Box {
+                half: Vec3::splat(0.2),
+            },
+            Vec3::new(-0.2 - GAP, 1.0, 0.0),
+            Quat::IDENTITY,
+            2000.0,
+        );
+        w.bodies.linvel[bullet as usize] = Vec3::new(V, 0.0, 0.0);
+        (w, vid, bullet)
+    };
+    let cfg0 = PhysConfig::default();
+    let dt_sub = cfg0.dt as f64 / cfg0.substeps.max(1) as f64;
+    let skin = cfg0.contact_skin as f64;
+    // **顺序感知**的解析预测：窄相用的是**上一子步末**的位置 ⇒ 首个"看见接触"的子步是
+    // `floor((GAP−skin)/(V·dt_sub)) + 2`（+1 是那一拍的位移、+1 是索引），再换成 tick。
+    let substep_hit = ((GAP as f64 - skin) / (V as f64 * dt_sub)).ceil() + 1.0;
+    let analytic = (substep_hit / cfg0.substeps.max(1) as f64).ceil() as usize;
+    let run = |substeps: u32, thresh: f32| -> (usize, usize) {
+        let (mut w, vid, _) = build(substeps);
+        let mut first = 0usize;
+        let mut total = 0usize;
+        for t in 1..=ticks {
+            w.step();
+            let n = w.apply_impact_destruction(vid, thresh, 1000.0);
+            if n > 0 && first == 0 {
+                first = t;
+            }
+            total += n;
+        }
+        (first, total)
+    };
+    let (trig, pieces) = run(cfg0.substeps, THRESHOLD);
+    let (trig_s1, pieces_s1) = run(1, THRESHOLD);
+    let (_, sub_pieces) = run(cfg0.substeps, SUB_THRESHOLD);
+    println!(
+        "{{\"probe\":\"R9_destruction_trigger_tick\",\"ticks\":{ticks},\"analytic_tick\":{analytic},\
+         \"trigger_tick\":{trig},\"trigger_tick_substeps1\":{trig_s1},\
+         \"debris_pieces\":{pieces},\"debris_pieces_substeps1\":{pieces_s1},\
+         \"sub_threshold_pieces\":{sub_pieces}}}",
+    );
 }
 
 /// R8 —— **睡眠的位置代价**：睡着不能把体冻在错位（外部评审「方向 14」的真实性半边）。
