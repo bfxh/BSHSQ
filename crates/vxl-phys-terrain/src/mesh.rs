@@ -210,9 +210,9 @@ impl TriMesh {
         let bin = mean_edge.max(MIN_BIN);
         let b = self.world_bounds();
         let dims = (
-            ((b.max.x - b.min.x) / bin).ceil() as u32 + 1,
-            ((b.max.y - b.min.y) / bin).ceil() as u32 + 1,
-            ((b.max.z - b.min.z) / bin).ceil() as u32 + 1,
+            (((b.max.x - b.min.x) / bin).ceil() as u32).saturating_add(1),
+            (((b.max.y - b.min.y) / bin).ceil() as u32).saturating_add(1),
+            (((b.max.z - b.min.z) / bin).ceil() as u32).saturating_add(1),
         );
         let n_bins = dims.0 as u64 * dims.1 as u64 * dims.2 as u64;
         if n_bins == 0 || n_bins > GRID_MAX_BINS {
