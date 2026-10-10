@@ -280,9 +280,8 @@ fn report_working_set(w: &World, ticks: u32, acc: &Acc) {
         acc.pts_max,
         acc.cands_max
     );
-    // 抖动审计（SPEC §3：休眠体被重复唤醒 < 1 次/秒/体）。**分母用活跃秒**（更严：
-    // 全睡之后不可能再翻转，用全期秒数会稀释）⇒ 报的是保守上界。判据进门见
-    // `scripts/gate_scale.sh`（确定性量：翻转峰是场景与码的函数）。
+    // 抖动审计（SPEC §3：休眠体被重复唤醒 < 1 次/秒/体）。**分母用活跃秒**（更严：全睡之后
+    // 不可能再翻转，用全期秒数会稀释）⇒ 报的是保守上界；判据进门见 `scripts/gate_scale.sh`。
     // ⚠️ 行尾**必须保留 ASCII 机读标签** `wake_flips=` / `wake_rate_per_s=`：门脚本按它解析
     // （照 `determinism` 打 `FINAL_HASH=0x…` 的先例）——**别在门里切中文**：
     // 实测 `sed 's/[^0-9]*([0-9]+)次…/'` 在中文前缀上匹配不上、把整行漏给判据（踩过）。
@@ -415,8 +414,23 @@ fn print_narrow_probe(w: &World, ticks: f64) {
     );
 }
 
-/// 出口门槛判定（§3：≥ 30 FPS）。
-fn print_gate(avg: f64) {
+/// §3 最低通过档的**场景规模**（与 `SPEC.md` §3 / `gate_scale.sh` 的冻结值同源）。
+const TIER_STATIC: usize = 102_400;
+const TIER_DYNAMIC: usize = 100_000;
+
+/// 出口门槛判定（§3：10 万动态 + 10 万静态 ≥ 30 FPS）。
+///
+/// ⚠️ **只在场景确实是 §3 那一档时才敢下结论**（2026-10-10 更正）：旧实现只判
+/// `avg < 33.33`，于是**任何 N 都会打印"✅ §3 最低通过档"**——沙箱在 `N = 10` 上复现过。
+/// 那是"标签撒谎"：跑 10 个盒子快，不代表 10 万+10 万达标。现在规模不符就只报计时。
+fn print_gate(avg: f64, a: &Args) {
+    if a.n_static < TIER_STATIC || a.n_dynamic < TIER_DYNAMIC {
+        println!(
+            "ℹ️ 本档不是 §3 场景（静态 {} + 动态 {}；§3 = {TIER_STATIC} + {TIER_DYNAMIC}）⇒ 只报计时，不判档",
+            a.n_static, a.n_dynamic
+        );
+        return;
+    }
     if avg < 33.33 {
         println!("✅ §3 最低通过档（10万+10万 ≥30FPS）");
     } else {
@@ -446,5 +460,5 @@ fn main() {
     let avg = acc.total / a.ticks as f64;
     print_summary(&w, avg, acc.worst);
     report_working_set(&w, a.ticks, &acc);
-    print_gate(avg);
+    print_gate(avg, &a);
 }

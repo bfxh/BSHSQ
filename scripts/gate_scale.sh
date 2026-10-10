@@ -202,6 +202,20 @@ else
     echo "  ⚠️ 稳态窗口为空（活跃期覆盖到末 tick，如全程不睡的档）——该场景没有稳态可分"
 fi
 
+  # **标签诚实**（2026-10-10 加）：`m1_scale` 的"§3 最低通过档"标签必须**只在 §3 那一档**出现。
+  # 旧实现只判 `avg < 33.33`，任何 N 都会打这个标（沙箱在 N=10 上复现）⇒ 本检查用一个**小档**
+  # 跑一遍，日志里出现"§3 最低通过档"即红。小档只跑 10 盒 × 60 tick（≈1 s 量级）。
+  # 日志放**临时文件**（别落到仓库根：`out` 未定义时会把工作区弄脏——踩过）。
+  tiny_log=$(mktemp)
+  trap 'rm -f "$tiny_log"' EXIT
+  cargo run --release -q -p vxl-phys --example m1_scale -- 1 10 10 60 16 >"$tiny_log" 2>&1
+  if grep -q "§3 最低通过档" "$tiny_log"; then
+      echo "❌ 标签不诚实：非 §3 场景（10+10）也打印了'§3 最低通过档'（见 $tiny_log）" >&2
+      fail=1
+  else
+      echo "✅ 标签诚实：小档（10+10）未冒称 §3 通过档"
+  fi
+
   if [ "$fail" -eq 0 ]; then
     case "$verdict_time" in
         REPORT) echo "✅ 规模档门全绿（**确定性量逐项一致**；计时按 SCALE_TIME_REPORT=1 只报不判）" ;;
