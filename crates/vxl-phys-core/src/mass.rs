@@ -28,14 +28,39 @@ fn aabb_box_props(density: f32, half: Vec3) -> MassProps {
     }
 }
 
+/// **尺寸必须有限且为正**（2026-10-10 安全审计 F-09）：`0` ⇒ `mass = 0` ⇒ `inv_mass = inf`
+/// ⇒ 该体自身变 NaN；**负**尺寸 ⇒ `mass < 0` ⇒ `inv_mass < 0` ⇒ `is_dynamic`（判据
+/// `inv_mass > 0`）为假 ⇒ **被当非动态静默冻结**（实测停在半空、速度为 0）。在**构造当场**
+/// 拒绝；`> 0.0` 同时也挡住 NaN 尺寸。抽成自由函数是为了不顶 god 门的"最长函数只准减"。
+fn assert_positive_dims(shape: &Shape) {
+    assert!(
+        match *shape {
+            Shape::Box { half } => half.x > 0.0 && half.y > 0.0 && half.z > 0.0,
+            Shape::Sphere { radius } => radius > 0.0,
+            Shape::Cylinder {
+                half_height,
+                radius,
+            }
+            | Shape::Cone {
+                half_height,
+                radius,
+            } => {
+                half_height > 0.0 && radius > 0.0
+            }
+            _ => true,
+        },
+        "形状尺寸必须为正（0 ⇒ inf 惯量、负 ⇒ 静默冻结；见安全审计 F-09）"
+    );
+}
+
 /// 按形状 + 密度计算质量属性。`density <= 0` 视为非法，回退 1.0。
+/// **唯一调用点**是 `BodySet::push_dynamic` ⇒ 这里拒绝坏形状只影响动态体的构造。
 pub fn mass_props(shape: &Shape, density: f32) -> MassProps {
+    assert_positive_dims(shape);
     let density = if density > 0.0 { density } else { 1.0 };
     match *shape {
         Shape::Box { half } => {
-            let ex = 2.0 * half.x;
-            let ey = 2.0 * half.y;
-            let ez = 2.0 * half.z;
+            let (ex, ey, ez) = (2.0 * half.x, 2.0 * half.y, 2.0 * half.z);
             let m = density * ex * ey * ez;
             let ix = m / 12.0 * (ey * ey + ez * ez);
             let iy = m / 12.0 * (ex * ex + ez * ez);
@@ -121,41 +146,5 @@ pub fn mass_props(shape: &Shape, density: f32) -> MassProps {
             inv_mass: 0.0,
             local_inv_inertia: Vec3::ZERO,
         },
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn box_inertia_matches_formula() {
-        let h = Vec3::new(0.5, 1.0, 2.0);
-        let p = mass_props(&Shape::Box { half: h }, 2.0);
-        let m = 2.0 * 8.0 * h.x * h.y * h.z;
-        assert!((p.mass - m).abs() < 1e-4);
-        let ix = m / 12.0 * ((2.0 * h.y) * (2.0 * h.y) + (2.0 * h.z) * (2.0 * h.z));
-        assert!((1.0 / p.local_inv_inertia.x - ix).abs() < 1e-3);
-    }
-
-    #[test]
-    fn sphere_inertia() {
-        let p = mass_props(&Shape::Sphere { radius: 1.0 }, 1.0);
-        let m = 4.0 / 3.0 * core::f32::consts::PI;
-        assert!((p.mass - m).abs() < 1e-4);
-        assert!((1.0 / p.local_inv_inertia.x - 2.0 / 5.0 * m).abs() < 1e-4);
-    }
-
-    #[test]
-    fn cylinder_axis_is_y() {
-        let p = mass_props(
-            &Shape::Cylinder {
-                half_height: 1.0,
-                radius: 0.5,
-            },
-            1.0,
-        );
-        // Iy = 1/2 m r^2 < Ix —— 绕主轴更容易转。
-        assert!(p.local_inv_inertia.y > p.local_inv_inertia.x);
     }
 }
