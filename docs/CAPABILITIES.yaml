@@ -391,6 +391,52 @@ capabilities:
     owner: maintainer
     notes: 用户 2026-10-08 点名"高斯喷溅…这些也是要搞的"。
 
+  - id: PHY-SCOPE-SENSE
+    title: 声音 / 震动（感官输出：求解事件 → 音频/触觉 cue）
+    scope: included
+    implementation: absent
+    implementation_path: null
+    evidence:
+      - id: user_scope
+        note: >-
+          用户 2026-10-10 点名："搞完这个要搞声音 震动 和相关的工具链" ⇒ 登记为 included。
+      - id: design_decision
+        note: >-
+          定案见 `docs/ROUTE.md` §3.2：本域是**只读消费者**（不改物理），**不得往 `World`
+          加方法**——`god.gate.json` 已把 `World` 的"方法 76"登记为债务，处置是"域侧 API 拆成
+          扩展 trait"，判据是"新加一域不必再往 `World` 添方法"。⇒ 走 `impl SenseExt for World`。
+          材质→音色映射放**外部表**（不往 `Material` 塞声学字段：它是棘轮管的类型）。
+      - id: event_sources_exist
+        note: >-
+          **事件源全部已存在，无需新引擎管线**：`World::impacts()`（逐 tick **峰值**冲击：
+          provider / 体 / 接触点 / 沿法向接近速度 / 解算前速度——2026-10-10 起按 tick 取峰，
+          见 `KNOWLEDGE.md` §T）、`bodies.material[i]` → `Material{friction, restitution}`、
+          `World::manifolds()`（持续接触）。
+      - id: contracts
+        note: >-
+          三条契约（都要 CI 可判）：① **零干扰**——开/关感官归约，`state_hash` 逐位不变
+          （只读、不得借出 `&mut`）；② **确定性**——同场景同输入 ⇒ 逐字相同的 cue 序列
+          （体按索引序、事件按记录序、无 HashMap 迭代序）；③ **预算**——每 tick cue 数有
+          上界 + 显式优先级规则（万级密堆一 tick 上千次冲击，不许默认全播）。
+      - id: toolchain
+        note: >-
+          工具链 = cue 流格式（一行一 cue 的 JSONL，同 `bench/baselines/realism.jsonl` 的
+          "机器无关 + `--strict` 逐字对拍"先例）+ CLI（把示例场景跑出 cue 流，供音效师对表与
+          CI 取基线）+ CI 三条门（零干扰 / 确定性 / 预算）。
+      - id: slices
+        note: >-
+          分期：S1 冲击→cue 归约（强度取法向接近速度、位置取接触点）+ 预算与优先级 + dump；
+          S2 持续接触（滑/滚）连续量；S3 材质表与资产映射（缺项显式拒绝，不静默用默认音）；
+          S4 震动设备输出（包络 / 上钳 [0,1] / 更新率）。S1 落点 = 新 crate `vxl-phys-sense`。
+    required_evidence:
+      - implementation_path
+      - tests
+    decision_id: null
+    owner: maintainer
+    notes: >-
+      本仓第一条"输出侧"域。它同时是 `ROUTE.md` §7 那条"域侧 API 走扩展 trait"的**第一次实考**：
+      若 S1 能在**不碰 `World` 任何既有方法**的前提下落地，那条设计判据就被证实可用。
+
   - id: PHY-SCOPE-HULL
     title: 多边形（凸体外壳）作为刚体形状
     scope: included
