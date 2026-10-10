@@ -6,3 +6,4 @@
 {"probe":"R6_spherical_chain_violation","links":10,"ticks":600,"samples":6000,"sep_p50_m":0.00386,"sep_p99_m":0.00966,"sep_max_m":0.01141,"violation_rate_gt_1cm_pct":0.467,"violation_rate_gt_5cm_pct":0.000}
 {"probe":"R7_fluid_volume_wcsph","ticks":400,"particles_t1":504,"particles_end":504,"volume_end_rel_err_pct":11.441,"volume_max_abs_rel_err_pct":68.705,"mean_rho_over_rho0_end":0.7999}
 {"probe":"R7i_fluid_volume_split","ticks":400,"particles_total":504,"interior_count":0,"interior_frac_pct":0.000,"mean_rho_over_rho0_all":0.7962,"mean_rho_over_rho0_interior":0.0000,"mean_rho_over_rho0_surface":0.7962,"full_support_ref":32}
+{"probe":"R8_sleep_position_error","ticks":600,"dynamic":32,"slept_a":32,"pos_dev_max_m":0.00966,"pos_dev_p99_m":0.00966,"ang_dev_max_deg":0.21388}

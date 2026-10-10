@@ -100,6 +100,7 @@ probes = [
     "R5_mass_ratio_stack2",
     "R6_spherical_chain_violation",
     "R7_fluid_volume_wcsph",
+    "R8_sleep_position_error",
 ]
 missing = [p for p in probes if p not in g]
 if missing:
@@ -158,6 +159,15 @@ if r7i is not None:
     chk("R7i", "interior_frac_pct", r7i["interior_frac_pct"] <= 0.5, f"{r7i['interior_frac_pct']:.3f} ≤ 0.5")
     chk("R7i", "mean_rho_over_rho0_all", 0.6 <= r7i["mean_rho_over_rho0_all"] <= 1.05, f"{r7i['mean_rho_over_rho0_all']:.4f} ∈ [0.6, 1.05]")
     chk("R7i", "mean_rho_over_rho0_surface", 0.5 <= r7i["mean_rho_over_rho0_surface"] <= 0.95, f"{r7i['mean_rho_over_rho0_surface']:.4f} ∈ [0.5, 0.95]")
+
+# 2026-10-10 R8：睡眠的**位置代价**（评审「方向 14」的真实性半边）。仓库此前只测入睡率/
+# 唤醒率，不测"睡眠把体冻在哪儿"。判据两条：① **非空洞**——32 体必须**全部入睡**
+# （否则本探针什么都没测，直接红）；② 睡着后的末态与"关睡眠参考"的逐体偏差有界。
+r8 = g.get("R8_sleep_position_error")
+if r8 is not None:
+    chk("R8", "all_slept", r8["slept_a"] == r8["dynamic"], f"{r8['slept_a']}/{r8['dynamic']} 入睡")
+    chk("R8", "pos_dev_max_m", r8["pos_dev_max_m"] <= 0.02, f"{r8['pos_dev_max_m']:.5f} ≤ 0.02")
+    chk("R8", "ang_dev_max_deg", r8["ang_dev_max_deg"] <= 1.0, f"{r8['ang_dev_max_deg']:.5f} ≤ 1.0")
 
 fails = [(n, d) for n, ok, d in checks if not ok]
 for name, ok, detail in checks:

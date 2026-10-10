@@ -412,7 +412,7 @@ capabilities:
 
   # ── 验证能力：真实性基准不是"某个物理域"，但同样是本仓要长期守的能力 ──
   - id: PHY-SCOPE-REALISM-BENCH
-    title: 真实性基准（R1–R7：能量 / 弹性 / 接触力 / 穿透 / 质量比 / 关节 / 流体体积）
+    title: 真实性基准（R1–R8：能量 / 弹性 / 接触力 / 穿透 / 质量比 / 关节 / 流体体积 / 睡眠位置）
     scope: included
     implementation: implemented
     implementation_path: bench/realism-probe/src/bin/probe.rs
@@ -424,7 +424,7 @@ capabilities:
           才收进 CI。顺序不可反：先在本机逐字复现外部基线，再拿它当基线；复现不了只能当报告项。
       - id: two_tiers
         note: >-
-          不变量档（15 项阈值，守真实性不退化）进 PR 门；逐字档（--strict，与基线逐行相等）
+          不变量档（21 项阈值，守真实性不退化）进 PR 门；逐字档（--strict，与基线逐行相等）
           既做复现验证、又是"机器无关"这条前提的持续体检。计时类基准（bench/sweep_scale.py）
           不进 CI —— 那是 E-REF 报告项，与 gate_scale.sh 的 SCALE_TIME_REPORT 同口径。
       - id: gate
@@ -438,6 +438,10 @@ capabilities:
           20 → 1000，零换代）；R7 溃坝 Σm/ρ 体积偏 68.7%（2026-10-09 口径已分离：溃坝全程
           interior=0 ⇒ 全部是自由面核截断的口径，非引擎真误差；探针加 R7i 分报，零换代）。
           R2/R5 修掉后基线换代；R7 降级为已解释口径（OPEN-PROBLEMS P16）。
+          另加 **R8 睡眠的位置代价**（2026-10-10，评审「方向 14」的真实性半边）：仓库此前只测
+          入睡率/唤醒率、不测"睡眠把体冻在哪儿"；R8 两档同输入（睡眠开 / `sleep_time=+∞`）
+          比末态逐体位置与姿态，并**要求 32 体全部入睡**（非空洞）。实测 32/32 入睡、
+          max 9.66 mm / 0.214°。
     required_evidence:
       - implementation_path
       - ci_verification_path
@@ -445,4 +449,5 @@ capabilities:
     owner: maintainer
     notes: >-
       这不是"某个物理域"，而是跨域的验证能力；放在本表是为了让"真实性有没有自动门"这件事
-      只有一个事实源。R1–R7 的定义与逐条读数见 bench/realism-probe 与 docs/KNOWLEDGE.md §M。
+      只有一个事实源。R1–R8 的定义与逐条读数见 bench/realism-probe 与 docs/KNOWLEDGE.md
+      §M（R8 另见 §R）。

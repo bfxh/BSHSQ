@@ -1,9 +1,10 @@
 //! BSHSQ 真实性补测探针（外部只读调用公共 API，不改引擎代码）。
 //! 输出一行一个 JSON 对象，供 CI 解析。
 //!
-//! 七个探针（R1–R7）覆盖：能量漂移 / 弹性碰撞守恒 / 静置接触力连续性 / 穿透深度分布 /
-//! 质量比极限 / 关节约束违反 / 流体体积守恒。**全部量机器无关**（跨 OS / CPU / 编译器
-//! 逐字一致，2026-10-09 在 Windows + Linux 沙箱双环境复现）⇒ 可以直接做 CI 判据。
+//! 探针 R1–R8 覆盖：能量漂移 / 弹性碰撞守恒 / 静置接触力连续性 / 穿透深度分布 /
+//! 质量比极限 / 关节约束违反 / 流体体积守恒（R7 及口径分离 R7i）/ **睡眠的位置代价（R8）**。
+//! **全部量机器无关**（跨 OS / CPU / 编译器逐字一致，2026-10-09 在 Windows + Linux 沙箱
+//! 双环境复现）⇒ 可以直接做 CI 判据。
 //!
 //! 参考基线：`bench/baselines/realism.jsonl`；门脚本：`scripts/gate_bench.sh`。
 use vxl_phys::{Joint, JointKind, PhysConfig, Quat, Shape, Vec3, World};
@@ -637,4 +638,84 @@ fn main() {
     joint_chain(10, 600);
     fluid_volume(400);
     fluid_volume_split(400);
+    sleep_position_error(600);
+}
+
+/// R8 —— **睡眠的位置代价**：睡着不能把体冻在错位（外部评审「方向 14」的真实性半边）。
+///
+/// 仓库此前只测**入睡率/唤醒率**，不测"睡眠把体冻在哪儿"。本探针两档**同场景同输入**：
+/// A = 默认（睡眠开）、B = 关睡眠（`sleep_time = +∞`），比末态**逐体位置**（L2）与**姿态**
+/// （相对转角）。A 档必须**真的睡着**（否则本探针无意义 ⇒ 判据红，不假绿）。
+/// 机器无关（位置/姿态是确定函数）。
+fn sleep_position_error(ticks: usize) {
+    const LAYERS: u32 = 2;
+    const SIDE: u32 = 4;
+    let build = |sleep: bool| -> (World, Vec<u32>) {
+        let cfg = PhysConfig {
+            sleep_time: if sleep { 0.5 } else { f32::INFINITY },
+            threads: 1,
+            ..PhysConfig::default()
+        };
+        let mut w = World::new(cfg);
+        w.add_static(
+            Shape::Box {
+                half: Vec3::new(6.0, 0.5, 6.0),
+            },
+            Vec3::new(0.0, -0.5, 0.0),
+            Quat::IDENTITY,
+        );
+        let mut dyn_ids = Vec::new();
+        // SIDE×SIDE 基础 × LAYERS 层；层高 1.001 起堆（微隙 ⇒ 初始不嵌合）。
+        for layer in 0..LAYERS {
+            for gy in 0..SIDE {
+                for gx in 0..SIDE {
+                    let x = gx as f32 - (SIDE as f32 - 1.0) * 0.5;
+                    let z = gy as f32 - (SIDE as f32 - 1.0) * 0.5;
+                    let y = 0.5 + layer as f32 * 1.001;
+                    dyn_ids.push(w.add_dynamic(
+                        Shape::Box {
+                            half: Vec3::splat(0.5),
+                        },
+                        Vec3::new(x, y, z),
+                        Quat::IDENTITY,
+                        1000.0,
+                    ));
+                }
+            }
+        }
+        (w, dyn_ids)
+    };
+    let (mut a, ids) = build(true);
+    let (mut b, _) = build(false);
+    for _ in 0..ticks {
+        a.step();
+        b.step();
+    }
+    let n_dyn = ids.len();
+    let mut devs: Vec<f32> = Vec::with_capacity(n_dyn);
+    let mut angs: Vec<f32> = Vec::with_capacity(n_dyn);
+    for i in 0..n_dyn {
+        let (ai, bi) = (ids[i] as usize, ids[i] as usize);
+        devs.push((a.bodies.position[ai] - b.bodies.position[bi]).length());
+        let mut q = a.bodies.rot(ai) * b.bodies.rot(bi).conjugate();
+        if q.w < 0.0 {
+            q = Quat::new(-q.x, -q.y, -q.z, -q.w);
+        }
+        let v = Vec3::new(q.x, q.y, q.z);
+        angs.push(2.0 * v.length().atan2(q.w).to_degrees());
+    }
+    devs.sort_by(f32::total_cmp);
+    angs.sort_by(f32::total_cmp);
+    let slept = ids
+        .iter()
+        .filter(|&&i| !a.bodies.awake[i as usize])
+        .count();
+    println!(
+        "{{\"probe\":\"R8_sleep_position_error\",\"ticks\":{ticks},\"dynamic\":{n_dyn},\
+         \"slept_a\":{slept},\"pos_dev_max_m\":{:.5},\"pos_dev_p99_m\":{:.5},\
+         \"ang_dev_max_deg\":{:.5}}}",
+        devs[n_dyn - 1],
+        pct_sorted(&devs, 99.0),
+        angs[n_dyn - 1],
+    );
 }
