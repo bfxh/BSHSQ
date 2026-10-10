@@ -205,7 +205,9 @@ fi
   # **标签诚实**（2026-10-10 加）：`m1_scale` 的"§3 最低通过档"标签必须**只在 §3 那一档**出现。
   # 旧实现只判 `avg < 33.33`，任何 N 都会打这个标（沙箱在 N=10 上复现）⇒ 本检查用一个**小档**
   # 跑一遍，日志里出现"§3 最低通过档"即红。小档只跑 10 盒 × 60 tick（≈1 s 量级）。
-  tiny_log="${out:-.}/scale_tiny_label.log"
+  # 日志放**临时文件**（别落到仓库根：`out` 未定义时会把工作区弄脏——踩过）。
+  tiny_log=$(mktemp)
+  trap 'rm -f "$tiny_log"' EXIT
   cargo run --release -q -p vxl-phys --example m1_scale -- 1 10 10 60 16 >"$tiny_log" 2>&1
   if grep -q "§3 最低通过档" "$tiny_log"; then
       echo "❌ 标签不诚实：非 §3 场景（10+10）也打印了'§3 最低通过档'（见 $tiny_log）" >&2
