@@ -1,6 +1,18 @@
 use super::{sat_scan_scalar, sat_scan_sse2};
 use vxl_phys_core::Vec3;
 
+/// 一组 SAT 入参（`args-gate` 的 soft 阈值实测把 7 个形参也算违规 ⇒ 打包成结构体再传）。
+struct Case {
+    axes: Vec<Vec3>,
+    ha: Vec3,
+    aa: [Vec3; 3],
+    pa: Vec3,
+    hb: Vec3,
+    ab: [Vec3; 3],
+    pb: Vec3,
+    skin: f32,
+}
+
 fn v(x: f32, y: f32, z: f32) -> Vec3 {
     Vec3::new(x, y, z)
 }
@@ -272,4 +284,156 @@ fn simd_matches_scalar_on_extreme_inputs() {
         none_n > 0 && none_n < n,
         "两类结论都要覆盖：None={none_n}/{n}"
     );
+}
+
+/// 确定性 LCG（不引 RNG 依赖；同仓内其它随机化判据的做法）。
+struct Lcg(u64);
+
+impl Lcg {
+    fn u32(&mut self) -> u32 {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (self.0 >> 33) as u32
+    }
+    /// `[0,1)`。
+    fn unit(&mut self) -> f32 {
+        (self.u32() >> 8) as f32 / (1u32 << 24) as f32
+    }
+    /// 幅度档：正常 / 小 / 大 / 极大——后两档是 sep1/sep2 出现 Inf/NaN 的来源。
+    fn mag(&mut self) -> f32 {
+        const MAGS: [f32; 6] = [1.0, 1e-3, 1e3, 1e19, 1e30, 1e38];
+        MAGS[(self.u32() % 6) as usize]
+    }
+    fn val(&mut self) -> f32 {
+        (self.unit() * 2.0 - 1.0) * self.mag()
+    }
+    fn vec(&mut self) -> Vec3 {
+        v(self.val(), self.val(), self.val())
+    }
+}
+
+/// 造一组入参：轴表取"盒对形态"（12 面轴 + 3 条随机轴），半长/中心/姿态按幅度档随机；
+/// `inject = true` 时另有 1/32 的概率直接注入 NaN / ±Inf（"全有限子族"要求 `false`）。
+fn case(rng: &mut Lcg, inject: bool) -> Case {
+    let aa = basis(&mut || rng.unit());
+    let ab = basis(&mut || rng.unit());
+    let mut axes = axes_of(&aa, &ab);
+    axes.truncate(15);
+    axes.push(rng.vec());
+    let odd = inject && rng.u32().is_multiple_of(32);
+    let hf = |rng: &mut Lcg| {
+        let m = rng.mag();
+        if odd {
+            match rng.u32() % 4 {
+                0 => f32::NAN,
+                1 => f32::INFINITY,
+                2 => f32::NEG_INFINITY,
+                _ => m,
+            }
+        } else {
+            m
+        }
+    };
+    Case {
+        axes,
+        ha: v(hf(rng), hf(rng), hf(rng)),
+        aa,
+        pa: rng.vec(),
+        hb: v(hf(rng), hf(rng), hf(rng)),
+        ab,
+        pb: rng.vec(),
+        skin: if odd { f32::NAN } else { 0.01 },
+    }
+}
+
+/// 单轴的 `(sep1, sep2)`——算术与 `sat_scan_scalar` 一字不差（左结合序也照抄）。
+fn axis_seps(c: &Case, n: Vec3) -> Option<(f32, f32)> {
+    if n.length_squared() < 0.5 {
+        return None;
+    }
+    let ra = c.ha.x * c.aa[0].dot(n).abs()
+        + c.ha.y * c.aa[1].dot(n).abs()
+        + c.ha.z * c.aa[2].dot(n).abs();
+    let rb = c.hb.x * c.ab[0].dot(n).abs()
+        + c.hb.y * c.ab[1].dot(n).abs()
+        + c.hb.z * c.ab[2].dot(n).abs();
+    let (ca, cb) = (c.pa.dot(n), c.pb.dot(n));
+    Some(((cb - rb) - (ca + ra), (ca - ra) - (cb + rb)))
+}
+
+/// 旧写法会取的值：Intel `MAXPS(a, b)` = `a > b ? a : b`，**任一操作数为 NaN 都返回 `b`**
+/// （旧代码是 `_mm_max_ps(sep2, sep1)` ⇒ 返回 `sep1`）。`f32` 的比较对 NaN 全假 ⇒ 下面这个
+/// `if sep2 > sep1 { sep2 } else { sep1 }` 与 MAXPS 语义一致（无需 unsafe 内建即可复现）。
+fn maxps_select(sep2: f32, sep1: f32) -> f32 {
+    if sep2 > sep1 {
+        sep2
+    } else {
+        sep1
+    }
+}
+
+/// 修法会取的值：与标量同一条 `sep1 >= sep2` 谓词 + 位选择。
+fn ge_select(sep1: f32, sep2: f32) -> f32 {
+    if sep1 >= sep2 {
+        sep1
+    } else {
+        sep2
+    }
+}
+
+/// **F-12 差分复现：审计那 845/10⁶ 的族**（"必红对照"补在这里）。
+///
+/// 审计在 `main@51278a5` 上量到：**全有限输入**里 845/10⁶ 组让 SIMD 与标量分叉（首例
+/// SIMD=None、标量=Some）。根因 = 旧写法 `_mm_max_ps(sep2, sep1)`：Intel 的 MAXPS 在**任一
+/// 操作数为 NaN 时返回第二操作数**（这里 = `sep1`），而标量的 `sep1 >= sep2` 对 NaN 判假会取
+/// `sep2` ⇒ 两条路径的 sep **值**各有各的算术 ⇒ `> skin` / `> best` 上可分叉。
+///
+/// 这条判据做两件事，缺一不可：
+///   · **修复有效**：族里每一组都要求 SIMD 与标量**逐位同结果**；
+///   · **样本有敏感度**（否则就是空跑）：同一批输入里统计"MAXPS 语义 ≠ `>=` 选择"的**轴数**
+///     ——那正是**旧写法必然分叉**的族。要求 > 0，并打印占比（审计那 845/10⁶ 的可复现形式）。
+#[test]
+fn differential_family_reproduces_the_maxps_divergence() {
+    // 两族都跑：**含非有限注入**（把 Inf/NaN 直接喂进去）+ **全有限**（对齐审计那句
+    // "全有限输入仍有 845/10⁶"——有限但极大的幅度档照样能在 sep1/sep2 里造出 Inf/NaN）。
+    for &(label, inject) in &[("含注入", true), ("全有限", false)] {
+        let mut rng = Lcg(0x5DEE_CE66_D1CE_u64);
+        let cases = 20_000usize;
+        let (mut sensitive, mut axes_n) = (0usize, 0usize);
+        for k in 0..cases {
+            let c = case(&mut rng, inject);
+            for &n in &c.axes {
+                if let Some((sep1, sep2)) = axis_seps(&c, n) {
+                    axes_n += 1;
+                    let (old, new) = (maxps_select(sep2, sep1), ge_select(sep1, sep2));
+                    // 只数**真会分叉**的那些：一个是 NaN、另一个不是。两边都是 NaN 时下游
+                    // （`> skin` / `> best`）结论相同 ⇒ 不算敏感。
+                    if old.is_nan() != new.is_nan() {
+                        sensitive += 1;
+                    }
+                }
+            }
+            let s = sat_scan_scalar(&c.axes, c.ha, &c.aa, c.pa, c.hb, &c.ab, c.pb, c.skin);
+            let d = sat_scan_sse2(&c.axes, c.ha, &c.aa, c.pa, c.hb, &c.ab, c.pb, c.skin);
+            assert!(
+                same(s, d),
+                "第 {k} 组（{label}）SIMD/标量分叉（F-12 回归）：标量有值={} SIMD 有值={}",
+                s.is_some(),
+                d.is_some()
+            );
+        }
+        // 非空洞：样本量够，且**真的**覆盖到了旧写法会分叉的族。
+        assert!(axes_n > 100_000, "{label}：轴样本太少：{axes_n}");
+        assert!(
+            sensitive > 0,
+            "{label}：这批输入一条都没落在 MAXPS 敏感族上 ⇒ 判据空转（调幅度档/注入概率）"
+        );
+        // 整数算术报"每 10⁶ 轴"的比例（本仓禁 f64，连测试里也不开例外）。
+        println!(
+            "F-12 差分[{label}]：{cases} 组 / {axes_n} 轴，MAXPS 敏感轴 {sensitive}（{}/10⁶）——SIMD 与标量逐位同结果",
+            sensitive * 1_000_000 / axes_n
+        );
+    }
 }

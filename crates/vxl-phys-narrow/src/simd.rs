@@ -9,6 +9,12 @@
 //! 非 x86_64（如 CI 的 aarch64 交叉）自动走标量路径；两条路径的四段哈希
 //! （`m0_gates`/`determinism`/status/stress）必须逐位一致——这是跨平台哈希门的要求。
 //!
+//! **F-12 的"必红对照"**：`tests.rs::differential_family_reproduces_the_maxps_divergence`
+//! 用 20 000 组随机族（含"全有限"子族）逐位对拍 SIMD 与标量，并用**纯 Rust 复刻的 MAXPS
+//! 语义**（`if sep2 > sep1 { sep2 } else { sep1 }`）统计"旧写法必然分叉"的轴数——实测两族各
+//! 约 2×10⁴/10⁶ 条（审计在 `main@51278a5` 上量到的是 845/10⁶ 组，族不同、量级同源）⇒ 判据
+//! **非空洞**；而同一批输入上 SIMD 与标量逐位同结果。审计的复现任务到此闭环。
+//!
 //! SAFETY：`unsafe` 全部限于 `core::arch::x86_64` 的 `_mm_*` 内建调用；
 //! `_mm_loadu_ps` 的输入都是长度 4 的**本地数组**（未对齐读取安全），无裸指针运算、
 //! 无生命周期擦除、无别名假设；SSE2 是 x86_64 基线 ISA ⇒ 不需要 `target_feature`
@@ -183,7 +189,7 @@ fn sat_scan_sse2(
                                                                            // 这里让**同一个** `ge` 既定 `flags`（法线方向）又定 `sep`（值）。旧写法
                                                                            // `_mm_max_ps(sep2, sep1)` 在 NaN 时按 Intel 语义返回第二操作数，而标量的 `>=`
                                                                            // 对 NaN 判假会取 `sep2` ⇒ 两条路径各有各的算术 ⇒ 分类可分叉。平局（含带符号零）由
-                                                                           // 同一个 `>=` 定夺 ⇒ 与标量逐位同；判据见 tests 的平局与极值两条（后者是**扩覆盖**）。
+                                                                           // 同一个 `>=` 定夺 ⇒ 与标量逐位同；回归判据见模块头注（差分族），平局与极值两条是扩覆盖。
             let ge = _mm_cmpge_ps(sep1, sep2);
             flags = _mm_movemask_ps(ge) ^ 0b1111;
             let sep = _mm_or_ps(_mm_and_ps(ge, sep1), _mm_andnot_ps(ge, sep2));
