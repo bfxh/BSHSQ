@@ -5,11 +5,19 @@
 
 use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::{
-    jsonl, AcousticConfig, AcousticGeometry, AcousticsExt, Listener, PathKind, SoundPath,
+    jsonl, AcousticConfig, AcousticGeometry, AcousticsExt, Listener, PathKind, SoundPath, BANDS,
 };
 
 /// 一块 8×8 的地板（y = 0，两块三角）+ 一堵墙（可选，x = 0 平面、y∈[0,3]、z∈[-1,1]）。
-fn geo(with_wall: bool) -> (Vec<Vec3>, Vec<[u32; 3]>, Vec<f32>, Vec<f32>) {
+/// 场景表：顶点 / 三角 / 逐带吸声 / 逐带透射。
+type Tables = (
+    Vec<Vec3>,
+    Vec<[u32; 3]>,
+    Vec<[f32; BANDS]>,
+    Vec<[f32; BANDS]>,
+);
+
+fn geo(with_wall: bool) -> Tables {
     let mut verts = vec![
         Vec3::new(-4.0, 0.0, -4.0),
         Vec3::new(4.0, 0.0, -4.0),
@@ -17,8 +25,8 @@ fn geo(with_wall: bool) -> (Vec<Vec3>, Vec<[u32; 3]>, Vec<f32>, Vec<f32>) {
         Vec3::new(-4.0, 0.0, 4.0),
     ];
     let mut tris = vec![[0u32, 1, 2], [0, 2, 3]];
-    let mut absorb = vec![0.25f32, 0.25];
-    let mut trans = vec![0.0f32, 0.0]; // A1 场景：面全不透（墙靠 `blocked` 丢，A2 的泄漏表另测）
+    let mut absorb = vec![[0.25f32; BANDS]; 2];
+    let mut trans = vec![[0.0f32; BANDS]; 2]; // A1 场景：面全不透（墙靠 `blocked` 丢）
     if with_wall {
         let base = verts.len() as u32;
         verts.extend([
@@ -29,8 +37,8 @@ fn geo(with_wall: bool) -> (Vec<Vec3>, Vec<[u32; 3]>, Vec<f32>, Vec<f32>) {
             Vec3::new(-1.0, 3.0, 1.0),
         ]);
         tris.extend([[base, base + 1, base + 2], [base, base + 2, base + 3]]);
-        absorb.extend([0.9f32, 0.9]); // 强吸声的墙（挡直达，反射也弱）
-        trans.extend([0.0f32, 0.0]);
+        absorb.extend([[0.9f32; BANDS]; 2]); // 强吸声的墙（挡直达，反射也弱）
+        trans.extend([[0.0f32; BANDS]; 2]);
     }
     (verts, tris, absorb, trans)
 }
@@ -94,6 +102,7 @@ fn closed_form_direct_and_first_reflection() {
         .unwrap_or(SoundPath {
             source: 0,
             delay: 0.0,
+            bands: [0.0; BANDS],
             gain: 0.0,
             dir: [0.0, 0.0, 0.0],
             kind: PathKind::Direct,

@@ -15,6 +15,7 @@
 //!
 //! [`AcousticConfig::medium_step`]: crate::AcousticConfig::medium_step
 
+use crate::BANDS;
 use vxl_phys::Vec3;
 
 /// 介质在一点的参数（A3）。
@@ -22,16 +23,25 @@ use vxl_phys::Vec3;
 pub struct Medium {
     /// 声速（m/s）。
     pub speed_of_sound: f32,
-    /// 沿程**吸收系数**（1/m）：能量按 `exp(-α·len)` 衰减。
-    pub attenuation: f32,
+    /// 沿程**吸收系数**（1/m，**逐频带**）：能量按 `exp(-α·len)` 衰减 ⇒ 高频带更大就是"更闷"。
+    pub attenuation: [f32; BANDS],
 }
 
 impl Medium {
     /// 空气（常温、无吸收）——最常用的基准档。
     pub const AIR: Medium = Medium {
         speed_of_sound: 343.0,
-        attenuation: 0.0,
+        attenuation: [0.0; BANDS],
     };
+}
+
+/// 逐带能量衰减因子 `exp(-τ)`。
+fn exp_bands(tau: &[f32; BANDS]) -> [f32; BANDS] {
+    let mut out = [1.0f32; BANDS];
+    for (o, t) in out.iter_mut().zip(tau.iter()) {
+        *o = (-*t).exp();
+    }
+    out
 }
 
 /// **介质体积场**（A3）：只读采样。
@@ -39,9 +49,9 @@ pub trait AcousticMedium {
     /// `p` 处的介质。
     fn at(&self, p: Vec3) -> Medium;
 
-    /// **可选的解析积分**：线段 `a→b` 的 `(时延秒, 能量衰减因子)`；`None` = 本实现不给，
+    /// **可选的解析积分**：线段 `a→b` 的 `(时延秒, 逐带能量衰减因子)`；`None` = 本实现不给，
     /// 由调用方退回固定步长中点法。分层介质拿它当**精确解**（判据的"解析式对拍"就靠它）。
-    fn segment_exact(&self, _a: Vec3, _b: Vec3) -> Option<(f32, f32)> {
+    fn segment_exact(&self, _a: Vec3, _b: Vec3) -> Option<(f32, [f32; BANDS])> {
         None
     }
 }
@@ -118,9 +128,10 @@ impl LayeredMedium {
         ts
     }
 
-    /// 逐段（层内）积分：时延 = Σ len/c、能量衰减 = `exp(-Σ α·len)`。
-    fn integrate(&self, a: Vec3, b: Vec3, c0: f32) -> (f32, f32) {
-        let (mut delay, mut tau) = (0.0f32, 0.0f32);
+    /// 逐段（层内）积分：时延 = Σ len/c、逐带能量衰减 = `exp(-Σ α_b·len)`。
+    fn integrate(&self, a: Vec3, b: Vec3, c0: f32) -> (f32, [f32; BANDS]) {
+        let mut delay = 0.0f32;
+        let mut tau = [0.0f32; BANDS];
         let mut prev = 0.0f32;
         let mut cuts = self.cuts(a, b);
         cuts.push(1.0);
@@ -135,10 +146,12 @@ impl LayeredMedium {
                 c0
             };
             delay += len / c;
-            tau += m.attenuation.max(0.0) * len;
+            for (t, a) in tau.iter_mut().zip(m.attenuation.iter()) {
+                *t += a.max(0.0) * len;
+            }
             prev = t;
         }
-        (delay, (-tau).exp())
+        (delay, exp_bands(&tau))
     }
 }
 
@@ -147,12 +160,12 @@ impl AcousticMedium for LayeredMedium {
         self.medium_at_y(p.y)
     }
 
-    fn segment_exact(&self, a: Vec3, b: Vec3) -> Option<(f32, f32)> {
+    fn segment_exact(&self, a: Vec3, b: Vec3) -> Option<(f32, [f32; BANDS])> {
         Some(self.integrate(a, b, Medium::AIR.speed_of_sound))
     }
 }
 
-/// 一段直线 `a→b` 在介质里的 **`(时延, 能量衰减因子)`**。
+/// 一段直线 `a→b` 在介质里的 **`(时延, 逐带能量衰减因子)`**。
 ///
 /// `None`（= 没有声明介质场）⇒ 均匀空气（`c0`、无吸收），**数值与 A1 / A2 逐位相同**
 /// （衰减因子恒为 `1.0`，`1.0` 的乘法是精确的）。
@@ -165,14 +178,14 @@ pub(crate) fn seg_effect(
     b: Vec3,
     c0: f32,
     step: f32,
-) -> (f32, f32) {
+) -> (f32, [f32; BANDS]) {
     let d = b - a;
     let len = d.length();
     if len <= 1e-6 {
-        return (0.0, 1.0);
+        return (0.0, [1.0; BANDS]);
     }
     let Some(f) = m else {
-        return (len / c0, 1.0);
+        return (len / c0, [1.0; BANDS]);
     };
     if let Some(e) = f.segment_exact(a, b) {
         return e;
@@ -181,7 +194,8 @@ pub(crate) fn seg_effect(
     let n = ((len / step).ceil() as usize).max(1);
     let dt = len / n as f32;
     let dir = d * (1.0 / len);
-    let (mut delay, mut tau) = (0.0f32, 0.0f32);
+    let mut delay = 0.0f32;
+    let mut tau = [0.0f32; BANDS];
     for i in 0..n {
         let p = a + dir * ((i as f32 + 0.5) * dt);
         let md = f.at(p);
@@ -191,7 +205,9 @@ pub(crate) fn seg_effect(
             c0
         };
         delay += dt / c;
-        tau += md.attenuation.max(0.0) * dt;
+        for (t, a) in tau.iter_mut().zip(md.attenuation.iter()) {
+            *t += a.max(0.0) * dt;
+        }
     }
-    (delay, (-tau).exp())
+    (delay, exp_bands(&tau))
 }

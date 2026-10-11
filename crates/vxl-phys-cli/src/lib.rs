@@ -18,7 +18,7 @@
 use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::{
     jsonl as aco_jsonl, AcousticConfig, AcousticGeometry, AcousticMedium, AcousticsExt,
-    LayeredMedium, Listener, Medium, Portal, SoundPath,
+    LayeredMedium, Listener, Medium, Portal, SoundPath, BANDS,
 };
 use vxl_phys_replay::Recorder;
 use vxl_phys_sense::{jsonl, Cue, SenseConfig, SenseExt};
@@ -210,8 +210,8 @@ fn cue_cmd(name: &str, ticks: usize) -> Result<String, String> {
 struct Room {
     verts: Vec<Vec3>,
     tris: Vec<[u32; 3]>,
-    absorb: Vec<f32>,
-    trans: Vec<f32>,
+    absorb: Vec<[f32; BANDS]>,
+    trans: Vec<[f32; BANDS]>,
     portals: Vec<Portal>,
 }
 
@@ -228,14 +228,15 @@ impl Room {
     }
 }
 
-/// **介质体积场**（A3）：地板附近一层"雾 / 湿热层"（声速略低、略有吸收），上面是常温空气。
+/// **介质体积场**（A3）：地板附近一层"雾 / 湿热层"（声速略低、**高频吸收明显更强**），
+/// 上面是常温空气 —— 分频带之后，"听起来闷"就是一个可算的量。
 ///
 /// 分层介质给**解析积分**（按层边界切段）⇒ 时延与衰减都不是采样近似。要换密度/温度剖面，
 /// 实现 `AcousticMedium` 交进来即可（也可用固定步长回退档）。
 fn medium() -> LayeredMedium {
     let haze = Medium {
         speed_of_sound: 330.0,
-        attenuation: 0.05,
+        attenuation: [0.02, 0.06, 0.15],
     };
     LayeredMedium::split(1.0, haze, Medium::AIR)
 }
@@ -258,8 +259,20 @@ fn room() -> Room {
     Room {
         verts,
         tris: vec![[0u32, 1, 2], [0, 2, 3], [4, 5, 6], [4, 6, 7]],
-        absorb: vec![0.2f32, 0.2, 0.9, 0.9],
-        trans: vec![0.0f32, 0.0, 0.02, 0.02],
+        // 地板吸声一般；墙**逐带**吸声（越高频越吸 ⇒ 门缝里漏出来的声音自然"发闷"）。
+        absorb: vec![
+            [0.2f32; BANDS],
+            [0.2; BANDS],
+            [0.6, 0.9, 0.95],
+            [0.6, 0.9, 0.95],
+        ],
+        // 墙的透射也是逐带的：高频更难透（现实里隔声量随频率上升）。
+        trans: vec![
+            [0.0f32; BANDS],
+            [0.0; BANDS],
+            [0.03, 0.02, 0.008],
+            [0.03, 0.02, 0.008],
+        ],
         portals: vec![Portal {
             quad: [
                 Vec3::new(-1.0, 0.25, 1.5),

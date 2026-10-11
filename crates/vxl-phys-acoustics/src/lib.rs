@@ -1,12 +1,13 @@
-//! # vxl-phys-acoustics —— 声学传播（射线追踪音频）**A1 + A2**
+//! # vxl-phys-acoustics —— 声学传播（射线追踪音频）**A1 + A2 + A3**
 //!
 //! 设计与调研见 `docs/SURVEY-ACOUSTIC-RAYTRACING.md`（技术全景 / 系统与论文清单 / A1–A5 分期）。
 //! 本 crate 已落三期：
 //!
-//! - **A1**：静态场景的**直达 + 一次镜面反射（镜像源法）+ 遮挡**，单频带材质表（吸声系数）；
+//! - **A1**：静态场景的**直达 + 一次镜面反射（镜像源法）+ 遮挡**，材质表（吸声系数）；
 //! - **A2**：**portal 穿孔传声**（开口当二级声源）+ **无 portal 的墙按透射系数泄漏**；
-//! - **A3**：**介质体积场**（声速 + 沿程吸收，[`AcousticMedium`]）—— 每条路径的时延与衰减
-//!   按沿途介质积分（分层介质给[解析积分](AcousticMedium::segment_exact)，其它场退回
+//! - **A3**：**介质体积场**（声速 + 沿程吸收，[`AcousticMedium`]）+ **频带**（[`BANDS`] =
+//!   低/中/高：吸声、透射、介质吸收**逐带**，输出 [`SoundPath::bands`]）—— 每条路径的时延与
+//!   逐带衰减按沿途介质积分（分层介质给[解析积分](AcousticMedium::segment_exact)，其它场退回
 //!   固定步长中点法）。
 //!
 //! ## 三条设计原则（文档 §4 的落实）
@@ -20,6 +21,12 @@
 //! 3. **介质是体积参数场**（A3 已落）：[`AcousticGeometry::medium`] 由调用方给一个**只读**的
 //!    [`AcousticMedium`]（`None` = 均匀空气 = A1/A2 行为）；吸收按 `exp(-α·len)` 沿途累乘、
 //!    声速沿途积分。**折射（声线折转）仍未做** —— A3 的直线几何是显式边界（文档 §7）。
+//!
+//! ## 输出格式（A3 起，**换代一次**）
+//!
+//! [`jsonl`] 每行多了 `"bands":[低,中,高]`（逐带能量）；`"gain"` 改成**中频带**
+//! （[`SoundPath::gain`]）—— 单频带档（三带同参）下它与旧的标量口径**逐位相同**。旧基线在
+//! `replay` 里会 FAIL 并指到第一个观测点（`record/replay` 的既有语义：格式换代要重新录）。
 //!
 //! ## 三条契约（与 `vxl-phys-sense` 同款，CI 可判）
 //!
@@ -40,17 +47,21 @@ pub use medium::{AcousticMedium, LayeredMedium, Medium, Slab};
 use medium::seg_effect;
 use vxl_phys::{Vec3, World};
 
-/// **声学几何**（建模面：顶点 + 三角 + 逐面吸声系数 + 逐面透射系数 + 开口表）。
+/// **频带数**：低 / 中 / 高。本层**不给绝对频率** —— Hz 分组由宿主定，引擎只给三个标量
+/// （判据只谈"高频更闷"这类**单调**性质，不绑具体 Hz）。
+pub const BANDS: usize = 3;
+
+/// **声学几何**（建模面：顶点 + 三角 + 逐面吸声 + 逐面透射 + 开口表 + 介质场）。
 ///
-/// `absorption[i] ∈ [0,1]`：1 = 全吸（无声反射），0 = 全反射。**外部表**——不往 `Material` 塞
-/// 声学字段（那是物理侧棘轮管的类型）。
+/// 两张材质表都是**逐频带**（`[BANDS]`）且是**外部表** —— 不往 `Material` 塞声学字段
+/// （那是物理侧棘轮管的类型）。`absorption[i][b] ∈ [0,1]`：1 = 全吸（无声反射）、0 = 全反射。
 pub struct AcousticGeometry<'a> {
     pub verts: &'a [Vec3],
     pub tris: &'a [[u32; 3]],
-    pub absorption: &'a [f32],
-    /// 逐面**透射系数**（A2）：直线被 `tris[i]` 挡住时按它泄漏，取值 `0` = 完全不透、`1` = 全透。
-    /// 与 `absorption` 同口径：**外部表**；短了 / 缺了按 `0`（实墙）算。
-    pub transmission: &'a [f32],
+    pub absorption: &'a [[f32; BANDS]],
+    /// 逐面**透射系数**（A2，逐频带）：直线被 `tris[i]` 挡住时按它泄漏，`0` = 完全不透、`1` = 全透。
+    /// 与 `absorption` 同口径：**外部表**；短了 / 缺了按 `[0.0; BANDS]`（实墙）算。
+    pub transmission: &'a [[f32; BANDS]],
     /// **显式开口拓扑**（A2）：作者标的开口；空 = 场景没有开口（A1 行为）。
     pub portals: &'a [Portal],
     /// **介质体积场**（A3）：`None` = 均匀空气（用 [`AcousticConfig::speed_of_sound`]、无吸收，
@@ -122,7 +133,11 @@ pub struct SoundPath {
     pub source: u32,
     /// 到达时延（秒）。
     pub delay: f32,
-    /// 能量增益（直达 = `1/d²`；反射再乘 `(1 - absorption)`）。
+    /// **逐频带**能量增益（直达 = `1/d²`；反射再乘 `(1 - absorption[b])`；再乘介质衰减）。
+    pub bands: [f32; BANDS],
+    /// **宽带口径** = **中频带**（`bands[BANDS/2]`）—— **口径、不是物理量**：真宽带能量要按宿主的
+    /// 频带权重求和，本层不替宿主定权重。单频带档（三带同参）下它与旧的标量口径**逐位相同**
+    /// （`jsonl` 的 `"gain"` 与只想拿单值的宿主都读它）。
     pub gain: f32,
     /// 到达方向（单位；从听者指向来声）。
     pub dir: [f32; 3],
@@ -215,14 +230,16 @@ struct Ctx<'a> {
 fn push_direct(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) {
     let (src, c) = (cx.src, cx.c);
     let d = cx.listener.pos - src;
-    let mut leak = 1.0f32;
+    let mut leak = [1.0f32; BANDS];
     if let Some(ti) = blocker(cx.geo, src, cx.listener.pos) {
-        let tau = cx.geo.transmission.get(ti).copied().unwrap_or(0.0);
-        if tau <= 0.0 {
+        let tau = cx.geo.transmission.get(ti).copied().unwrap_or([0.0; BANDS]);
+        if tau.iter().all(|t| *t <= 0.0) {
             st.blocked += 1;
             return;
         }
-        leak = tau.clamp(0.0, 1.0);
+        for (l, t) in leak.iter_mut().zip(tau.iter()) {
+            *l = t.clamp(0.0, 1.0);
+        }
     }
     let dist = d.length().max(1e-3);
     // 听者半径只做**远场粗筛**（`radius` 的 1000 倍之外不产出；A3 起换成介质衰减与距离门）。
@@ -235,9 +252,14 @@ fn push_direct(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) {
     }
     // 约定：`dir` = **从听者指向来声**（空间化器要的就是入射方向，不是"声源→听者"）。
     let dir = ((src - cx.listener.pos) * (1.0 / dist)).normalize();
-    // A3：沿途介质给的时延与吸收（无介质场 ⇒ `len / c`、衰减因子 1.0，与 A1/A2 逐位相同）。
+    // A3：沿途介质给的时延与逐带吸收（无介质场 ⇒ `len / c`、衰减因子全 1.0）。
     let (delay, atten) = seg_effect(cx.geo.medium, src, cx.listener.pos, c, cx.cfg.medium_step);
-    let kind = if leak < 1.0 {
+    let leaked = leak.iter().any(|t| *t < 1.0);
+    let mut bands = [0.0f32; BANDS];
+    for ((o, l), a) in bands.iter_mut().zip(leak.iter()).zip(atten.iter()) {
+        *o = l * a / (dist * dist);
+    }
+    let kind = if leaked {
         PathKind::Transmitted
     } else {
         PathKind::Direct
@@ -245,15 +267,21 @@ fn push_direct(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) {
     out.push(SoundPath {
         source: cx.si,
         delay,
-        gain: leak * atten / (dist * dist),
+        bands,
+        gain: mid_band(&bands),
         dir: [dir.x, dir.y, dir.z],
         kind,
     });
-    if leak < 1.0 {
+    if leaked {
         st.leaked += 1;
     } else {
         st.direct += 1;
     }
+}
+
+/// **宽带口径**：取 [`BANDS`] 的中频带 —— 单频带档（三带同参）下与旧的标量口径逐位相同。
+fn mid_band(bands: &[f32; BANDS]) -> f32 {
+    bands[BANDS / 2]
 }
 
 /// **A2：portal 穿孔传声** —— 开口当**二级声源**：`声源 → 开口中心 → 听者` 两段都不被挡就产出一条
@@ -283,13 +311,18 @@ fn push_portals(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) 
         let d2 = (cx.listener.pos - c).length().max(1e-3);
         let reach = d1 + d2;
         let dirv = (c - cx.listener.pos) * (1.0 / d2);
-        // A3：两段各自的介质时延/吸收（球面扩散仍用几何距离 `reach`）。
+        // A3：两段各自的介质时延/逐带吸收（球面扩散仍用几何距离 `reach`）。
         let (t1, a1) = seg_effect(cx.geo.medium, cx.src, c, cx.c, cx.cfg.medium_step);
         let (t2, a2) = seg_effect(cx.geo.medium, c, cx.listener.pos, cx.c, cx.cfg.medium_step);
+        let mut bands = [0.0f32; BANDS];
+        for ((o, x), y) in bands.iter_mut().zip(a1.iter()).zip(a2.iter()) {
+            *o = open * x * y / (reach * reach);
+        }
         out.push(SoundPath {
             source: cx.si,
             delay: t1 + t2,
-            gain: open * a1 * a2 / (reach * reach),
+            bands,
+            gain: mid_band(&bands),
             dir: [dirv.x, dirv.y, dirv.z],
             kind: PathKind::Portal,
         });
@@ -346,13 +379,23 @@ fn push_reflections(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'
         let d1 = (hit - src).length().max(1e-3);
         let d2 = (l - hit).length().max(1e-3);
         let dirv = (hit - l) * (1.0 / d2);
-        // A3：两段各自的介质时延/吸收（吸声系数仍是面属性，两者相乘）。
+        // A3：两段各自的介质时延/逐带吸收（吸声系数是面属性，逐带相乘）。
         let (t1, a1) = seg_effect(geo.medium, src, hit, c, cfg.medium_step);
         let (t2, a2) = seg_effect(geo.medium, hit, l, c, cfg.medium_step);
+        let mut bands = [0.0f32; BANDS];
+        for (((o, r), x), y) in bands
+            .iter_mut()
+            .zip(absorb.iter())
+            .zip(a1.iter())
+            .zip(a2.iter())
+        {
+            *o = (1.0 - r.clamp(0.0, 1.0)) * x * y / ((d1 + d2) * (d1 + d2));
+        }
         out.push(SoundPath {
             source: cx.si,
             delay: t1 + t2,
-            gain: (1.0 - absorb.clamp(0.0, 1.0)) * a1 * a2 / ((d1 + d2) * (d1 + d2)),
+            bands,
+            gain: mid_band(&bands),
             dir: [dirv.x, dirv.y, dirv.z],
             kind: PathKind::Reflected,
         });
@@ -360,8 +403,12 @@ fn push_reflections(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'
     }
 }
 
-/// 取三角的三顶点与吸声系数（索引越界 / 表短 ⇒ `None`，与 `TriMesh` 的"丢坏三角"同口径）。
-fn tri_of(geo: &AcousticGeometry<'_>, ti: usize, tri: [u32; 3]) -> Option<(Vec3, Vec3, Vec3, f32)> {
+/// 取三角的三顶点与**逐带**吸声系数（索引越界 / 表短 ⇒ `None`，与 `TriMesh` 的"丢坏三角"同口径）。
+fn tri_of(
+    geo: &AcousticGeometry<'_>,
+    ti: usize,
+    tri: [u32; 3],
+) -> Option<(Vec3, Vec3, Vec3, [f32; BANDS])> {
     let n = geo.verts.len();
     if tri.iter().any(|&k| k as usize >= n) {
         return None;
@@ -451,7 +498,8 @@ pub fn jsonl(paths: &[SoundPath]) -> String {
     let mut s = String::new();
     for p in paths {
         s.push_str(&format!(
-            "{{\"source\":{},\"kind\":\"{}\",\"delay\":{:.6},\"gain\":{:.6},\"dir\":[{:.6},{:.6},{:.6}]}}\n",
+            "{{\"source\":{},\"kind\":\"{}\",\"delay\":{:.6},\"gain\":{:.6},\
+             \"bands\":[{:.6},{:.6},{:.6}],\"dir\":[{:.6},{:.6},{:.6}]}}\n",
             p.source,
             match p.kind {
                 PathKind::Direct => "direct",
@@ -461,6 +509,9 @@ pub fn jsonl(paths: &[SoundPath]) -> String {
             },
             p.delay,
             p.gain,
+            p.bands[0],
+            p.bands[1],
+            p.bands[2],
             p.dir[0],
             p.dir[1],
             p.dir[2]
