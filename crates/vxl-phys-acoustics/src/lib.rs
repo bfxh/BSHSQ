@@ -1,4 +1,4 @@
-//! # vxl-phys-acoustics —— 声学传播（射线追踪音频）**A1 + A2 + A3 + A4（衍射）**
+//! # vxl-phys-acoustics —— 声学传播（射线追踪音频）**A1 + A2 + A3 + A4**
 //!
 //! 设计与调研见 `docs/SURVEY-ACOUSTIC-RAYTRACING.md`（技术全景 / 系统与论文清单 / A1–A5 分期）。
 //! 本 crate 已落三期：
@@ -9,10 +9,11 @@
 //!   低/中/高：吸声、透射、介质吸收**逐带**，输出 [`SoundPath::bands`]）—— 每条路径的时延与
 //!   逐带衰减按沿途介质积分（分层介质给[解析积分](AcousticMedium::segment_exact)，其它场退回
 //!   固定步长中点法）。
-//! - **A4（衍射那一半）**：**绕射**（[`Edge`] = 作者显式声明的衍射棱）—— 棱上取 **Fermat 点**
-//!   （定次数二分，确定性），只在**阴影里**产出 `Diffracted` 路径，能量口径 `coeff_b · D(θ) ·
-//!   介质衰减 / (d1·d2)`，`D(θ) = (1 + cosθ)/2`（掠射时与自由场连续）。**散射系数与 UTD 的
-//!   Fresnel 积分仍未做**。
+//! - **A4**：**绕射**（[`Edge`] = 作者显式声明的衍射棱）—— 棱上取 **Fermat 点**（定次数二分，
+//!   确定性），只在**阴影里**产出 `Diffracted` 路径，能量口径 `coeff_b · D(θ) · 介质衰减 / (d1·d2)`，
+//!   `D(θ) = (1 + cosθ)/2`（掠射时与自由场连续）；**散射**（`scattering` 表）—— 镜面那条按
+//!   `(1 - s_b)` 打折、剩下的按**漫反射二级声源**给出 `Scattered` 路径。**UTD 的 Fresnel 积分
+//!   仍未做**。
 //!
 //! ## 三条设计原则（文档 §4 的落实）
 //!
@@ -66,6 +67,10 @@ pub struct AcousticGeometry<'a> {
     /// 逐面**透射系数**（A2，逐频带）：直线被 `tris[i]` 挡住时按它泄漏，`0` = 完全不透、`1` = 全透。
     /// 与 `absorption` 同口径：**外部表**；短了 / 缺了按 `[0.0; BANDS]`（实墙）算。
     pub transmission: &'a [[f32; BANDS]],
+    /// 逐面**散射系数**（A4 的散射那一半，逐频带）：`0` = 纯镜面（A1–A3 行为）、`1` = 全散射。
+    /// 镜面那条按 `(1 - s_b)` 打折，剩下的能量由**漫反射二级声源**（`push_scatter`）接手。
+    /// 与其它表同口径：**外部表**；短了 / 缺了按 `[0.0; BANDS]`（纯镜面）算。
+    pub scattering: &'a [[f32; BANDS]],
     /// **显式开口拓扑**（A2）：作者标的开口；空 = 场景没有开口（A1 行为）。
     pub portals: &'a [Portal],
     /// **显式衍射棱拓扑**（A4）：作者标的棱；空 = 场景没有绕射（A1–A3 行为）。
@@ -114,6 +119,8 @@ pub struct AcousticConfig {
     pub max_portals: u32,
     /// 每个声源最多尝试几条衍射棱（A4；`0` = 不算绕射）。
     pub max_edges: u32,
+    /// 每个声源最多尝试几个散射面（A4 散射；`0` = 不算散射）。
+    pub max_scatters: u32,
     /// 介质积分的**采样步长**（米；只在中点法回退时用到，下限 `1e-3`）。解析积分（分层介质）
     /// 不受它影响。
     pub medium_step: f32,
@@ -128,6 +135,7 @@ impl Default for AcousticConfig {
             max_reflections: 24,
             max_portals: 8,
             max_edges: 8,
+            max_scatters: 8,
             medium_step: 0.5,
             max_paths: 16,
         }
@@ -145,6 +153,8 @@ pub enum PathKind {
     Portal,
     /// 绕过一条**衍射棱**过来（A4；只在阴影里产出）。
     Diffracted,
+    /// 由某个面的**漫反射**散射过来（A4 散射；面当二级声源）。
+    Scattered,
     /// 一次镜面反射。
     Reflected,
 }
@@ -180,6 +190,8 @@ pub struct AcousticStats {
     pub portals: usize,
     /// 绕射路径数（A4）。
     pub diffracted: usize,
+    /// 散射路径数（A4 散射）。
+    pub scattered: usize,
     /// 反射路径数。
     pub reflected: usize,
     /// 因遮挡被丢的直达路径数。
@@ -235,6 +247,7 @@ impl AcousticsExt for World {
             push_portals(out, &mut st, &cx);
             push_diffraction(out, &mut st, &cx);
             push_reflections(out, &mut st, &cx);
+            push_scatter(out, &mut st, &cx);
         }
         st
     }
@@ -451,6 +464,75 @@ fn fermat_point(e: &Edge, src: Vec3, dst: Vec3) -> Vec3 {
     e.a + dir * (0.5 * (lo + hi))
 }
 
+/// **A4「散射」** —— 面当**二级声源**（漫反射口径）：面中心按 Lambertian 往听者方向辐射
+///
+/// `gain_b = s_b · cos_in · cos_out · A / (d1² · d2²)`
+///
+/// ⚠️ **工程口径**（不承诺辐射度单位）：面积 × 入射余弦 × 出射余弦 × 散射系数 / 两段距离平方。
+/// 要真辐射度得上离线烘焙（如 Project Acoustics 那类）。条件：正/背面要**同侧**、两个余弦 > 0、
+/// 两条腿都不被挡。镜面那一半在 [`push_reflections`] 里按 `(1 - s_b)` 打折 ⇒ **能量守恒式分工**。
+fn push_scatter(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) {
+    for (ti, tri) in cx.geo.tris.iter().enumerate() {
+        if ti as u32 >= cx.cfg.max_scatters {
+            st.dropped_budget += 1;
+            break;
+        }
+        let s = cx.geo.scattering.get(ti).copied().unwrap_or([0.0; BANDS]);
+        if s.iter().all(|v| *v <= 0.0) {
+            continue;
+        }
+        let Some((a, b, cc, _)) = tri_of(cx.geo, ti, *tri) else {
+            continue;
+        };
+        let cross = (b - a).cross(cc - a);
+        let area2 = cross.length();
+        if area2 <= 1e-9 {
+            continue;
+        }
+        let p = (a + b + cc) * (1.0 / 3.0);
+        let v1 = cx.src - p;
+        let v2 = cx.listener.pos - p;
+        let (d1, d2) = (v1.length(), v2.length());
+        if d1 <= 1e-3 || d2 <= 1e-3 {
+            continue;
+        }
+        // 法向朝"声源那一侧"：声与听者必须在面的同一侧，才谈得上反射式散射。
+        let mut n = cross * (1.0 / area2);
+        if n.dot(v1) < 0.0 {
+            n *= -1.0;
+        }
+        let cos_in = n.dot(v1 * (1.0 / d1)).max(0.0);
+        let cos_out = n.dot(v2 * (1.0 / d2)).max(0.0);
+        if cos_in <= 0.0 || cos_out <= 0.0 {
+            continue;
+        }
+        if occluded(cx.geo, cx.src, p) || occluded(cx.geo, p, cx.listener.pos) {
+            continue;
+        }
+        if out.len() >= cx.cfg.max_paths {
+            st.dropped_budget += 1;
+            break;
+        }
+        let (t1, a1) = seg_effect(cx.geo.medium, cx.src, p, cx.c, cx.cfg.medium_step);
+        let (t2, a2) = seg_effect(cx.geo.medium, p, cx.listener.pos, cx.c, cx.cfg.medium_step);
+        let geom = 0.5 * area2 * cos_in * cos_out / (d1 * d1 * d2 * d2);
+        let mut bands = [0.0f32; BANDS];
+        for (((o, k), x), y) in bands.iter_mut().zip(s.iter()).zip(a1.iter()).zip(a2.iter()) {
+            *o = k.clamp(0.0, 1.0) * geom * x * y;
+        }
+        let dirv = v2 * (1.0 / d2);
+        out.push(SoundPath {
+            source: cx.si,
+            delay: t1 + t2,
+            bands,
+            gain: mid_band(&bands),
+            dir: [dirv.x, dirv.y, dirv.z],
+            kind: PathKind::Scattered,
+        });
+        st.scattered += 1;
+    }
+}
+
 /// 一次镜面反射：**镜像源法**——镜像听者，与三角平面求交，命中点落在三角内且两段都不被挡 ⇒ 一条路径。
 fn push_reflections(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) {
     let (src, c, geo, cfg) = (cx.src, cx.c, cx.geo, cx.cfg);
@@ -462,6 +544,8 @@ fn push_reflections(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'
         let Some((a, b, cc, absorb)) = tri_of(geo, ti, *tri) else {
             continue;
         };
+        // A4 散射：镜面那条按 `(1 - s_b)` 打折（缺表 ⇒ 纯镜面，数值与 A1–A3 逐位相同）。
+        let scatter = geo.scattering.get(ti).copied().unwrap_or([0.0; BANDS]);
         let n = (b - a).cross(cc - a);
         let ln = n.length();
         if ln <= 1e-9 {
@@ -499,13 +583,15 @@ fn push_reflections(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'
         let (t1, a1) = seg_effect(geo.medium, src, hit, c, cfg.medium_step);
         let (t2, a2) = seg_effect(geo.medium, hit, l, c, cfg.medium_step);
         let mut bands = [0.0f32; BANDS];
-        for (((o, r), x), y) in bands
+        for ((((o, r), x), y), sc) in bands
             .iter_mut()
             .zip(absorb.iter())
             .zip(a1.iter())
             .zip(a2.iter())
+            .zip(scatter.iter())
         {
-            *o = (1.0 - r.clamp(0.0, 1.0)) * x * y / ((d1 + d2) * (d1 + d2));
+            let spec = 1.0 - sc.clamp(0.0, 1.0);
+            *o = spec * (1.0 - r.clamp(0.0, 1.0)) * x * y / ((d1 + d2) * (d1 + d2));
         }
         out.push(SoundPath {
             source: cx.si,
@@ -622,6 +708,7 @@ pub fn jsonl(paths: &[SoundPath]) -> String {
                 PathKind::Transmitted => "transmitted",
                 PathKind::Portal => "portal",
                 PathKind::Diffracted => "diffracted",
+                PathKind::Scattered => "scattered",
                 PathKind::Reflected => "reflected",
             },
             p.delay,
