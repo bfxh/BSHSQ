@@ -36,6 +36,12 @@
 //! （[`SoundPath::gain`]）—— 单频带档（三带同参）下它与旧的标量口径**逐位相同**。旧基线在
 //! `replay` 里会 FAIL 并指到第一个观测点（`record/replay` 的既有语义：格式换代要重新录）。
 //!
+//! ## 作者便利（文档 §8 的兜底路线）
+//!
+//! 开口（[`Portal`]）与衍射棱（[`Edge`]）都要**作者显式标**（凸凹/连通语义由人给最准）。衍射棱
+//! 这一半另给了一条兜底：[`AcousticGeometry::detect_edges`] 能从网格里认出**边界棱与凸棱**
+//! （前提：三角绕序**朝外**一致，见 [`EdgeDetect`]）。
+//!
 //! ## 三条契约（与 `vxl-phys-sense` 同款，CI 可判）
 //!
 //! 1. **零干扰**：[`AcousticsExt::acoustic_cues`] 只持有 `&self` ⇒ 开/关声学层，`state_hash`
@@ -49,8 +55,10 @@
 
 #![forbid(unsafe_code)]
 
+mod auto_edge;
 mod medium;
 
+pub use auto_edge::EdgeDetect;
 pub use medium::{AcousticMedium, LayeredMedium, Medium, Slab};
 
 use medium::seg_effect;
