@@ -71,6 +71,13 @@ fn acoustic_stream_is_jsonl_and_deterministic() {
         a.contains("\"kind\":\"transmitted\""),
         "流里必须有墙的透射泄漏（A2）：{a}"
     );
+    // A3 频带：每行都要有逐带能量（格式换代一次，见 crate 头注）
+    let lines = a.lines().count();
+    let with_bands = a.lines().filter(|l| l.contains("\"bands\":[")).count();
+    assert!(
+        lines > 0 && with_bands == lines,
+        "每行都要有逐带能量 bands（A3 频带）：{lines} 行里只有 {with_bands} 行有"
+    );
 }
 
 #[test]

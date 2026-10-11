@@ -10,7 +10,7 @@
 use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::{
     jsonl, AcousticConfig, AcousticGeometry, AcousticStats, AcousticsExt, Listener, PathKind,
-    Portal, SoundPath,
+    Portal, SoundPath, BANDS,
 };
 
 /// 门洞全宽（x ∈ [-1,1]）——开启比例 = 缝宽 / 本值。
@@ -20,8 +20,8 @@ const DOOR_W: f32 = 2.0;
 struct Geo {
     verts: Vec<Vec3>,
     tris: Vec<[u32; 3]>,
-    absorb: Vec<f32>,
-    trans: Vec<f32>,
+    absorb: Vec<[f32; BANDS]>,
+    trans: Vec<[f32; BANDS]>,
     portals: Vec<Portal>,
 }
 
@@ -65,8 +65,13 @@ fn scene(open: f32, transmission: f32) -> Geo {
     Geo {
         verts,
         tris: vec![[0u32, 1, 2], [0, 2, 3], [4, 5, 6], [4, 6, 7]],
-        absorb: vec![0.25f32, 0.25, 0.9, 0.9],
-        trans: vec![0.0f32, 0.0, transmission, transmission],
+        absorb: vec![[0.25f32; BANDS], [0.25; BANDS], [0.9; BANDS], [0.9; BANDS]],
+        trans: vec![
+            [0.0f32; BANDS],
+            [0.0; BANDS],
+            [transmission; BANDS],
+            [transmission; BANDS],
+        ],
         portals: vec![Portal {
             quad: [
                 Vec3::new(-1.0, 0.0, 1.0),
@@ -126,6 +131,7 @@ fn first_of(paths: &[SoundPath], kind: PathKind, src: u32) -> SoundPath {
         .unwrap_or(SoundPath {
             source: src,
             delay: 0.0,
+            bands: [0.0; BANDS],
             gain: 0.0,
             dir: [0.0, 0.0, 0.0],
             kind,

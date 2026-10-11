@@ -9,7 +9,7 @@
 |---|---|---|
 | 刚体/接触/关节/地形/破坏/布绳（绝大多数） | `vxl-phys` | 门面。**只需要它**：内部 20+ 个 crate 由它组装 |
 | 声音/震动（把冲击归约成音频/触觉 cue） | `vxl-phys` + `vxl-phys-sense` | 感官域是**只读消费者**（`impl SenseExt for World`） |
-| 声学传播（射线追踪：直达/反射/遮挡 + 孔隙传声 + 墙的透射泄漏） | `vxl-phys` + `vxl-phys-acoustics` | 第二条输出侧域；同样**只读**，几何由调用方以建模面交进来 |
+| 声学传播（射线追踪：直达/反射/遮挡 + 孔隙传声 + 墙的透射泄漏 + 介质体积场 + 频带） | `vxl-phys` + `vxl-phys-acoustics` | 第二条输出侧域；同样**只读**，几何与逐带材质表/介质场都由调用方交进来 |
 | 体素几何（自己造 `VoxelVolume`） | `vxl-phys-terrain` | 门面已转出常用件；要直接建体素加它 |
 | 布/绳（自己造 `ClothSheet`/`Rope`） | `vxl-phys-soft` | 同上 |
 
@@ -54,7 +54,7 @@ cargo run -p vxl-phys-cli -- demo  voxel 240     # 体素地面（破坏/感官�
 cargo run -p vxl-phys-cli -- hash  stack 600     # 末态 state_hash（两次跑必须同值）
 cargo run -p vxl-phys-cli -- check drop  600     # 同场景跑两遍、逐观测点比对哈希（**CI 门**：不一致退出码 2）
 cargo run -p vxl-phys-cli -- cue   voxel 240     # 感官 cue 流（JSONL，一行一条）
-cargo run -p vxl-phys-cli -- acoustic voxel 240  # 声学路径流（JSONL；声明式"房间"，与碰撞体无关）
+cargo run -p vxl-phys-cli -- acoustic voxel 240  # 声学路径流（JSONL；逐带 bands + 声明式"房间"，与碰撞体无关）
 cargo run -p vxl-phys-cli -- hash  stack 600 --json   # 任意子命令加 --json ⇒ 机器可读（脚本/CI 取数）
 cargo run -p vxl-phys-cli -- record stack 600 base.jsonl   # 录一份观测点基线（一行一个 tick 的哈希）
 cargo run -p vxl-phys-cli -- replay stack 600 base.jsonl   # 与之逐行对拍（跨机器/跨版本复现检查）

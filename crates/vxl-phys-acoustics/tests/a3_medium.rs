@@ -9,13 +9,13 @@
 use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::{
     jsonl, AcousticConfig, AcousticGeometry, AcousticMedium, AcousticStats, AcousticsExt,
-    LayeredMedium, Listener, Medium, PathKind, SoundPath,
+    LayeredMedium, Listener, Medium, PathKind, SoundPath, BANDS,
 };
 
 /// 水：声速 1500 m/s + 明显吸收（0.2 /m）—— 只为一眼看得出差异的数值实验。
 const WATER: Medium = Medium {
     speed_of_sound: 1500.0,
-    attenuation: 0.2,
+    attenuation: [0.2; BANDS],
 };
 
 /// 分界面高度：声源在 y ≈ 0.25、听者在 y = 1.5 ⇒ 直达路径在 `t = 0.2` 处穿过它。
@@ -25,8 +25,8 @@ const SPLIT: f32 = 0.5;
 struct Scene {
     verts: Vec<Vec3>,
     tris: Vec<[u32; 3]>,
-    absorb: Vec<f32>,
-    trans: Vec<f32>,
+    absorb: Vec<[f32; BANDS]>,
+    trans: Vec<[f32; BANDS]>,
 }
 
 impl Scene {
@@ -39,8 +39,8 @@ impl Scene {
                 Vec3::new(-4.0, 0.0, 4.0),
             ],
             tris: vec![[0u32, 1, 2], [0, 2, 3]],
-            absorb: vec![0.25f32, 0.25],
-            trans: vec![0.0f32, 0.0],
+            absorb: vec![[0.25f32; BANDS]; 2],
+            trans: vec![[0.0f32; BANDS]; 2],
         }
     }
 
@@ -118,6 +118,7 @@ fn direct_of(
         .unwrap_or(SoundPath {
             source: 0,
             delay: 0.0,
+            bands: [0.0; BANDS],
             gain: 0.0,
             dir: [0.0, 0.0, 0.0],
             kind: PathKind::Direct,
@@ -153,7 +154,7 @@ fn uniform_medium_matches_closed_form() {
         "两种档都必须产出直达"
     );
     let expect_delay = dist / WATER.speed_of_sound;
-    let expect_gain = (-WATER.attenuation * dist).exp() / (dist * dist);
+    let expect_gain = (-WATER.attenuation[BANDS / 2] * dist).exp() / (dist * dist);
     assert!(
         (water.1.delay - expect_delay).abs() <= expect_delay * 1e-5,
         "全水时延应为 L/c（实际 {}，期望 {expect_delay}）",
@@ -191,7 +192,7 @@ fn two_layer_crossing_matches_closed_form() {
     assert!(st.direct >= 1, "穿层场景必须产出直达");
     let expect_delay = d1 / WATER.speed_of_sound + d2 / Medium::AIR.speed_of_sound;
     let dist = (l - src).length();
-    let expect_gain = (-WATER.attenuation * d1).exp() / (dist * dist);
+    let expect_gain = (-WATER.attenuation[BANDS / 2] * d1).exp() / (dist * dist);
     assert!(
         (p.delay - expect_delay).abs() <= expect_delay * 1e-4,
         "穿层时延应为 d₁/c₁ + d₂/c₂（实际 {}，期望 {expect_delay}）",
