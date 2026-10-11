@@ -55,6 +55,7 @@ cargo run -p vxl-phys-cli -- hash  stack 600     # 末态 state_hash（两次跑
 cargo run -p vxl-phys-cli -- check drop  600     # 同场景跑两遍、逐观测点比对哈希（**CI 门**：不一致退出码 2）
 cargo run -p vxl-phys-cli -- cue   voxel 240     # 感官 cue 流（JSONL，一行一条）
 cargo run -p vxl-phys-cli -- acoustic voxel 240  # 声学路径流（JSONL；逐带 bands + 声明式"房间"，与碰撞体无关）
+cargo run -p vxl-phys-cli -- acoustic voxel 240 --realtime  # 实时档：候选与产出都收紧（确定性、不看时钟）
 cargo run -p vxl-phys-cli -- hash  stack 600 --json   # 任意子命令加 --json ⇒ 机器可读（脚本/CI 取数）
 cargo run -p vxl-phys-cli -- record stack 600 base.jsonl   # 录一份观测点基线（一行一个 tick 的哈希）
 cargo run -p vxl-phys-cli -- replay stack 600 base.jsonl   # 与之逐行对拍（跨机器/跨版本复现检查）

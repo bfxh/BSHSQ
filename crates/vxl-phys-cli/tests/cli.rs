@@ -86,6 +86,17 @@ fn acoustic_stream_is_jsonl_and_deterministic() {
         lines > 0 && with_bands == lines,
         "每行都要有逐带能量 bands（A3 频带）：{lines} 行里只有 {with_bands} 行有"
     );
+    // A5 实时档：确定性、且候选上限更紧（产出不多于全量档）
+    let rt = ok(&["acoustic", "voxel", "180", "--realtime"]);
+    let rt2 = ok(&["acoustic", "voxel", "180", "--realtime"]);
+    assert_eq!(rt, rt2, "实时档两跑必须逐字一致");
+    assert!(!rt.is_empty(), "实时档也要出流：{rt}");
+    let off_lines = ok(&["acoustic", "voxel", "180"]).lines().count();
+    assert!(
+        rt.lines().count() <= off_lines,
+        "实时档的产出不该多于全量档（{} vs {off_lines}）",
+        rt.lines().count()
+    );
 }
 
 #[test]

@@ -522,7 +522,8 @@ capabilities:
         note: >-
           **仍未做（如实登记）**：**折射**（声线折转 —— A3 的直线几何是显式边界，见文档 §7）、
           UTD 的 **Fresnel 积分**（A4 的 `D(θ)` 与漫反射口径都是工程近似）、
-          A5 动态源/听者 + 实时档（GPU 档可选）。portal 与衍射棱都按文档 §8 的取舍先落"显式图元"，
+          **GPU 档**（A5 的实时档只有 CPU 侧的工作量上界）。
+          portal 与衍射棱都按文档 §8 的取舍先落"显式图元"，
           "体素空洞自动识别"（从占据位找连通孔）作兜底仍未做。低频不承诺 / 不做双耳渲染见文档 §7。
       - id: a4_diffraction_landed
         note: >-
@@ -547,6 +548,19 @@ capabilities:
           散射增益与**闭式口径**对拍且对系数**线性**、**Lambertian**（同距离下绕离法向 60° 恰好弱一半）、
           腿被挡则无路径、逐带系数 ⇒ 带比等于系数比 + 预算 + 逐字确定性 + `state_hash` 不变。
           ⚠️ 仍**不做** Fresnel 积分与楔角 UTD 系数（`D(θ) = (1+cosθ)/2` 与 Lambertian 都是工程近似）。
+      - id: a5_landed
+        note: >-
+          **A5 已落地（2026-10-11）**：动态源/听者本来就成立（声源逐 tick 取 `World::impacts()`、
+          听者位置每次调用由调用方给）；这一期补的是**预算与实时档**：
+          ① **产出按优先级（能量）截断**到 `max_paths`（先收本 tick 的候选，再 `sort_by` 稳定排序取
+          最响的 K 条 —— 平局仍按产出顺序，逐位可复现），丢弃数如实计入 `dropped_budget`；
+          候选侧的四个上界（`max_reflections` / `max_portals` / `max_edges` / `max_scatters`）仍是**工作量**上界。
+          ② `AcousticTier { Offline, Realtime, Minimal }` = **确定性的工作量上界预设**（`config()` 给旋钮组合；
+          **不是墙钟预算** —— 宿主想帧率自适应请自己选档）。
+          判据 `tests/a5_realtime.rs` 4 条：留下的必须是**最响的 K 条**且丢弃数 = 候选数 − K、
+          档越省候选越少且 `Minimal` 不算反射（顶满时上报）、移动听者下**时延受几何界、增益受
+          Lipschitz 界（`2/d³·Δd`）、路径数不抖**、同扫掠两跑逐字一致 + `state_hash` 不变。
+          CLI 加 `--realtime`（同一房间：全量 1421 行 → 实时 1064 行）。**GPU 档**仍未做。
       - id: cli_wired
         note: >-
           **工具链已接（2026-10-11）**：`vxl-phys-cli acoustic <voxel> [ticks]` 打声学路径流（JSONL，

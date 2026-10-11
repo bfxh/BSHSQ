@@ -17,8 +17,8 @@
 // 用 `use vxl_phys::prelude::*;` 才是我们要给他们的便利，见 `docs/QUICKSTART.md`）。
 use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::{
-    jsonl as aco_jsonl, AcousticConfig, AcousticGeometry, AcousticMedium, AcousticsExt, Edge,
-    LayeredMedium, Listener, Medium, Portal, SoundPath, BANDS,
+    jsonl as aco_jsonl, AcousticConfig, AcousticGeometry, AcousticMedium, AcousticTier,
+    AcousticsExt, Edge, LayeredMedium, Listener, Medium, Portal, SoundPath, BANDS,
 };
 use vxl_phys_replay::Recorder;
 use vxl_phys_sense::{jsonl, Cue, SenseConfig, SenseExt};
@@ -136,6 +136,8 @@ fn run_scene(name: &str, ticks: usize) -> Result<(World, Vec<Vec3>), String> {
 pub fn run(args: &[String]) -> Result<String, String> {
     // `--json` 可放任意位置（脚本/CI 吃机器可读输出）；位置参数按"不以 `-` 开头"取。
     let json = args.iter().any(|a| a == "--json");
+    // `--realtime` 只对 `acoustic` 有意义：换成实时档（确定性的工作量上界，见 `vxl-phys-acoustics`）。
+    let realtime = args.iter().any(|a| a == "--realtime");
     let pos: Vec<&str> = args
         .iter()
         .map(String::as_str)
@@ -157,7 +159,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
         "replay" => replay_cmd(name, ticks, path),
         "cue" => cue_cmd(name, ticks),
         // **第二条输出侧域**：声学路径流（走声明的"房间"几何，与碰撞体无关）。
-        "acoustic" => acoustic_cmd(name, ticks),
+        "acoustic" => acoustic_cmd(name, ticks, realtime),
         "help" => Ok(USAGE.to_string()),
         other => Err(format!("未知子命令 `{other}`\n{USAGE}")),
     }
@@ -327,13 +329,21 @@ fn room() -> Room {
 /// `acoustic`：声学路径流（JSONL，一行一条；机器可读形式就是它本身）。
 ///
 /// 听者站在墙**外侧**（z = 3.0）⇒ 听到的是"隔壁房间"的冲击：穿门洞的 `portal` 路径 +
-/// 墙的透射泄漏 `transmitted` + 反射。逐 tick 归约（每 tick 用干净缓冲 ⇒ 预算按 tick 算）。
-fn acoustic_cmd(name: &str, ticks: usize) -> Result<String, String> {
+/// 墙的透射泄漏 `transmitted` + 门框绕射 + 天花板漫反射 + 反射。逐 tick 归约（每 tick 用干净
+/// 缓冲 ⇒ 预算按 tick 算）。
+///
+/// `realtime` = 用 [`AcousticTier::Realtime`] 的**确定性工作量上界**（候选与产出都收紧）；
+/// 档位不是墙钟预算，宿主想自适应请自己按帧率选档。
+fn acoustic_cmd(name: &str, ticks: usize, realtime: bool) -> Result<String, String> {
     let mut w = scene(name)?;
     let room = room();
     let field = medium();
     let geo = room.geom(Some(&field));
-    let cfg = AcousticConfig::default();
+    let cfg = if realtime {
+        AcousticTier::Realtime.config()
+    } else {
+        AcousticConfig::default()
+    };
     let listener = Listener {
         pos: Vec3::new(0.0, 1.0, 3.0),
         radius: 0.5,
@@ -481,9 +491,10 @@ vxl-phys —— vxl_phys 的命令行入口
   vxl-phys hash  <drop|stack> [ticks]              末态 state_hash（可复现自检）
   vxl-phys check <drop|stack|cloth|voxel> [ticks]  跑两遍、逐观测点比对哈希（CI 自检；不一致退出码 2）
   vxl-phys cue   <voxel> [ticks]                   感官 cue 流（JSONL；只有 voxel 是 provider 地面）
-  vxl-phys acoustic <voxel> [ticks]                声学路径流（JSONL；声学几何是声明的房间，与碰撞体无关）
+  vxl-phys acoustic <voxel> [ticks] [--realtime]   声学路径流（JSONL；声学几何是声明的房间，与碰撞体无关）
   vxl-phys record <scene> [ticks] [基线.jsonl]      录观测点序列（JSONL；省略文件则打到 stdout）
   vxl-phys replay <scene> [ticks] <基线.jsonl>      与基线逐行对拍（跨机器/跨版本复现检查）
   vxl-phys help                                    本说明
 任意子命令都可加 `--json`：输出机器可读 JSON（cue 本来就是 JSONL）。
+`acoustic` 可加 `--realtime`：走实时档（候选与产出都收紧，确定性、不看时钟）。
 ";
