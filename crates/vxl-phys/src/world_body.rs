@@ -1,6 +1,8 @@
 //! world_body：从 lib.rs 按域拆出（纯搬移，语义未改）。
 use super::*;
 
+pub(crate) mod voronoi_fracture;
+
 impl World {
     /// 该流体是否开了 2b（对账/测试用）。
     pub fn fluid_boundary_coupling(&self, fluid: usize) -> bool {
@@ -83,6 +85,10 @@ impl World {
     /// 每块提取为刚体碎块并移除。`seeds` 由调用方给（可用
     /// `vxl_phys_terrain::voxel::VoxelVolume::seeds_jittered` 生成确定性抖动种子）。
     /// 返回碎块总数。
+    ///
+    /// **预算**（安全审计 F-14）：种子数与碎块数都封顶**默认档 `B1K` 的容量**（同破坏管线默认
+    /// 档）；超预算的盒**回填成体素**（不丢几何），返回值如实给本次生成数。破坏策略路径
+    /// （`DestructionExt`）用 `DestructionConfig::budget` 调 `voronoi_fracture::extract`，不受此处默认档限制。
     pub fn fracture_voronoi(
         &mut self,
         id: u32,
@@ -91,24 +97,14 @@ impl World {
         seeds: &[Vec3],
         density: f32,
     ) -> usize {
-        if self.claim_extraction_effect(id).is_err() {
-            return 0;
-        }
-        let Some(vol) = self.providers.voxel_mut(id) else {
-            return 0;
-        };
-        let cells = vol.fracture_voronoi(min, max, seeds);
-        let mut n = 0usize;
-        for (_si, boxes) in cells {
-            for (c, h) in boxes {
-                let d = (1e-3 / (8.0 * h.x * h.y * h.z)).max(density).max(1e-3);
-                self.bodies
-                    .push_dynamic(Shape::Box { half: h }, c, Quat::IDENTITY, d);
-                n += 1;
-            }
-        }
-        self.refresh_provider_bounds();
-        n
+        voronoi_fracture::extract(
+            self,
+            id,
+            vxl_phys_core::Aabb { min, max },
+            seeds,
+            density,
+            voronoi_fracture::DEFAULT_BUDGET,
+        )
     }
 
     /// **M3 冲击破坏**（调用方在每次 `step()` 之后调用）：对指定 provider，
