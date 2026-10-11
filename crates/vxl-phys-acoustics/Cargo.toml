@@ -1,0 +1,14 @@
+[package]
+name = "vxl-phys-acoustics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "vxl_phys 声学传播（射线追踪音频 A1：直达 + 一次镜像反射 + 遮挡；只读消费者）"
+
+[dependencies]
+# 只依赖门面：声学层吃**建模面**（由调用方以切片交进来），不读碰撞体、不碰任何内部 crate。
+vxl-phys = { workspace = true }
+
+[dev-dependencies]
+# 判据里需要一块体素地面来"打出一次冲击"（声源 = `World::impacts()` 的接触点）。
+vxl-phys-terrain = { workspace = true }

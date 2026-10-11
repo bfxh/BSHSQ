@@ -1009,6 +1009,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vxl-phys-acoustics"
+version = "0.1.0"
+dependencies = [
+ "vxl-phys",
+ "vxl-phys-terrain",
+]
+
+[[package]]
 name = "vxl-phys-aero"
 version = "0.1.0"
 dependencies = [

@@ -27,6 +27,7 @@ members = [
     "crates/vxl-phys-ffi",
     "crates/vxl-phys-sense",
     "crates/vxl-phys-cli",
+    "crates/vxl-phys-acoustics",
 ]
 
 [workspace.package]
@@ -60,6 +61,8 @@ vxl-phys = { version = "0.1.0", path = "crates/vxl-phys" }
 vxl-phys-sense = { version = "0.1.0", path = "crates/vxl-phys-sense" }
 # 命令行工具（对外工具链的样板：只用公共 API 跑场景 / 打哈希 / 导 cue 流）。
 vxl-phys-cli = { version = "0.1.0", path = "crates/vxl-phys-cli" }
+# 声学传播域（射线追踪音频，`docs/SURVEY-ACOUSTIC-RAYTRACING.md`）：只读消费者，依赖门面。
+vxl-phys-acoustics = { version = "0.1.0", path = "crates/vxl-phys-acoustics" }
 
 [profile.release]
 lto = "thin"
