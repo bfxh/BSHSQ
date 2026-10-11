@@ -39,6 +39,7 @@ impl Geo {
             absorption: &self.absorb,
             transmission: &self.trans,
             portals: &self.portals,
+            medium: None,
         }
     }
 
