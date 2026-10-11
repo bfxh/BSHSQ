@@ -54,6 +54,22 @@ pub trait AcousticMedium {
     fn segment_exact(&self, _a: Vec3, _b: Vec3) -> Option<(f32, [f32; BANDS])> {
         None
     }
+
+    /// **可选**：给出**折射折线**（A3 的第二半：声线在层界面上按 Snell 折转）。
+    ///
+    /// 返回 `(折点表, 时延, 逐带能量衰减因子)`；折点表**含首尾**（`src` 与 `dst`）。
+    /// `None` = 本实现不建模折射（调用方仍按直线积分 —— A1–A5 的行为）。默认返回 `None`。
+    ///
+    /// 折线由**介质自己**给（只有它知道层界在哪）；本层只做**逐段遮挡检查**与球面扩散。
+    /// `iters` 是给数值解法用的**定次数**上界（无早退 ⇒ 逐位可复现）。
+    fn refracted(
+        &self,
+        _src: Vec3,
+        _dst: Vec3,
+        _iters: u32,
+    ) -> Option<(Vec<Vec3>, f32, [f32; BANDS])> {
+        None
+    }
 }
 
 /// 分层介质的一层：`y ∈ [lo, hi)` 用 `medium`。
@@ -153,6 +169,32 @@ impl LayeredMedium {
         }
         (delay, exp_bands(&tau))
     }
+
+    /// 从 `y0` 到 `y1` 依次穿过哪些层：`(声速, 逐带吸收, 竖直跨度)`（顺序按 y 升序）。
+    fn crossed(&self, y0: f32, y1: f32) -> Vec<(f32, [f32; BANDS], f32)> {
+        let (lo, hi) = (y0.min(y1), y0.max(y1));
+        let mut cuts: Vec<f32> = self
+            .slabs
+            .iter()
+            .flat_map(|s| [s.lo, s.hi])
+            .filter(|e| e.is_finite() && *e > lo + 1e-9 && *e < hi - 1e-9)
+            .collect();
+        cuts.sort_by(|a, b| a.total_cmp(b));
+        cuts.dedup_by(|a, b| (*a - *b).abs() <= 1e-9);
+        let mut bounds = vec![lo];
+        bounds.extend(cuts);
+        bounds.push(hi);
+        let mut out = Vec::new();
+        for w in bounds.windows(2) {
+            let span = w[1] - w[0];
+            if span <= 1e-9 {
+                continue;
+            }
+            let m = self.medium_at_y(0.5 * (w[0] + w[1]));
+            out.push((m.speed_of_sound, m.attenuation, span));
+        }
+        out
+    }
 }
 
 impl AcousticMedium for LayeredMedium {
@@ -162,6 +204,84 @@ impl AcousticMedium for LayeredMedium {
 
     fn segment_exact(&self, a: Vec3, b: Vec3) -> Option<(f32, [f32; BANDS])> {
         Some(self.integrate(a, b, Medium::AIR.speed_of_sound))
+    }
+
+    /// **Snell 折转**（分层介质）：水平慢度 `p = sin θ / c` 沿声线守恒 ⇒ 用**定次数二分**找
+    /// 那个能把声线正好送到听者的 `p`；`|p|` 的上界是 `1/c_max` —— 需要的 `p` 超过它就意味着
+    /// **全反射**（该层里 `sin θ` 会大于 1），这时返回 `None`（不产出折射路径）。
+    ///
+    /// 退化情形也返回 `None`：同一高度（纯水平）、或**被穿的层同速**（那时直线就是解，交给直达
+    /// 那条，避免重复计能）。
+    fn refracted(
+        &self,
+        src: Vec3,
+        dst: Vec3,
+        iters: u32,
+    ) -> Option<(Vec<Vec3>, f32, [f32; BANDS])> {
+        let dh = Vec3::new(dst.x - src.x, 0.0, dst.z - src.z);
+        let horiz = dh.length();
+        if horiz <= 1e-6 || (dst.y - src.y).abs() <= 1e-9 {
+            return None;
+        }
+        let layers = self.crossed(src.y, dst.y);
+        let c0 = layers.first()?.0;
+        if layers.iter().all(|(c, _, _)| (*c - c0).abs() <= 1e-6) {
+            return None; // 均匀：直线就是解
+        }
+        let c_max = layers.iter().map(|(c, _, _)| *c).fold(0.0f32, f32::max);
+        if c_max <= 0.0 {
+            return None;
+        }
+        // 给定 p 时声线在每一层里的水平推进量（竖直跨度 × tanθ，带符号 ⇒ p 单调递增）
+        let run = |p: f32| -> f32 {
+            let mut s = 0.0f32;
+            for (c, _, span) in layers.iter() {
+                let sin = (p * c).clamp(-1.0, 1.0);
+                let cos = (1.0 - sin * sin).max(1e-12).sqrt();
+                s += span * (sin / cos);
+            }
+            s
+        };
+        let hi = (1.0 / c_max) * (1.0 - 1e-6);
+        if run(hi) < horiz || run(-hi) > horiz {
+            return None; // 需要的慢度超出物理上限 ⇒ 全反射（或几何上不可达）
+        }
+        let (mut lo, mut upp) = (-hi, hi);
+        let iters = iters.max(8);
+        for _ in 0..iters {
+            let mid = 0.5 * (lo + upp);
+            if run(mid) < horiz {
+                lo = mid;
+            } else {
+                upp = mid;
+            }
+        }
+        let p = 0.5 * (lo + upp);
+        // 折点表：沿竖直方向逐层推进（水平推进按 tanθ 累积），最后一点**强制**落在听者上
+        let diru = dh * (1.0 / horiz);
+        let up = (dst.y - src.y).signum();
+        let mut kinks = vec![src];
+        let (mut acc, mut y) = (0.0f32, src.y);
+        for (c, _, span) in layers.iter() {
+            let sin = (p * c).clamp(-1.0, 1.0);
+            let cos = (1.0 - sin * sin).max(1e-12).sqrt();
+            acc += (up * span) * (sin / cos);
+            y += up * span;
+            kinks.push(Vec3::new(src.x + diru.x * acc, y, src.z + diru.z * acc));
+        }
+        if let Some(last) = kinks.last_mut() {
+            *last = dst;
+        }
+        let mut delay = 0.0f32;
+        let mut tau = [0.0f32; BANDS];
+        for (i, (c, alpha, _)) in layers.iter().enumerate() {
+            let len = (kinks[i + 1] - kinks[i]).length();
+            delay += len / c;
+            for (t, a) in tau.iter_mut().zip(alpha.iter()) {
+                *t += a.max(0.0) * len;
+            }
+        }
+        Some((kinks, delay, exp_bands(&tau)))
     }
 }
 
