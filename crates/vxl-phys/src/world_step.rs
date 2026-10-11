@@ -7,6 +7,7 @@ pub(crate) mod coupling;
 pub(crate) mod destruction;
 pub(crate) mod fluid_stepper;
 mod medium;
+pub(crate) mod nan_guard;
 pub(crate) mod narrow_tier;
 mod splat_dynamics;
 
@@ -261,6 +262,8 @@ impl World {
     }
 
     pub(crate) fn substep(&mut self, dt: f32, first: bool, reuse_manifolds: bool) {
+        // 0) 运行期 NaN 隔离（审计 F-08 第 3 点）：本子步任何相位之前先把脏体冻结/有限化。
+        nan_guard::guard(self);
         // 1) 力场（重力在 World::new 注入注册表）+ 介质耦合（喷溅场作介质）。
         // 计时走跨目标探针：wasm32-unknown-unknown 无时钟（`Instant::now()` 会 panic），该目标下退化为 0。
         let t0 = vxl_phys_core::probe::start();
