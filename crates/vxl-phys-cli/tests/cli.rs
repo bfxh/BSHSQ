@@ -57,3 +57,38 @@ fn help_is_self_describing() {
         assert!(out.contains(need), "用法缺 {need}：{out}");
     }
 }
+
+/// `--json`：给脚本/CI 吃的机器可读输出（键名是本工具对外承诺的一部分）。
+#[test]
+fn json_flag_gives_machine_readable_output() {
+    let h = ok(&["hash", "stack", "60", "--json"]);
+    assert!(
+        h.starts_with('{') && h.contains("\"state_hash\":\"0x"),
+        "hash --json 形状不对：{h}"
+    );
+    let d = ok(&["demo", "drop", "60", "--json"]);
+    for key in [
+        "\"scene\":\"drop\"",
+        "\"bodies\":4",
+        "\"health\":",
+        "\"poses\":[[",
+    ] {
+        assert!(d.contains(key), "demo --json 缺 {key}：{d}");
+    }
+}
+
+/// `check`：集成方可以直接把它当 CI 门（一致 ⇒ PASS；不一致 ⇒ Err ⇒ CLI 退出码 2）。
+#[test]
+fn check_is_a_ci_gate() {
+    let out = ok(&["check", "drop", "120"]);
+    assert!(out.contains("PASS"), "一致场景应当 PASS：{out}");
+    assert!(
+        out.contains("2 个观测点"),
+        "120 tick / 60 一采 ⇒ 2 个观测点：{out}"
+    );
+    let j = ok(&["check", "voxel", "60", "--json"]);
+    assert!(
+        j.contains("\"pass\":true") && j.contains("\"samples\":1"),
+        "{j}"
+    );
+}

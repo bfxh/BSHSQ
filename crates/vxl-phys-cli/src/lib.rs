@@ -14,6 +14,7 @@
 // ⚠️ 本仓 `glob-gate` 对新文件的 `use ...::*` 是硬判 ⇒ 这里**逐项具名导入**（调用方自己那边
 // 用 `use vxl_phys::prelude::*;` 才是我们要给他们的便利，见 `docs/QUICKSTART.md`）。
 use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys_replay::Recorder;
 use vxl_phys_sense::{jsonl, Cue, SenseConfig, SenseExt};
 use vxl_phys_soft::{ClothSheet, Stiffness};
 
@@ -127,13 +128,22 @@ fn run_scene(name: &str, ticks: usize) -> Result<(World, Vec<Vec3>), String> {
 
 /// 命令行入口（见模块头注）。
 pub fn run(args: &[String]) -> Result<String, String> {
-    let sub = args.first().map(String::as_str).unwrap_or("help");
-    let rest = &args[args.len().min(1)..];
-    let name = rest.first().map(String::as_str).unwrap_or("drop");
-    let ticks: usize = rest.get(1).and_then(|s| s.parse().ok()).unwrap_or(240);
+    // `--json` 可放任意位置（脚本/CI 吃机器可读输出）；位置参数按"不以 `-` 开头"取。
+    let json = args.iter().any(|a| a == "--json");
+    let pos: Vec<&str> = args
+        .iter()
+        .map(String::as_str)
+        .filter(|a| !a.starts_with('-'))
+        .collect();
+    let sub = pos.first().copied().unwrap_or("help");
+    let name = pos.get(1).copied().unwrap_or("drop");
+    let ticks: usize = pos.get(2).and_then(|s| s.parse().ok()).unwrap_or(240);
     match sub {
         "demo" => {
             let (w, poses) = run_scene(name, ticks)?;
+            if json {
+                return Ok(json_demo(name, ticks, &w, &poses));
+            }
             let mut s = format!("场景 {name} / {ticks} tick：体 {} 具\n", w.bodies.len());
             for (i, p) in poses.iter().enumerate().take(6) {
                 s.push_str(&format!("  体{i}: ({:.4}, {:.4}, {:.4})\n", p.x, p.y, p.z));
@@ -147,11 +157,17 @@ pub fn run(args: &[String]) -> Result<String, String> {
         }
         "hash" => {
             let (mut w, _) = run_scene(name, ticks)?;
+            let h = w.state_hash();
+            if json {
+                return Ok(json_hash(name, ticks, h));
+            }
             Ok(format!(
                 "{}\n（同一个场景两次跑必须给出同一个值——集成方的复现自检）\n",
-                w.state_hash()
+                h
             ))
         }
+        // **集成方的 CI 自检**：同场景跑两遍、每 60 tick 采一个观测点，逐点比对 `state_hash`。
+        "check" => check(name, ticks, json),
         "cue" => {
             let mut w = scene(name)?;
             let cfg = SenseConfig::default();
@@ -162,17 +178,79 @@ pub fn run(args: &[String]) -> Result<String, String> {
             }
             Ok(jsonl(&cues))
         }
-        "help" | "--help" | "-h" => Ok(USAGE.to_string()),
+        "help" => Ok(USAGE.to_string()),
         other => Err(format!("未知子命令 `{other}`\n{USAGE}")),
     }
+}
+
+/// `demo --json` 的机器可读末态（**键名是本工具对外的承诺**：脚本/CI 会按它取值）。
+fn json_demo(name: &str, ticks: usize, w: &World, poses: &[Vec3]) -> String {
+    let mut s = format!(
+        "{{\"scene\":\"{name}\",\"ticks\":{ticks},\"bodies\":{},\"poses\":[",
+        w.bodies.len()
+    );
+    for (i, p) in poses.iter().enumerate() {
+        if i > 0 {
+            s.push(',');
+        }
+        s.push_str(&format!("[{:.6},{:.6},{:.6}]", p.x, p.y, p.z));
+    }
+    let rep = w.health();
+    s.push_str(&format!(
+        "],\"health\":{{\"awake\":{},\"nan\":{},\"contacts\":{}}}}}\n",
+        rep.awake_bodies, rep.nan_bodies, rep.contacts
+    ));
+    s
+}
+
+/// `hash --json`。
+fn json_hash(name: &str, ticks: usize, h: u128) -> String {
+    format!("{{\"scene\":\"{name}\",\"ticks\":{ticks},\"state_hash\":\"0x{h:032x}\"}}\n")
+}
+
+/// 跑两遍同一场景，逐观测点比对 `state_hash`（`Recorder` 是公共 API 里最小的"观测点"容器）。
+/// 不一致 ⇒ `Err`（CLI 退出码 2 ⇒ 可直接当 CI 门用）。
+fn check(name: &str, ticks: usize, json: bool) -> Result<String, String> {
+    let period = 60u64;
+    let sample = |name: &str| -> Result<(Recorder, u128), String> {
+        let mut w = scene(name)?;
+        let mut rec = Recorder::new(period);
+        for t in 0..ticks as u64 {
+            w.step();
+            if (t + 1) % period == 0 {
+                rec.observe(t + 1, w.state_hash());
+            }
+        }
+        Ok((rec, w.state_hash()))
+    };
+    let (a, ha) = sample(name)?;
+    let (b, hb) = sample(name)?;
+    let samples = (ticks as u64 / period) as usize;
+    let pass = a.matches(&b) && ha == hb;
+    if json {
+        return Ok(format!(
+            "{{\"scene\":\"{name}\",\"ticks\":{ticks},\"samples\":{samples},\"pass\":{pass},\
+             \"state_hash\":\"0x{ha:032x}\"}}\n"
+        ));
+    }
+    if !pass {
+        return Err(format!(
+            "FAIL：{name} / {ticks} tick 两次跑不一致（观测点 {samples} 个，末态 0x{ha:032x} vs 0x{hb:032x}）"
+        ));
+    }
+    Ok(format!(
+        "PASS：{name} / {ticks} tick / {samples} 个观测点逐位一致（0x{ha:032x}）\n"
+    ))
 }
 
 /// 用法文本（`--help` 与错误信息共用一份）。
 pub const USAGE: &str = "\
 vxl-phys —— vxl_phys 的命令行入口
 用法：
-  vxl-phys demo <drop|stack|cloth> [ticks]   跑示例场景，打印末态摘要（默认 drop / 240 tick）
-  vxl-phys hash <drop|stack> [ticks]         打印末态 state_hash（可复现自检）
-  vxl-phys cue  <voxel> [ticks]              打印感官 cue 流（JSONL；**只有 voxel 是 provider 地面**）
-  vxl-phys help                              本说明
+  vxl-phys demo  <drop|stack|cloth|voxel> [ticks]  示例场景末态摘要（默认 drop / 240 tick）
+  vxl-phys hash  <drop|stack> [ticks]              末态 state_hash（可复现自检）
+  vxl-phys check <drop|stack|cloth|voxel> [ticks]  跑两遍、逐观测点比对哈希（CI 自检；不一致退出码 2）
+  vxl-phys cue   <voxel> [ticks]                   感官 cue 流（JSONL；只有 voxel 是 provider 地面）
+  vxl-phys help                                    本说明
+任意子命令都可加 `--json`：输出机器可读 JSON（cue 本来就是 JSONL）。
 ";
