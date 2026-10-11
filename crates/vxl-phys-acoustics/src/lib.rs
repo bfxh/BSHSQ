@@ -16,7 +16,8 @@
 //!   仍未做**。
 //! - **A5**：**动态源/听者 + 预算与实时档** —— 声源本来就逐 tick 从 `World::impacts()` 来（会动），
 //!   听者位置每次调用都由调用方给（会动）；本层补上**按优先级（能量）截断**与 [`AcousticTier`]
-//!   （**确定性**的工作量上界，不是墙钟预算）。**GPU 档仍未做**。
+//!   （**确定性**的工作量上界，不是墙钟预算）；GPU 档落的是**基础件**（平铺布局 + 批处理入口 +
+//!   等价契约），**设备内核仍未做**（见下面"GPU 档"一节）。
 //!
 //! ## 三条设计原则（文档 §4 的落实）
 //!
@@ -43,6 +44,17 @@
 //! 这一半另给了一条兜底：[`AcousticGeometry::detect_edges`] 能从网格里认出**边界棱与凸棱**
 //! （前提：三角绕序**朝外**一致，见 [`EdgeDetect`]）。
 //!
+//! ## GPU 档（A5 的第二半）
+//!
+//! 几何与材质表本来就是**平铺切片**（`verts: &[Vec3]`、`tris: &[[u32; 3]]`、逐带表 `&[[f32; BANDS]]`）
+//! ⇒ 上传给计算着色器不需要再打包。在此基础上加**批处理入口**
+//! [`AcousticsExt::acoustic_cues_batch`]：对一批听者归约，每个听者一个**独立工作项**，
+//! 输出里每个听者**连续**成段，预算是**逐听者**算的。
+//!
+//! ⚠️ **真正跑在设备上的计算内核仍未做**：它属于 `vxl-phys-gpu`（那里才有 wgpu 会话）；
+//! 本层能先钉住的是**等价契约** —— 批处理必须与逐个标量调用**逐位相同**（判据
+//! `tests/a5_gpu_batch.rs`）。GPU 后端只要通过这条契约，接进来就不会改数值。
+//!
 //! ## 三条契约（与 `vxl-phys-sense` 同款，CI 可判）
 //!
 //! 1. **零干扰**：[`AcousticsExt::acoustic_cues`] 只持有 `&self` ⇒ 开/关声学层，`state_hash`
@@ -59,12 +71,14 @@
 mod auto_edge;
 mod diffract;
 mod medium;
+mod scatter;
 
 pub use auto_edge::EdgeDetect;
 pub use medium::{AcousticMedium, LayeredMedium, Medium, Slab};
 
 use diffract::push_diffraction;
 use medium::seg_effect;
+use scatter::push_scatter;
 use vxl_phys::{Vec3, World};
 
 /// **频带数**：低 / 中 / 高。本层**不给绝对频率** —— Hz 分组由宿主定，引擎只给三个标量
@@ -118,6 +132,7 @@ pub struct Edge {
 }
 
 /// 听者（A1 只有一个点 + 半径：进入该球即可闻）。
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Listener {
     pub pos: Vec3,
     pub radius: f32,
@@ -242,6 +257,10 @@ pub struct SoundPath {
 }
 
 /// 一次归约的统计（"预算真的生效了没有"由它自证）。
+///
+/// ⚠️ **口径**：逐类计数是**产出**的路径（**截断之后**）—— 所以
+/// [`paths`](AcousticStats::paths) 就是本次写进 `out` 的条数（批处理靠它切段）；
+/// **候选**侧被丢多少看 [`dropped_budget`](AcousticStats::dropped_budget)。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct AcousticStats {
     /// 声源数（= 本 tick 的冲击记录数）。
@@ -266,6 +285,19 @@ pub struct AcousticStats {
     pub dropped_budget: usize,
 }
 
+impl AcousticStats {
+    /// 本次归约**产出的路径条数**（五类路径之和）—— 批处理里用它切段。
+    pub fn paths(&self) -> usize {
+        self.direct
+            + self.leaked
+            + self.portals
+            + self.diffracted
+            + self.scattered
+            + self.refracted
+            + self.reflected
+    }
+}
+
 /// **声学传播域的扩展 API**（`impl AcousticsExt for World`）——同感官域：**不往 `World` 加方法**。
 pub trait AcousticsExt {
     /// 归约**本 tick**的可闻路径，**追加**到 `out`（返回 [`AcousticStats`]）。
@@ -279,6 +311,32 @@ pub trait AcousticsExt {
         cfg: &AcousticConfig,
         out: &mut Vec<SoundPath>,
     ) -> AcousticStats;
+
+    /// **批处理入口（GPU 档的基础件）**：对**一批听者**归约。
+    ///
+    /// 契约（判据 `tests/a5_gpu_batch.rs` 逐条钉住）：
+    ///
+    /// 1. **逐位等价**：每个听者在批里的结果与"单独调 [`acoustic_cues`](Self::acoustic_cues)"
+    ///    完全相同（含顺序）⇒ GPU 后端只要通过这条，接进来不改数值；
+    /// 2. **输出分段**：`out` 里每个听者的路径**连续**排在自己的段里，段长 = 对应
+    ///    [`AcousticStats::paths`]；`stats_out` 与 `listeners` 一一对应（清空后重填）；
+    /// 3. **逐听者预算**：`max_paths` **不跨听者共享**（每个听者各自最多 `max_paths` 条）。
+    ///
+    /// 默认实现就是"循环调 [`acoustic_cues`](Self::acoustic_cues)"—— 它天然满足前两条；
+    /// GPU 后端可以覆盖它（平铺、并行），但必须仍然满足这三条。
+    fn acoustic_cues_batch(
+        &self,
+        geo: &AcousticGeometry<'_>,
+        listeners: &[Listener],
+        cfg: &AcousticConfig,
+        out: &mut Vec<SoundPath>,
+        stats_out: &mut Vec<AcousticStats>,
+    ) {
+        stats_out.clear();
+        for l in listeners {
+            stats_out.push(self.acoustic_cues(geo, l, cfg, out));
+        }
+    }
 }
 
 impl AcousticsExt for World {
@@ -320,11 +378,31 @@ impl AcousticsExt for World {
         }
         // **A5：输出预算按优先级（能量）截断** —— 只留最响的 `room` 条。`sort_by` 是**稳定**排序
         // ⇒ 增益相同时仍按产出顺序（逐位可复现）；多出来的如实计入 `dropped_budget`。
-        let room = cfg.max_paths.saturating_sub(out.len());
+        // 预算是**逐调用（逐听者）**算的：`out` 里已有的内容不吃本次的额度（批处理要逐听者独立）。
+        let room = cfg.max_paths;
         if found.len() > room {
             found.sort_by(|a, b| b.gain.total_cmp(&a.gain));
             st.dropped_budget += found.len() - room;
             found.truncate(room);
+        }
+        // 逐类计数按**产出**重算（候选侧的丢弃已经记在 `dropped_budget` 里）
+        st.direct = 0;
+        st.leaked = 0;
+        st.portals = 0;
+        st.diffracted = 0;
+        st.scattered = 0;
+        st.refracted = 0;
+        st.reflected = 0;
+        for p in found.iter() {
+            match p.kind {
+                PathKind::Direct => st.direct += 1,
+                PathKind::Transmitted => st.leaked += 1,
+                PathKind::Portal => st.portals += 1,
+                PathKind::Diffracted => st.diffracted += 1,
+                PathKind::Scattered => st.scattered += 1,
+                PathKind::Refracted => st.refracted += 1,
+                PathKind::Reflected => st.reflected += 1,
+            }
         }
         out.extend(found);
         st
@@ -482,71 +560,6 @@ fn push_refraction(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_
     st.refracted += 1;
 }
 
-/// **A4「散射」** —— 面当**二级声源**（漫反射口径）：面中心按 Lambertian 往听者方向辐射
-///
-/// `gain_b = s_b · cos_in · cos_out · A / (d1² · d2²)`
-///
-/// ⚠️ **工程口径**（不承诺辐射度单位）：面积 × 入射余弦 × 出射余弦 × 散射系数 / 两段距离平方。
-/// 要真辐射度得上离线烘焙（如 Project Acoustics 那类）。条件：正/背面要**同侧**、两个余弦 > 0、
-/// 两条腿都不被挡。镜面那一半在 [`push_reflections`] 里按 `(1 - s_b)` 打折 ⇒ **能量守恒式分工**。
-fn push_scatter(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) {
-    for (ti, tri) in cx.geo.tris.iter().enumerate() {
-        if ti as u32 >= cx.cfg.max_scatters {
-            st.dropped_budget += 1;
-            break;
-        }
-        let s = cx.geo.scattering.get(ti).copied().unwrap_or([0.0; BANDS]);
-        if s.iter().all(|v| *v <= 0.0) {
-            continue;
-        }
-        let Some((a, b, cc, _)) = tri_of(cx.geo, ti, *tri) else {
-            continue;
-        };
-        let cross = (b - a).cross(cc - a);
-        let area2 = cross.length();
-        if area2 <= 1e-9 {
-            continue;
-        }
-        let p = (a + b + cc) * (1.0 / 3.0);
-        let v1 = cx.src - p;
-        let v2 = cx.listener.pos - p;
-        let (d1, d2) = (v1.length(), v2.length());
-        if d1 <= 1e-3 || d2 <= 1e-3 {
-            continue;
-        }
-        // 法向朝"声源那一侧"：声与听者必须在面的同一侧，才谈得上反射式散射。
-        let mut n = cross * (1.0 / area2);
-        if n.dot(v1) < 0.0 {
-            n *= -1.0;
-        }
-        let cos_in = n.dot(v1 * (1.0 / d1)).max(0.0);
-        let cos_out = n.dot(v2 * (1.0 / d2)).max(0.0);
-        if cos_in <= 0.0 || cos_out <= 0.0 {
-            continue;
-        }
-        if occluded(cx.geo, cx.src, p) || occluded(cx.geo, p, cx.listener.pos) {
-            continue;
-        }
-        let (t1, a1) = seg_effect(cx.geo.medium, cx.src, p, cx.c, cx.cfg.medium_step);
-        let (t2, a2) = seg_effect(cx.geo.medium, p, cx.listener.pos, cx.c, cx.cfg.medium_step);
-        let geom = 0.5 * area2 * cos_in * cos_out / (d1 * d1 * d2 * d2);
-        let mut bands = [0.0f32; BANDS];
-        for (((o, k), x), y) in bands.iter_mut().zip(s.iter()).zip(a1.iter()).zip(a2.iter()) {
-            *o = k.clamp(0.0, 1.0) * geom * x * y;
-        }
-        let dirv = v2 * (1.0 / d2);
-        out.push(SoundPath {
-            source: cx.si,
-            delay: t1 + t2,
-            bands,
-            gain: mid_band(&bands),
-            dir: [dirv.x, dirv.y, dirv.z],
-            kind: PathKind::Scattered,
-        });
-        st.scattered += 1;
-    }
-}
-
 /// 一次镜面反射：**镜像源法**——镜像听者，与三角平面求交，命中点落在三角内且两段都不被挡 ⇒ 一条路径。
 fn push_reflections(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) {
     let (src, c, geo, cfg) = (cx.src, cx.c, cx.geo, cx.cfg);
@@ -616,7 +629,7 @@ fn push_reflections(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'
 }
 
 /// 取三角的三顶点与**逐带**吸声系数（索引越界 / 表短 ⇒ `None`，与 `TriMesh` 的"丢坏三角"同口径）。
-fn tri_of(
+pub(crate) fn tri_of(
     geo: &AcousticGeometry<'_>,
     ti: usize,
     tri: [u32; 3],

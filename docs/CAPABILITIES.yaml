@@ -521,7 +521,9 @@ capabilities:
       - id: acoustic_not_done
         note: >-
           **仍未做（如实登记）**：UTD 的 **Fresnel 积分**（A4 的 `D(θ)` 与漫反射口径都是工程近似）、
-          **GPU 档**（A5 的实时档只有 CPU 侧的工作量上界）。
+          **GPU 档的设备内核**（本层已落批处理入口与逐位等价契约，见 `a5_gpu_base`；真正的
+          计算着色器属于 `vxl-phys-gpu` —— 那里的 CI 口径是 `--exclude vxl-phys-gpu`，headless
+          运行器不跑 GPU 用例）。
           portal 与衍射棱都按文档 §8 的取舍先落"显式图元"（衍射棱另有兜底，见下条）；
           **"体素空洞自动识别"**（从占据位找连通孔）仍未做。低频不承诺 / 不做双耳渲染见文档 §7。
       - id: a4_diffraction_landed
@@ -585,6 +587,19 @@ capabilities:
           比直线积分更快（**Fermat**）；② 路径级：时延/逐带衰减/到达方向与介质给的一致；
           ③ 均匀介质不折；④ 折线任一段被挡 ⇒ 不产出（去掉挡板就有）；⑤ 确定性 + `state_hash` 不变。
           ⚠️ 边界：只做**分层（水平层界）**介质；曲面/一般体积场要折线就自己实现 `refracted`。
+      - id: a5_gpu_base
+        note: >-
+          **GPU 档的"基础件"已落地（2026-10-12）**：几何与材质表本来就是**平铺切片**（`&[Vec3]` /
+          `&[[u32; 3]]` / `&[[f32; BANDS]]`）⇒ 上传给计算着色器不需要再打包；在此之上加
+          `AcousticsExt::acoustic_cues_batch`（对**一批听者**归约）。契约三条：① **逐位等价** ——
+          批里每个听者的结果与单独调 `acoustic_cues` 完全相同；② **输出分段** —— 每个听者的路径
+          连续成段、段长 = `AcousticStats::paths()`；③ **逐听者预算** —— `max_paths` 不跨听者共享
+          （否则后面的听者会被前面的饿死）。为此把统计口径改成**产出**（截断后重算逐类计数；
+          候选侧丢弃仍记 `dropped_budget`），`Listener` 也补了 `Copy`。
+          判据 `tests/a5_gpu_batch.rs` 4 条（逐位等价 / 逐听者预算（1 条额度 × 3 听者 ⇒ 恰好 3 条，
+          共享预算时后两个会变 0）/ 空批与单元素批 / 确定性 + `state_hash` 不变）。
+          ⚠️ **设备内核仍未做**（属 `vxl-phys-gpu`：那里才有 wgpu 会话；既有口径
+          `cargo test --workspace --exclude vxl-phys-gpu` ⇒ headless CI 不跑 GPU 用例）。
       - id: cli_wired
         note: >-
           **工具链已接（2026-10-11）**：`vxl-phys-cli acoustic <voxel> [ticks]` 打声学路径流（JSONL，
