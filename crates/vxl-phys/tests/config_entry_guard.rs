@@ -113,3 +113,27 @@ fn huge_iteration_config_still_steps_forward() {
     );
     assert!(p.y < 2.0, "重力下必须下落（未被闸死）：y = {}", p.y);
 }
+
+/// **F-17**：`threads` 超过本机并行度 ⇒ 收口到并行度（fork-join 池多开的 OS 线程与工作量无关）。
+/// 0 / 1 是合法档（串行），不被改动；本机并行度本身是上限（不放大）。
+#[test]
+fn threads_are_capped_at_machine_parallelism() {
+    let par = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    let cfg = PhysConfig {
+        threads: 4096,
+        ..PhysConfig::default()
+    };
+    let w = World::new(cfg);
+    assert_eq!(w.config.threads, par, "4096 线程应收口到本机并行度");
+    // 串行档原样保留（0 与 1 都是"串行"口径，仓内测试真在用）
+    for t in [0usize, 1] {
+        let cfg = PhysConfig {
+            threads: t,
+            ..PhysConfig::default()
+        };
+        let w = World::new(cfg);
+        assert_eq!(w.config.threads, t, "串行档不得被改写");
+    }
+}

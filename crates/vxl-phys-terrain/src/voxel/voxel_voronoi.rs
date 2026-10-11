@@ -116,7 +116,9 @@ impl SeedGrid {
         if !self.in_bounds(ix, iy, iz) {
             return;
         }
-        for &si in &self.bins[((ix * self.dims.1 + iy) * self.dims.2 + iz) as usize] {
+        let idx =
+            (ix as usize * self.dims.1 as usize + iy as usize) * self.dims.2 as usize + iz as usize;
+        for &si in &self.bins[idx] {
             let d = (p - seeds[si as usize]).length_squared();
             if d < best.0 || (d == best.0 && si < best.1) {
                 *best = (d, si);

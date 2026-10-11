@@ -25,10 +25,10 @@ PROBES = {
     "unwrap-gate":  ("probe_unwrap.rs",  'fn p(){ let _x: Option<i32> = None; _x.unwrap(); }\n'),
     "unsafe-gate":  ("probe_unsafe.rs",  'fn p(){ unsafe { let _ = 1; } }\n'),
     "linelen-gate": ("probe_linelen.rs", 'fn p() { ' + "a" * 240 + ' }\n'),
+    "usize-gate":   ("probe_usize.rs",    'fn p(a: u32, b: u32) { let _ = (a * b) as usize; }\n'),  # 窄类型里先乘再转：注入后必须转红
     "glob-gate":    ("probe_glob.rs",    'use std::collections::*;\n'),
     "todo-gate":    ("probe_todo.rs",    'fn p(){ todo!(); }\n'),
-    # god 是**尺寸棘轮**（>800 行文件 / >120 行函数 / >24 成员才红），"新文件即红"不是它的语义
-    # ⇒ 最小违规必须真的超阈：一个 125 行的函数（实测 max_fn_lines=125 > 120 命中）。
+    # god 是**尺寸棘轮**（>800 行文件 / >120 行函数 / >24 成员才红），"新文件即红"不是它的语义 ⇒ 最小违规必须真的超阈：一个 125 行的函数（实测命中）。
     "god-gate":     ("probe_god.rs",
         'fn p() {\n' + '    let _ = 1u32;\n' * 125 + '}\n'),
     "cyc-gate":     ("probe_cyc.rs",
