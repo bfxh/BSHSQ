@@ -521,9 +521,8 @@ capabilities:
       - id: acoustic_not_done
         note: >-
           **仍未做（如实登记）**：UTD 的 **Fresnel 积分**（A4 的 `D(θ)` 与漫反射口径都是工程近似）、
-          **GPU 档的设备内核**（本层已落批处理入口与逐位等价契约，见 `a5_gpu_base`；真正的
-          计算着色器属于 `vxl-phys-gpu` —— 那里的 CI 口径是 `--exclude vxl-phys-gpu`，headless
-          运行器不跑 GPU 用例）。
+          **GPU 档只落了直达核（M1）**：反射/绕射/散射/介质积分仍未上卡（见 `a5_gpu_direct_kernel`；
+          本层已落批处理入口与逐位等价契约，见 `a5_gpu_base`）。
           portal 与衍射棱都按文档 §8 的取舍先落"显式图元"（衍射棱另有兜底，见下条）；
           **"体素空洞自动识别"**（从占据位找连通孔）仍未做。低频不承诺 / 不做双耳渲染见文档 §7。
       - id: a4_diffraction_landed
@@ -600,6 +599,20 @@ capabilities:
           共享预算时后两个会变 0）/ 空批与单元素批 / 确定性 + `state_hash` 不变）。
           ⚠️ **设备内核仍未做**（属 `vxl-phys-gpu`：那里才有 wgpu 会话；既有口径
           `cargo test --workspace --exclude vxl-phys-gpu` ⇒ headless CI 不跑 GPU 用例）。
+      - id: a5_gpu_direct_kernel
+        note: >-
+          **GPU 档的「直达核」（M1）已落地（2026-10-12）**：`vxl-phys-gpu` 的
+          `src/acoustic.rs` + `src/acoustic.wgsl` —— 一批 `(声源, 听者)` 对，每对一个工作项
+          （`@workgroup_size(64)`），核内走**真正的射线-三角**（Möller–Trumbore，端点共面不计）
+          + `dist/speed` 与 `1/dist²`；与 CPU 端 `vxl-phys-acoustics` 的直达同口径。
+          复用既有的 `pipeline::gpu_setup`（`mk_layout`/`mk_pipe`/`dispatch`/`ent`/`f32_bytes`）与
+          `mapped::mapped_view` 回读 ⇒ **不引新依赖、不用 unsafe**。
+          探针 `crates/vxl-phys-gpu/tests/acoustic_direct_probe.rs`：场景是**轴对齐屏障**，参照值用
+          纯算术写（线段与 `z=1` 的交点落不落在矩形内），与卡上跑的**不是同一份实现** ⇒ 不是自证。
+          判据 = **拓扑（遮挡分类）逐位 + 浮点（时延/增益）相对 1e-4**；无适配器则打印 `[SKIP]`。
+          实测（本机）：`NVIDIA GeForce RTX 4060 Ti | Vulkan | DiscreteGpu` 上 6 对全对。
+          ⚠️ **CI 不覆盖**（既有口径 `cargo test --workspace --exclude vxl-phys-gpu`：headless 运行器
+          无 GPU）⇒ 这条路只能在本机或 GPU 探针 job 上验；**反射/绕射/散射/介质积分仍未上卡**。
       - id: cli_wired
         note: >-
           **工具链已接（2026-10-11）**：`vxl-phys-cli acoustic <voxel> [ticks]` 打声学路径流（JSONL，
