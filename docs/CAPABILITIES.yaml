@@ -502,9 +502,14 @@ capabilities:
       - id: acoustic_not_done
         note: >-
           **仍未做（如实登记）**：A3 介质体积场（ρ / c / 吸收沿途衰减 + 频带）、A4 衍射（UTD 近似）与
-          散射系数、A5 动态源/听者 + 实时档（GPU 档可选）；`vxl-phys-cli` 的 `acoustic` 子命令（把 cue
-          流接进 `record / replay`）也还没加。portal 表示法按文档 §8 的取舍先落"显式图元"，
+          散射系数、A5 动态源/听者 + 实时档（GPU 档可选）。portal 表示法按文档 §8 的取舍先落"显式图元"，
           "体素空洞自动识别"（从占据位找连通孔）作兜底仍未做。低频不承诺 / 不做双耳渲染见文档 §7。
+      - id: cli_wired
+        note: >-
+          **工具链已接（2026-10-11）**：`vxl-phys-cli acoustic <voxel> [ticks]` 打声学路径流（JSONL，
+          与感官域的 `cue` 同款 ⇒ 直接进 `record / replay` 的跨机器对拍）；声学几何是**声明的"房间"**
+          （地板 + `z = 1.5` 的墙 + 门洞），与碰撞体无关；听者站墙外侧 ⇒ 门洞路径 vs 墙透射约 **40×**。
+          判据 `crates/vxl-phys-cli/tests/cli.rs`。
     required_evidence:
       - implementation_path
       - tests
