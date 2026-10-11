@@ -267,7 +267,15 @@ impl World {
     }
 
     /// 注册复合体（子形状 = 形状 + 局部平移/旋转）→ compound id。
+    ///
+    /// **入口拒绝**（安全审计 F-13）：子序号走 `u16` 通道（`tag_child_features` 的
+    /// `space`/`feature` 两位共用它），子序号 ≥ 65536 回绕成 0 ⇒ 暖启动键与"非复合体"碰撞。
     pub fn add_compound(&mut self, children: Vec<CompoundChild>) -> u32 {
+        assert!(
+            children.len() <= u16::MAX as usize,
+            "复合体子形状数 {} 超过 u16 通道上限（回绕会与'非复合体'键碰撞）",
+            children.len()
+        );
         self.narrow.add_compound(children)
     }
 
