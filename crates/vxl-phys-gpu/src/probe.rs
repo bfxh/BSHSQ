@@ -39,8 +39,8 @@ pub struct PhaseParams {
     pub n_total: u32,
 }
 
-/// **极简 `block_on`**（不引 `pollster`）：wgpu 的 `request_device` 在原生后端是
-/// "立即就绪或一次性等待" ⇒ 用标准库的**空 waker**（`Waker::noop()`，stable）轮询即可。
+/// **极简 `block_on`**（不引 `pollster`）：wgpu 在原生后端是"立即就绪或一次性等待" ⇒ 空 waker（`Waker::noop()`）
+/// 轮询；`Pending` **睡 1 ms**——`yield_now()` 让不出 CPU，future 永不就绪（审计 F-19）时烧满一个核还不返回。
 fn block_on<F: std::future::Future>(fut: F) -> F::Output {
     use std::task::{Context, Poll, Waker};
     let mut cx = Context::from_waker(Waker::noop());
@@ -48,7 +48,7 @@ fn block_on<F: std::future::Future>(fut: F) -> F::Output {
     loop {
         match fut.as_mut().poll(&mut cx) {
             Poll::Ready(v) => return v,
-            Poll::Pending => std::thread::yield_now(),
+            Poll::Pending => std::thread::sleep(std::time::Duration::from_millis(1)),
         }
     }
 }
