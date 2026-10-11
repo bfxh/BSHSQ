@@ -177,6 +177,7 @@ pub struct ClothSheet {
 impl ClothSheet {
     /// 由顶点 + 三角构一张布片：**唯一边** = 距离约束（rest = 当前长度 ⇒ 注册态即零应变态）；
     /// 粒子质量按薄壳均分。`thickness ≤ 0` 兜底 1e-3（与 `MeshStore::shell_props` 同惯例）。
+    /// 索引越界的三角形**被丢弃**（同 `TriMesh::new`，安全审计 F-04）——不 panic、不静默截断索引。
     pub fn new(
         points: Vec<Vec3>,
         tris: Vec<[u32; 3]>,
@@ -188,7 +189,7 @@ impl ClothSheet {
         let rho = if density > 0.0 { density } else { 1.0 };
         let t = if thickness > 0.0 { thickness } else { 1e-3 };
         // 拓扑 + 注册长度 + 薄壳均分质量 —— 各自抽成纯函数（`new` 顶 god 门最长函数棘轮）。
-        let (cons, rest, bend, bend_rest) = topology(&tris, &points, n);
+        let (tris, cons, rest, bend, bend_rest) = topology(tris, &points, n);
         let mass = shell_mass(&tris, &points, rho, t);
         Self {
             pos: points,
@@ -504,17 +505,30 @@ fn bend_pairs(cons: &[[u32; 2]], n: usize) -> Vec<[u32; 2]> {
     bend
 }
 
-/// **拓扑 + 注册长度**的返回包（`(cons, rest, bend, bend_rest)`）—— 取别名只为过 `clippy::type_complexity`。
-type Topology = (Vec<[u32; 2]>, Vec<f32>, Vec<[u32; 2]>, Vec<f32>);
+/// **拓扑 + 注册长度**的返回包（`(tris, cons, rest, bend, bend_rest)`）—— 取别名只为过 `clippy::type_complexity`。
+type Topology = (
+    Vec<[u32; 3]>,
+    Vec<[u32; 2]>,
+    Vec<f32>,
+    Vec<[u32; 2]>,
+    Vec<f32>,
+);
 
 /// **拓扑 + 注册长度**：唯一边（结构+剪切）+ 二环对（弯曲），`rest` 取当前长度（注册态即零应变态）。
 /// 从 `new` 抽出（那里是全文件最长函数；god 门"合法交换"要求最长函数**严格下降**）。
-fn topology(tris: &[[u32; 3]], points: &[Vec3], n: usize) -> Topology {
-    let cons = unique_edges(tris);
+/// **索引越界的三角形在此丢弃**（口径同窄相 `TriMesh::new`）——否则下游 `pair_lengths` /
+/// `shell_mass` 直接索引 `points` ⇒ 构造期越界 panic（安全审计 F-04）。被丢三角的顶点
+/// 若无人引用 ⇒ 质量 0 ⇒ `inv_mass = 0`（等同钉住），不会留下"无处可去的 NaN 力"。
+fn topology(tris: Vec<[u32; 3]>, points: &[Vec3], n: usize) -> Topology {
+    let tris: Vec<[u32; 3]> = tris
+        .into_iter()
+        .filter(|t| (t[0] as usize) < n && (t[1] as usize) < n && (t[2] as usize) < n)
+        .collect();
+    let cons = unique_edges(&tris);
     let rest = pair_lengths(&cons, points);
     let bend = bend_pairs(&cons, n);
     let bend_rest = pair_lengths(&bend, points);
-    (cons, rest, bend, bend_rest)
+    (tris, cons, rest, bend, bend_rest)
 }
 
 /// **各对的注册长度**（`rest = 当前长度` ⇒ 注册态即零应变态）。
