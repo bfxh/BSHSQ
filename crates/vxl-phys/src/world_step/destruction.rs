@@ -126,7 +126,12 @@ impl DestructionExt for World {
                     per_round as usize,
                     SEED_JITTER,
                 );
-                total += self.fracture_voronoi(id, min, max, &seeds, density);
+                // 走**带预算**的同一条实现（`DestructionConfig::budget` 决定 site 上限），
+                // 而不是公开路径的默认档——策略侧的预算就是这里生效的（审计 F-14 的另一半）。
+                let domain = vxl_phys_core::Aabb { min, max };
+                total += crate::world_body::voronoi_fracture::extract(
+                    self, id, domain, &seeds, density, cfg.budget,
+                );
             } else {
                 total +=
                     fracture_voronoi_hier(self, id, center, r, (per_round, rounds_eff), density);
