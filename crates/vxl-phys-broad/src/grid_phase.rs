@@ -3,6 +3,12 @@ use super::*;
 
 pub(crate) type CellKey = (i32, i32, i32);
 
+/// **单体格数预算**（审计 F-07）：一个体最多占 `64³ = 262 144` 格，超出即**跳过该体**并计入
+/// [`GridBroadPhase::skipped`]。为什么需要它：`cell_of` 把坐标钳在 ±1e6，而格边长可以是 0.05 m
+/// ⇒ 单个"200 m 地面"或一个 Inf 体就会去插 `2×10⁶` 级的格（审计实测：release 9 s 撞 1.4 GB
+/// 内存、单步 2.9 s）。跳过而不是截断：**截断会让接触集合静默不完整**，跳过至少是可观测、可上报的。
+const MAX_CELLS_PER_BODY: u64 = 64 * 64 * 64;
+
 /// 均匀空间哈希网格宽相。
 pub struct GridBroadPhase {
     /// 网格边长（m）；应 ≥ 最大物体直径。
@@ -12,6 +18,8 @@ pub struct GridBroadPhase {
     pub(crate) cells_dynamic: HashMap<CellKey, Vec<u32>>,
     pub(crate) aabbs: Vec<Aabb>,
     pub(crate) pairs: Vec<(u32, u32)>,
+    /// 上一次 `compute_pairs` 里**因超预算被跳过**的体数（审计 F-07 的"上报"口）。
+    pub skipped: u64,
 }
 
 impl GridBroadPhase {
@@ -23,7 +31,22 @@ impl GridBroadPhase {
             cells_dynamic: HashMap::new(),
             aabbs: Vec::new(),
             pairs: Vec::new(),
+            skipped: 0,
         }
+    }
+
+    /// 该体 AABB 张成的格区间；**超预算 ⇒ `None`**（调用方跳过并计数）。
+    fn span(&self, aabb: &Aabb) -> Option<(CellKey, CellKey)> {
+        let (cmin, cmax) = (self.cell_of(aabb.min), self.cell_of(aabb.max));
+        let (sx, sy, sz) = (
+            (cmax.0 as i64 - cmin.0 as i64 + 1) as u64,
+            (cmax.1 as i64 - cmin.1 as i64 + 1) as u64,
+            (cmax.2 as i64 - cmin.2 as i64 + 1) as u64,
+        );
+        if sx.saturating_mul(sy).saturating_mul(sz) > MAX_CELLS_PER_BODY {
+            return None;
+        }
+        Some((cmin, cmax))
     }
 
     #[inline]
@@ -72,6 +95,7 @@ impl BroadPhase for GridBroadPhase {
         self.cells_static.clear();
         self.cells_dynamic.clear();
         self.pairs.clear();
+        self.skipped = 0;
 
         let n = bodies.len();
         self.aabbs.clear();
@@ -93,10 +117,10 @@ impl BroadPhase for GridBroadPhase {
             if bodies.is_dynamic(i) {
                 continue;
             }
-            let (cmin, cmax) = (
-                self.cell_of(self.aabbs[i].min),
-                self.cell_of(self.aabbs[i].max),
-            );
+            let Some((cmin, cmax)) = self.span(&self.aabbs[i]) else {
+                self.skipped += 1;
+                continue;
+            };
             Self::insert(&mut self.cells_static, cmin, cmax, i as u32);
         }
         // 动态：先全部插入（dyn-dyn 去重靠 j > i），再统一查询。
@@ -104,10 +128,10 @@ impl BroadPhase for GridBroadPhase {
             if !bodies.is_dynamic(i) {
                 continue;
             }
-            let (cmin, cmax) = (
-                self.cell_of(self.aabbs[i].min),
-                self.cell_of(self.aabbs[i].max),
-            );
+            let Some((cmin, cmax)) = self.span(&self.aabbs[i]) else {
+                self.skipped += 1;
+                continue;
+            };
             Self::insert(&mut self.cells_dynamic, cmin, cmax, i as u32);
         }
         // 查询。
@@ -115,10 +139,9 @@ impl BroadPhase for GridBroadPhase {
             if !bodies.is_dynamic(i) {
                 continue;
             }
-            let (cmin, cmax) = (
-                self.cell_of(self.aabbs[i].min),
-                self.cell_of(self.aabbs[i].max),
-            );
+            let Some((cmin, cmax)) = self.span(&self.aabbs[i]) else {
+                continue;
+            };
             let mut x = cmin.0;
             while x <= cmax.0 {
                 let mut y = cmin.1;
