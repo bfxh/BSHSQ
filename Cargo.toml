@@ -4,6 +4,7 @@ resolver = "2"
 #   core <- broad / narrow / integrate / solver / field / replay
 #   narrow <- terrain <- vxl-phys(门面)；soft <- vxl-phys(门面)（软体域：绳索/T1）
 #   destruction <- vxl-phys(门面)（M3：只做策略——冲量分级 / 碎片预算）
+#   sense / acoustics <- vxl-phys(门面)（两条输出侧只读域）；cli 在两者之后（工具链要能调它们）
 members = [
     "crates/vxl-phys-core",
     "crates/vxl-phys-broad",
@@ -25,9 +26,9 @@ members = [
     "crates/vxl-phys-gpu",
     "crates/vxl-phys-memfind",
     "crates/vxl-phys-ffi",
+    "crates/vxl-phys-acoustics",
     "crates/vxl-phys-sense",
     "crates/vxl-phys-cli",
-    "crates/vxl-phys-acoustics",
 ]
 
 [workspace.package]

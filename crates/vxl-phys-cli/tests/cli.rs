@@ -50,10 +50,33 @@ fn unknown_scene_and_subcommand_are_rejected_loudly() {
     assert!(e.contains("未知子命令") && e.contains("用法"), "{e}");
 }
 
+/// `acoustic`：声学路径流（JSONL）—— 逐字一致，且**真的含穿孔与透射泄漏两条新路径**。
+#[test]
+fn acoustic_stream_is_jsonl_and_deterministic() {
+    let (a, b) = (
+        ok(&["acoustic", "voxel", "180"]),
+        ok(&["acoustic", "voxel", "180"]),
+    );
+    assert_eq!(a, b, "声学路径流必须逐字一致（声学域的确定性契约）");
+    let first = a.lines().next().unwrap_or("");
+    assert!(
+        first.starts_with('{') && first.contains("\"kind\""),
+        "首行不是声学路径：{first}"
+    );
+    assert!(
+        a.contains("\"kind\":\"portal\""),
+        "流里必须有穿门洞的路径（A2）：{a}"
+    );
+    assert!(
+        a.contains("\"kind\":\"transmitted\""),
+        "流里必须有墙的透射泄漏（A2）：{a}"
+    );
+}
+
 #[test]
 fn help_is_self_describing() {
     let out = ok(&["help"]);
-    for need in ["demo", "hash", "cue", "ticks"] {
+    for need in ["demo", "hash", "cue", "acoustic", "ticks"] {
         assert!(out.contains(need), "用法缺 {need}：{out}");
     }
 }
