@@ -54,10 +54,14 @@ cargo run -p vxl-phys-cli -- hash  stack 600     # 末态 state_hash（两次跑
 cargo run -p vxl-phys-cli -- check drop  600     # 同场景跑两遍、逐观测点比对哈希（**CI 门**：不一致退出码 2）
 cargo run -p vxl-phys-cli -- cue   voxel 240     # 感官 cue 流（JSONL，一行一条）
 cargo run -p vxl-phys-cli -- hash  stack 600 --json   # 任意子命令加 --json ⇒ 机器可读（脚本/CI 取数）
+cargo run -p vxl-phys-cli -- record stack 600 base.jsonl   # 录一份观测点基线（一行一个 tick 的哈希）
+cargo run -p vxl-phys-cli -- replay stack 600 base.jsonl   # 与之逐行对拍（跨机器/跨版本复现检查）
 ```
 
 集成方最省事的"确定性自检"就是这条：把它塞进你自己的 CI，改引擎档位/依赖后跑一遍，
 `check` 报 PASS 才算你没把可复现性弄丢（它内部走 `Recorder` 的观测点 + 末态 `state_hash`）。
+要**跨机器/跨版本**比，就在参考机上 `record` 留一份 `*.jsonl` 基线，别的机器上 `replay` 逐行对拍
+（不一致会指到第一个不同的观测点；行数不同也判 FAIL）。
 
 `crates/vxl-phys-cli/src/lib.rs` 本身就是"只用公共 API 能写完整个工具"的样板 —— 接自己的场景
 抄它比抄仓库里的里程碑示例更快（后者是内部视角：直接摸 `bodies`/`manifolds` 做诊断）。
