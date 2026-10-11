@@ -51,6 +51,7 @@ impl Scene {
             absorption: &self.absorb,
             transmission: &self.trans,
             portals: &[],
+            edges: &[],
             medium,
         }
     }

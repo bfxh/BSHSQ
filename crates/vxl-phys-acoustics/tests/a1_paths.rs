@@ -86,6 +86,7 @@ fn closed_form_direct_and_first_reflection() {
         absorption: &absorb,
         transmission: &trans,
         portals: &[],
+        edges: &[],
         medium: None,
     };
     let w = world_with_source(Vec3::new(0.0, 1.0, 0.0));
@@ -138,6 +139,7 @@ fn wall_blocks_the_direct_path() {
         absorption: &absorb,
         transmission: &trans,
         portals: &[],
+        edges: &[],
         medium: None,
     };
     let w = world_with_source(Vec3::new(0.0, 1.0, 0.0));
@@ -162,6 +164,7 @@ fn budget_truncates_and_reports() {
         absorption: &absorb,
         transmission: &trans,
         portals: &[],
+        edges: &[],
         medium: None,
     };
     let w = world_with_source(Vec3::new(0.0, 1.0, 0.0));
@@ -189,6 +192,7 @@ fn zero_interference_state_hash_is_bit_identical() {
         absorption: &absorb,
         transmission: &trans,
         portals: &[],
+        edges: &[],
         medium: None,
     };
     let mut w = world_with_source(Vec3::new(0.0, 1.0, 0.0));
