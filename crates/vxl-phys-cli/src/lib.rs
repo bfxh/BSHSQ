@@ -171,21 +171,9 @@ pub fn run(args: &[String]) -> Result<String, String> {
         // **集成方的 CI 自检**：同场景跑两遍、每 60 tick 采一个观测点，逐点比对 `state_hash`。
         "check" => check(name, ticks, json),
         // **录观测点序列**（JSONL，一行一个 tick 的哈希）⇒ 给 `replay` 当基线。
-        "record" => match path {
-            Some(p) => {
-                let text = record_text(name, ticks)?;
-                match std::fs::write(p, &text) {
-                    Ok(()) => Ok(format!("已写入 {p}（{} 个观测点）\n", text.lines().count())),
-                    Err(e) => Err(format!("写不了 {p}：{e}")),
-                }
-            }
-            None => record_text(name, ticks),
-        },
+        "record" => record_cmd(name, ticks, path),
         // **回放对拍**：重跑场景，与基线逐行比对（跨机器/跨版本的复现检查）。
-        "replay" => match path {
-            Some(p) => replay(name, ticks, p),
-            None => Err("replay 需要基线文件：`replay <场景> [ticks] <基线.jsonl>`".to_string()),
-        },
+        "replay" => replay_cmd(name, ticks, path),
         "cue" => {
             let mut w = scene(name)?;
             let cfg = SenseConfig::default();
@@ -224,6 +212,26 @@ fn json_demo(name: &str, ticks: usize, w: &World, poses: &[Vec3]) -> String {
 /// `hash --json`。
 fn json_hash(name: &str, ticks: usize, h: u128) -> String {
     format!("{{\"scene\":\"{name}\",\"ticks\":{ticks},\"state_hash\":\"0x{h:032x}\"}}\n")
+}
+
+/// `record`：给了文件就写盘并回报行数，没给就打流（两条分支抽出来是为了压 `run` 的圈复杂度）。
+fn record_cmd(name: &str, ticks: usize, path: Option<&str>) -> Result<String, String> {
+    let text = record_text(name, ticks)?;
+    let Some(p) = path else {
+        return Ok(text);
+    };
+    match std::fs::write(p, &text) {
+        Ok(()) => Ok(format!("已写入 {p}（{} 个观测点）\n", text.lines().count())),
+        Err(e) => Err(format!("写不了 {p}：{e}")),
+    }
+}
+
+/// `replay`：基线文件是**必需**的（缺了就是用法错误，不该静默什么都不比）。
+fn replay_cmd(name: &str, ticks: usize, path: Option<&str>) -> Result<String, String> {
+    match path {
+        Some(p) => replay(name, ticks, p),
+        None => Err("replay 需要基线文件：`replay <场景> [ticks] <基线.jsonl>`".to_string()),
+    }
 }
 
 /// 观测点周期（ticks/行）——`record` 与 `replay` 共用的**格式常量**（改它 = 换格式）。
