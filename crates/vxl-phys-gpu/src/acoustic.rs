@@ -24,6 +24,19 @@ pub struct PairOut {
     pub gain: f32,
 }
 
+/// 一个 `(声源, 听者)` 对的**反射**读数（两次归约：有/无 + 最强那条的时延/增益/三角序号）。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReflectOut {
+    /// 是否找到一次镜面反射。
+    pub hit: bool,
+    /// 时延（秒）＝ `(d₁+d₂)/speed`。
+    pub delay: f32,
+    /// 能量增益 ＝ `(1-a)/(d₁+d₂)²`。
+    pub gain: f32,
+    /// 最强那条反射所在三角的序号（没有则为 `-1`）。
+    pub tri: f32,
+}
+
 /// `Params`（与 `acoustic.wgsl` 的 `struct Params` 逐字段对齐：16 B）。
 fn params_bytes(n_src: u32, n_lst: u32, n_tris: u32, speed: f32) -> Vec<u8> {
     let mut b = Vec::with_capacity(16);
@@ -54,21 +67,28 @@ fn tris_bytes(tris: &[[Vec3; 3]]) -> Vec<u8> {
     f32_bytes(&vals)
 }
 
-/// 在指定适配器上跑一趟直达核：返回 `(适配器名, 逐对读数)`。
-///
-/// 对序是 `src_i * n_lst + lst_i`（与 `acoustic.wgsl` 的展平口径一致）。
-pub fn direct_paths_on_adapter(
-    adapter_index: usize,
+/// 场景缓冲（两个入口共用：只有输出不同）。
+struct Buffers {
+    pb: wgpu::Buffer,
+    sb: wgpu::Buffer,
+    db: wgpu::Buffer,
+    tb: wgpu::Buffer,
+    ab: wgpu::Buffer,
+    ob: wgpu::Buffer,
+    rb: wgpu::Buffer,
+    n_pairs: usize,
+}
+
+/// 上传一批输入（几何/材质表都是平铺切片 ⇒ 直接就是卡的布局）。
+fn upload(
+    device: &wgpu::Device,
     srcs: &[Vec3],
     dsts: &[Vec3],
     tris: &[[Vec3; 3]],
+    absorb: &[f32],
     speed: f32,
-) -> Result<(String, Vec<PairOut>), String> {
-    let (name, device, queue) = crate::probe::device_for(adapter_index)?;
+) -> (Buffers, u64) {
     let n_pairs = srcs.len() * dsts.len();
-    if n_pairs == 0 {
-        return Ok((name, Vec::new()));
-    }
     let mk_storage = |label: &str, bytes: &[u8]| {
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(label),
@@ -89,6 +109,13 @@ pub fn direct_paths_on_adapter(
     let sb = mk_storage("acoustic.srcs", &vec4_bytes(srcs));
     let db = mk_storage("acoustic.dsts", &vec4_bytes(dsts));
     let tb = mk_storage("acoustic.tris", &tris_bytes(tris));
+    // 吸收表：即使不吃它（直达）也要给一个非空缓冲（零长 storage 不合法）。
+    let absorb = if absorb.is_empty() {
+        &[0.0f32][..]
+    } else {
+        absorb
+    };
+    let ab = mk_storage("acoustic.absorb", &f32_bytes(absorb));
     let out_bytes = (n_pairs * 16) as u64;
     let ob = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("acoustic.out"),
@@ -102,8 +129,31 @@ pub fn direct_paths_on_adapter(
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
+    (
+        Buffers {
+            pb,
+            sb,
+            db,
+            tb,
+            ab,
+            ob,
+            rb,
+            n_pairs,
+        },
+        out_bytes,
+    )
+}
+
+/// 跑指定入口并回读：每对 4 个 f32（`[kind, delay, gain, extra]`）。
+fn run_entry(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    b: &Buffers,
+    entry: &str,
+) -> Vec<[f32; 4]> {
+    let out_bytes = (b.n_pairs * 16) as u64;
     let bgl = mk_layout(
-        &device,
+        device,
         "acoustic.bgl",
         &[
             (0, Kind::Uniform),
@@ -111,6 +161,7 @@ pub fn direct_paths_on_adapter(
             (2, Kind::Ro),
             (3, Kind::Ro),
             (4, Kind::Rw),
+            (5, Kind::Ro),
         ],
     );
     // ⚠️ 这个变量必须叫 `shader`（词汇门只豁免这一种写法，见 `scripts/vocab_scan.sh` 头部）。
@@ -118,25 +169,26 @@ pub fn direct_paths_on_adapter(
         label: Some("acoustic.wgsl"),
         source: wgpu::ShaderSource::Wgsl(include_str!("acoustic.wgsl").into()),
     });
-    let pipe = mk_pipe(&device, &bgl, &shader, "acoustic.direct", "direct");
+    let pipe = mk_pipe(device, &bgl, &shader, "acoustic.pipe", entry);
     let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("acoustic.bg"),
         layout: &bgl,
         entries: &[
-            ent(0, &pb),
-            ent(1, &sb),
-            ent(2, &db),
-            ent(3, &tb),
-            ent(4, &ob),
+            ent(0, &b.pb),
+            ent(1, &b.sb),
+            ent(2, &b.db),
+            ent(3, &b.tb),
+            ent(4, &b.ob),
+            ent(5, &b.ab),
         ],
     });
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("acoustic.enc"),
     });
-    dispatch(&mut enc, &pipe, &bg, (n_pairs as u32).div_ceil(64).max(1));
-    enc.copy_buffer_to_buffer(&ob, 0, &rb, 0, out_bytes);
+    dispatch(&mut enc, &pipe, &bg, (b.n_pairs as u32).div_ceil(64).max(1));
+    enc.copy_buffer_to_buffer(&b.ob, 0, &b.rb, 0, out_bytes);
     queue.submit(Some(enc.finish()));
-    let slice = rb.slice(..);
+    let slice = b.rb.slice(..);
     let (tx, rx) = std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read, move |r| {
         tx.send(r).ok();
@@ -149,8 +201,8 @@ pub fn direct_paths_on_adapter(
         .ok();
     rx.recv().ok();
     let data = crate::mapped::mapped_view(slice);
-    let mut out = Vec::with_capacity(n_pairs);
-    for k in 0..n_pairs {
+    let mut rows = Vec::with_capacity(b.n_pairs);
+    for k in 0..b.n_pairs {
         let o = k * 16;
         let f = |j: usize| {
             f32::from_le_bytes([
@@ -160,13 +212,63 @@ pub fn direct_paths_on_adapter(
                 data[o + j * 4 + 3],
             ])
         };
-        out.push(PairOut {
-            blocked: f(3) > 0.5,
-            delay: f(1),
-            gain: f(2),
-        });
+        rows.push([f(0), f(1), f(2), f(3)]);
     }
     drop(data);
-    rb.unmap();
+    b.rb.unmap();
+    rows
+}
+
+/// 在指定适配器上跑一趟**直达核**（M1）：返回 `(适配器名, 逐对读数)`。
+///
+/// 对序是 `src_i * n_lst + lst_i`（与 `acoustic.wgsl` 的展平口径一致）。
+pub fn direct_paths_on_adapter(
+    adapter_index: usize,
+    srcs: &[Vec3],
+    dsts: &[Vec3],
+    tris: &[[Vec3; 3]],
+    speed: f32,
+) -> Result<(String, Vec<PairOut>), String> {
+    let (name, device, queue) = crate::probe::device_for(adapter_index)?;
+    if srcs.is_empty() || dsts.is_empty() {
+        return Ok((name, Vec::new()));
+    }
+    let (b, _) = upload(&device, srcs, dsts, tris, &[], speed);
+    let mut out = Vec::with_capacity(b.n_pairs);
+    for row in run_entry(&device, &queue, &b, "direct") {
+        out.push(PairOut {
+            blocked: row[3] > 0.5,
+            delay: row[1],
+            gain: row[2],
+        });
+    }
+    Ok((name, out))
+}
+
+/// 在指定适配器上跑一趟**一次镜面反射核**（M2）：逐对取**最强那条**反射（平局按三角序号取小）。
+///
+/// `absorb` 逐三角给（`0` = 全反射；缺了按空表 ⇒ 当 0 算）。
+pub fn reflected_on_adapter(
+    adapter_index: usize,
+    srcs: &[Vec3],
+    dsts: &[Vec3],
+    tris: &[[Vec3; 3]],
+    absorb: &[f32],
+    speed: f32,
+) -> Result<(String, Vec<ReflectOut>), String> {
+    let (name, device, queue) = crate::probe::device_for(adapter_index)?;
+    if srcs.is_empty() || dsts.is_empty() {
+        return Ok((name, Vec::new()));
+    }
+    let (b, _) = upload(&device, srcs, dsts, tris, absorb, speed);
+    let mut out = Vec::with_capacity(b.n_pairs);
+    for row in run_entry(&device, &queue, &b, "reflect") {
+        out.push(ReflectOut {
+            hit: row[0] > 0.5,
+            delay: row[1],
+            gain: row[2],
+            tri: row[3],
+        });
+    }
     Ok((name, out))
 }

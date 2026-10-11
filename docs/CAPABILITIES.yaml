@@ -521,8 +521,9 @@ capabilities:
       - id: acoustic_not_done
         note: >-
           **仍未做（如实登记）**：UTD 的 **Fresnel 积分**（A4 的 `D(θ)` 与漫反射口径都是工程近似）、
-          **GPU 档只落了直达核（M1）**：反射/绕射/散射/介质积分仍未上卡（见 `a5_gpu_direct_kernel`；
-          本层已落批处理入口与逐位等价契约，见 `a5_gpu_base`）。
+          **GPU 档落了直达 + 一次反射（M1/M2）**：绕射/散射/介质积分仍未上卡（见
+          `a5_gpu_direct_kernel` / `a5_gpu_reflect_kernel`；本层已落批处理入口与逐位等价契约，
+          见 `a5_gpu_base`）。
           portal 与衍射棱都按文档 §8 的取舍先落"显式图元"（衍射棱另有兜底，见下条）；
           **"体素空洞自动识别"**（从占据位找连通孔）仍未做。低频不承诺 / 不做双耳渲染见文档 §7。
       - id: a4_diffraction_landed
@@ -613,6 +614,19 @@ capabilities:
           实测（本机）：`NVIDIA GeForce RTX 4060 Ti | Vulkan | DiscreteGpu` 上 6 对全对。
           ⚠️ **CI 不覆盖**（既有口径 `cargo test --workspace --exclude vxl-phys-gpu`：headless 运行器
           无 GPU）⇒ 这条路只能在本机或 GPU 探针 job 上验；**反射/绕射/散射/介质积分仍未上卡**。
+      - id: a5_gpu_reflect_kernel
+        note: >-
+          **GPU 档的「一次镜面反射」（M2）已落地（2026-10-12）**：`acoustic.wgsl` 加 `reflect` 入口 ——
+          逐三角跑**镜像源法**（镜像听者 + 平面求交 + 重心内点 + 两段遮挡），逐对取**最强那条**
+          （平局按三角序号取小 ⇒ 确定），输出 `(hit, delay, gain, tri)`；吸收表按三角逐个读
+          （`(1-a)/(d₁+d₂)²`）。宿主侧把两个入口的缓冲/回读抽成共用件，并新增
+          `acoustic::reflected_on_adapter`。
+          探针 `crates/vxl-phys-gpu/tests/acoustic_reflect_probe.rs`：地板 `y = 0` 场景，参照值用
+          **镜像展开**手算（`L = |src' − dst|` ⇒ 时延 `L/c`、增益 `1/L²`），与卡上的逐三角实现
+          **不是同一份**；第二段再插一块**全吸收**挡板（它自己不成反射面）⇒ 折线被遮就**不得**
+          报出反射。实测（本机 RTX 4060 Ti | Vulkan）：两段顺序跑 2.6 s 全过。
+          ⚠️ **两条测试不要并行**：并行会各建一个 wgpu 设备，实测互相卡住 ⇒ 探针里合成**一条**测试
+          （文件头注写明了这条坑）。CI 同样不覆盖（`--exclude vxl-phys-gpu`）。
       - id: cli_wired
         note: >-
           **工具链已接（2026-10-11）**：`vxl-phys-cli acoustic <voxel> [ticks]` 打声学路径流（JSONL，
