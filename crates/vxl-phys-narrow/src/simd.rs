@@ -179,14 +179,14 @@ fn sat_scan_sse2(
             let cb = dot_lane(pb, nx, ny, nz);
             let sep1 = _mm_sub_ps(_mm_sub_ps(cb, rb), _mm_add_ps(ca, ra)); // min_b − max_a
             let sep2 = _mm_sub_ps(_mm_sub_ps(ca, ra), _mm_add_ps(cb, rb)); // min_a − max_b
-                                                                           // 标量是 `if sep1 >= sep2 {sep1} else {sep2}`；flip = !(sep1 >= sep2)
-            flags = _mm_movemask_ps(_mm_cmpnge_ps(sep1, sep2));
-            // 操作数顺序是承重的：标量取 sep1（平局时 `sep1 >= sep2` 为真），而 Intel
-            // MAXPS 在相等时返回**第二操作数** ⇒ 必须写成 `max(sep2, sep1)` 才让平局也取
-            // sep1。非平局时 max 对称、结果不变；平局带符号零时（sep1 = +0.0、sep2 = −0.0）
-            // 顺序写反会让 best_sep 的符号位与标量分叉，而那个值进确定性哈希。
-            // 见 tests::sat_tie_break_matches_scalar_on_signed_zero（随机采样撞不到这个平局）。
-            let sep = _mm_max_ps(sep2, sep1);
+                                                                           // **同一谓词 + 位选择**（审计 F-12）：标量是 `sep1 >= sep2 ? sep1 : sep2`，
+                                                                           // 这里让**同一个** `ge` 既定 `flags`（法线方向）又定 `sep`（值）。旧写法
+                                                                           // `_mm_max_ps(sep2, sep1)` 在 NaN 时按 Intel 语义返回第二操作数，而标量的 `>=`
+                                                                           // 对 NaN 判假会取 `sep2` ⇒ 两条路径各有各的算术 ⇒ 分类可分叉。平局（含带符号零）由
+                                                                           // 同一个 `>=` 定夺 ⇒ 与标量逐位同；判据见 tests 的平局与极值两条（后者是**扩覆盖**）。
+            let ge = _mm_cmpge_ps(sep1, sep2);
+            flags = _mm_movemask_ps(ge) ^ 0b1111;
+            let sep = _mm_or_ps(_mm_and_ps(ge, sep1), _mm_andnot_ps(ge, sep2));
             _mm_storeu_ps(sep_arr.as_mut_ptr(), sep);
         }
         // 标量侧：按轴序复刻三条规则（退化跳过 / 早退 / 严格择优）。
@@ -215,173 +215,4 @@ fn sat_scan_sse2(
 }
 
 #[cfg(all(test, target_arch = "x86_64"))]
-mod tests {
-    use super::*;
-
-    fn v(x: f32, y: f32, z: f32) -> Vec3 {
-        Vec3::new(x, y, z)
-    }
-
-    /// 轴表（盒对形态：12 面轴 + 至多 9 棱叉积轴）——与 `sat()` 的构造同序。
-    fn axes_of(aa: &[Vec3; 3], ab: &[Vec3; 3]) -> Vec<Vec3> {
-        let mut out = Vec::new();
-        for s in [
-            (1.0, 0.0, 0.0),
-            (-1.0, 0.0, 0.0),
-            (0.0, 1.0, 0.0),
-            (0.0, -1.0, 0.0),
-            (0.0, 0.0, 1.0),
-            (0.0, 0.0, -1.0),
-        ] {
-            out.push(aa[0] * s.0 + aa[1] * s.1 + aa[2] * s.2);
-        }
-        for s in [
-            (1.0, 0.0, 0.0),
-            (-1.0, 0.0, 0.0),
-            (0.0, 1.0, 0.0),
-            (0.0, -1.0, 0.0),
-            (0.0, 0.0, 1.0),
-            (0.0, 0.0, -1.0),
-        ] {
-            out.push(ab[0] * s.0 + ab[1] * s.1 + ab[2] * s.2);
-        }
-        let (ea, eb) = ([aa[1], aa[2], aa[0]], [ab[1], ab[2], ab[0]]);
-        for x in ea {
-            for y in eb {
-                let c = x.cross(y);
-                let l2 = c.length_squared();
-                if l2 > 1e-8 {
-                    out.push(c * (1.0 / l2.sqrt()));
-                }
-            }
-        }
-        out
-    }
-
-    /// 随机**正交基**（Gram-Schmidt）——模拟真实盒姿态；随机基会让 SAT 几乎总是
-    /// 分离，样本覆盖不到接触分支。
-    fn basis(rnd: &mut impl FnMut() -> f32) -> [Vec3; 3] {
-        let (mut a, mut b, mut c) = (
-            v(rnd() * 2.0 - 1.0, rnd() * 2.0 - 1.0, rnd() * 2.0 - 1.0),
-            v(rnd() * 2.0 - 1.0, rnd() * 2.0 - 1.0, rnd() * 2.0 - 1.0),
-            v(rnd() * 2.0 - 1.0, rnd() * 2.0 - 1.0, rnd() * 2.0 - 1.0),
-        );
-        a = a * (1.0 / a.length());
-        b = b - a * b.dot(a);
-        b = b * (1.0 / b.length());
-        c = c - a * c.dot(a) - b * c.dot(b);
-        c = c * (1.0 / c.length());
-        [a, b, c]
-    }
-
-    /// SIMD 与标量参考在随机姿态/尺寸/位移上**逐位一致**（含退化与分离两类）。
-    #[test]
-    fn simd_matches_scalar_bitwise() {
-        let mut seed = 0x1234_5678_9abc_def0u64;
-        let mut rnd = || {
-            seed ^= seed << 13;
-            seed ^= seed >> 7;
-            seed ^= seed << 17;
-            (seed >> 11) as f32 / (1u64 << 53) as f32
-        };
-        let mut sep_cnt = 0usize;
-        let mut hit_cnt = 0usize;
-        for _ in 0..4000 {
-            let ax = basis(&mut rnd);
-            let bx = basis(&mut rnd);
-            let ha = v(0.2 + rnd() * 0.3, 0.2 + rnd() * 0.3, 0.2 + rnd() * 0.3);
-            let hb = v(0.2 + rnd() * 0.3, 0.2 + rnd() * 0.3, 0.2 + rnd() * 0.3);
-            let pa = v(rnd() * 3.0 - 1.5, rnd() * 3.0 - 1.5, rnd() * 3.0 - 1.5);
-            let pb = pa + v(rnd() * 1.6 - 0.8, rnd() * 1.6 - 0.8, rnd() * 1.6 - 0.8);
-            let skin = 0.01;
-            let axes = axes_of(&ax, &bx);
-            let s = sat_scan_scalar(&axes, ha, &ax, pa, hb, &bx, pb, skin);
-            let d = sat_scan_sse2(&axes, ha, &ax, pa, hb, &bx, pb, skin);
-            match (s, d) {
-                (None, None) => sep_cnt += 1,
-                (Some((s0, sn, si)), Some((d0, dn, di))) => {
-                    hit_cnt += 1;
-                    assert_eq!(s0.to_bits(), d0.to_bits(), "best sep 不等");
-                    assert_eq!(si, di, "best idx 不等");
-                    assert_eq!(sn.x.to_bits(), dn.x.to_bits(), "法线 x 不等");
-                    assert_eq!(sn.y.to_bits(), dn.y.to_bits(), "法线 y 不等");
-                    assert_eq!(sn.z.to_bits(), dn.z.to_bits(), "法线 z 不等");
-                }
-                (a, b) => panic!(
-                    "分支不一致：标量 {:?} vs SIMD {:?}",
-                    a.is_some(),
-                    b.is_some()
-                ),
-            }
-        }
-        // 两类都必须被覆盖到（否则测试没有鉴别力）。
-        assert!(sep_cnt > 100, "分离样本太少：{sep_cnt}");
-        assert!(hit_cnt > 100, "命中样本太少：{hit_cnt}");
-    }
-
-    /// **符号零平局**：两条 sep 恰好都为零、符号相反时，`_mm_max_ps` 的平局规则
-    /// （Intel：相等取**第二操作数**）与标量参考的 `if sep1 >= sep2 { sep1 }` 会分叉，
-    /// 使 `best_sep` 的符号位不同——而它进确定性哈希。
-    ///
-    /// 随机采样**撞不到**这个平局（`simd_matches_scalar_bitwise` 的 4000 个样本里概率 ~0），
-    /// 所以这里给确定性的构造输入把它钉住：轴取 +X、两盒半宽均为零、A 心 x = −0.0、B 心 x = 0.0 ⇒
-    /// `sep1 = (cb − rb) − (ca + ra) = 0.0 − (−0.0) = +0.0`，
-    /// `sep2 = (ca − ra) − (cb + rb) = (−0.0 − 0.0) − 0.0 = −0.0`（IEEE：混号零相加归 +0.0，
-    /// 但 `(−0.0) − (+0.0)` 仍是 −0.0）。两条路径必须逐位同结果。
-    #[test]
-    fn sat_tie_break_matches_scalar_on_signed_zero() {
-        let ax = [v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0), v(0.0, 0.0, 1.0)];
-        let axes = vec![v(1.0, 0.0, 0.0)];
-        let zero = v(0.0, 0.0, 0.0);
-        let neg_zero_x = v(-0.0, 0.0, 0.0);
-        let s = sat_scan_scalar(&axes, zero, &ax, neg_zero_x, zero, &ax, zero, 0.01)
-            .expect("应有分离解（sep 为零、不被 skin 早退）");
-        let d = sat_scan_sse2(&axes, zero, &ax, neg_zero_x, zero, &ax, zero, 0.01)
-            .expect("应有分离解（sep 为零、不被 skin 早退）");
-        assert_eq!(
-            s.0.to_bits(),
-            d.0.to_bits(),
-            "平局时 best_sep 的符号位分叉：标量 {}（{:#010x}）vs SIMD {}（{:#010x}）",
-            s.0,
-            s.0.to_bits(),
-            d.0,
-            d.0.to_bits()
-        );
-        assert_eq!(s.2, d.2, "平局时 best_idx 不等");
-        // 构造前提自检：两条路径都必须给 **+0.0**。若构造失效（例如两个 sep 同号），
-        // 上面那条等式就退化成恒真、失去鉴别力——所以把期望值也钉死。
-        // 若 MAXPS 的操作数顺序写反（平局取 sep2 = −0.0），这里会以符号位不同报红。
-        assert_eq!(
-            s.0.to_bits(),
-            0.0f32.to_bits(),
-            "标量平局应取 sep1（+0.0），实为 {}",
-            s.0
-        );
-        assert_eq!(
-            d.0.to_bits(),
-            0.0f32.to_bits(),
-            "SIMD 平局必须与标量同取 +0.0，实为 {}",
-            d.0
-        );
-    }
-
-    /// 轴数不是 4 的倍数（21、12、13）时尾组 lane 不得被消费——与标量对比。
-    #[test]
-    fn simd_tail_lanes_are_ignored() {
-        let ax = [v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0), v(0.0, 0.0, 1.0)];
-        let bx = ax;
-        let ha = v(0.5, 0.5, 0.5);
-        let pa = v(0.0, 0.0, 0.0);
-        let pb = v(0.95, 0.0, 0.0);
-        for take in [1usize, 2, 3, 4, 5, 9, 12, 13, 21] {
-            let axes: Vec<Vec3> = (0..take).map(|k| ax[k % 3]).collect();
-            let s = sat_scan_scalar(&axes, ha, &ax, pa, ha, &bx, pb, 0.01);
-            let d = sat_scan_sse2(&axes, ha, &ax, pa, ha, &bx, pb, 0.01);
-            assert_eq!(s.is_some(), d.is_some(), "take={take} 分支不一致");
-            if let (Some((s0, _, si)), Some((d0, _, di))) = (s, d) {
-                assert_eq!(s0.to_bits(), d0.to_bits(), "take={take} sep 不等");
-                assert_eq!(si, di, "take={take} idx 不等");
-            }
-        }
-    }
-}
+mod tests;
