@@ -453,6 +453,45 @@ capabilities:
       本仓第一条"输出侧"域。它同时是 `ROUTE.md` §7 那条"域侧 API 走扩展 trait"的**第一次实考**：
       若 S1 能在**不碰 `World` 任何既有方法**的前提下落地，那条设计判据就被证实可用。
 
+  - id: PHY-SCOPE-ACOUSTIC-PROPAGATION
+    title: 声学传播（射线追踪音频：反射/衍射/遮挡 + 孔隙传声 + 介质体积）
+    scope: included
+    implementation: absent
+    implementation_path: null
+    evidence:
+      - id: user_scope
+        note: >-
+          用户 2026-10-11 点名："射线追踪音频……可以听见房间外的声音，可以按体积密度等等，
+          可以不受碰撞体的影响直接利用建模的缝隙然后听见声音——在有限的条件下还原真实声音。"
+          ⇒ 登记为 included。
+      - id: design_doc
+        note: >-
+          调研 + 落地方案见 `docs/SURVEY-ACOUSTIC-RAYTRACING.md`（技术全景 / 系统与论文清单 /
+          本仓差距 / 三条设计原则 / A1–A5 分期与判据 / 复用点与禁区 / 边界 / 三处待裁）。
+      - id: design_principles
+        note: >-
+          ① **声学几何 ≠ 碰撞几何**（声学层吃建模面，不读 `BodySet` 的碰撞形状）；
+          ② **缝隙/开口 = 显式 portal 拓扑**（开口当二级声源；无 portal 的墙按材质透射系数泄漏）；
+          ③ **介质 = 体积参数场**（密度/声速/吸收沿途衰减，"按体积密度"落在这里）。
+      - id: contracts
+        note: >-
+          三条契约与感官域同款（CI 可判）：零干扰（开/关声学层 `state_hash` 逐位不变）、
+          确定性（逐字相同的声学 cue 序列；复用 `record/replay` 跨机器对拍）、
+          预算（每 tick 声线数/反弹/portal 穿越有上界，超了按优先级截断并上报）。
+      - id: reuse
+        note: >-
+          可复用 `TriMesh`/`VoxelVolume` 的几何与 `MeshGrid` 桶、`vxl-phys-broad` 的 BVH 射线查询、
+          `vxl-phys-sense` 的 cue 流与工具链模板、`vxl-phys-field` 的场注册表。
+          禁区：不往 `World` 加方法、不往 `Material` 塞声学字段（属性放外部表）、不在 `step()` 里做重活。
+    required_evidence:
+      - implementation_path
+      - tests
+    decision_id: null
+    owner: maintainer
+    notes: >-
+      落点 = 新 crate `vxl-phys-acoustics`（门面之上、纯只读，API 走扩展 trait）。
+      首期 A1（静态直达+一次反射+遮挡）——低频波动效应**不承诺**（几何声学的边界，写进文档 §7）。
+
   - id: PHY-SCOPE-HULL
     title: 多边形（凸体外壳）作为刚体形状
     scope: included
