@@ -1,10 +1,13 @@
 //! # vxl-phys-acoustics —— 声学传播（射线追踪音频）**A1 + A2**
 //!
 //! 设计与调研见 `docs/SURVEY-ACOUSTIC-RAYTRACING.md`（技术全景 / 系统与论文清单 / A1–A5 分期）。
-//! 本 crate 已落两期：
+//! 本 crate 已落三期：
 //!
 //! - **A1**：静态场景的**直达 + 一次镜面反射（镜像源法）+ 遮挡**，单频带材质表（吸声系数）；
-//! - **A2**：**portal 穿孔传声**（开口当二级声源）+ **无 portal 的墙按透射系数泄漏**。
+//! - **A2**：**portal 穿孔传声**（开口当二级声源）+ **无 portal 的墙按透射系数泄漏**；
+//! - **A3**：**介质体积场**（声速 + 沿程吸收，[`AcousticMedium`]）—— 每条路径的时延与衰减
+//!   按沿途介质积分（分层介质给[解析积分](AcousticMedium::segment_exact)，其它场退回
+//!   固定步长中点法）。
 //!
 //! ## 三条设计原则（文档 §4 的落实）
 //!
@@ -14,8 +17,9 @@
 //! 2. **缝隙/开口是显式拓扑**（A2 已落）：开口由作者以 [`Portal`]（四边形 + 开启比例）交进来，
 //!    本层**不看碰撞体**；传播时开口当二级声源产出 `Portal` 路径（开启比例线性衰减 ⇒ 缝宽→衰减
 //!    单调），没登记 portal 的墙按逐面**透射系数**（[`AcousticGeometry::transmission`]）少量泄漏。
-//! 3. **介质是体积参数场**（A3）：A1 只有**常数声速**（[`AcousticConfig::speed_of_sound`]）；
-//!    密度/吸收的空间变化留到 A3。
+//! 3. **介质是体积参数场**（A3 已落）：[`AcousticGeometry::medium`] 由调用方给一个**只读**的
+//!    [`AcousticMedium`]（`None` = 均匀空气 = A1/A2 行为）；吸收按 `exp(-α·len)` 沿途累乘、
+//!    声速沿途积分。**折射（声线折转）仍未做** —— A3 的直线几何是显式边界（文档 §7）。
 //!
 //! ## 三条契约（与 `vxl-phys-sense` 同款，CI 可判）
 //!
@@ -29,6 +33,11 @@
 
 #![forbid(unsafe_code)]
 
+mod medium;
+
+pub use medium::{AcousticMedium, LayeredMedium, Medium, Slab};
+
+use medium::seg_effect;
 use vxl_phys::{Vec3, World};
 
 /// **声学几何**（建模面：顶点 + 三角 + 逐面吸声系数 + 逐面透射系数 + 开口表）。
@@ -44,6 +53,9 @@ pub struct AcousticGeometry<'a> {
     pub transmission: &'a [f32],
     /// **显式开口拓扑**（A2）：作者标的开口；空 = 场景没有开口（A1 行为）。
     pub portals: &'a [Portal],
+    /// **介质体积场**（A3）：`None` = 均匀空气（用 [`AcousticConfig::speed_of_sound`]、无吸收，
+    /// 数值与 A1 / A2 逐位相同）。
+    pub medium: Option<&'a dyn AcousticMedium>,
 }
 
 /// 一个**开口**（A2）：四边形（四个角，顶点顺序无要求）+ **开启比例**。
@@ -71,6 +83,9 @@ pub struct AcousticConfig {
     pub max_reflections: u32,
     /// 每个声源最多尝试几个开口（A2；`0` = 不算穿孔传声）。
     pub max_portals: u32,
+    /// 介质积分的**采样步长**（米；只在中点法回退时用到，下限 `1e-3`）。解析积分（分层介质）
+    /// 不受它影响。
+    pub medium_step: f32,
     /// 每 tick 最多产出多少条路径（硬预算）。
     pub max_paths: usize,
 }
@@ -81,6 +96,7 @@ impl Default for AcousticConfig {
             speed_of_sound: 343.0,
             max_reflections: 24,
             max_portals: 8,
+            medium_step: 0.5,
             max_paths: 16,
         }
     }
@@ -219,6 +235,8 @@ fn push_direct(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) {
     }
     // 约定：`dir` = **从听者指向来声**（空间化器要的就是入射方向，不是"声源→听者"）。
     let dir = ((src - cx.listener.pos) * (1.0 / dist)).normalize();
+    // A3：沿途介质给的时延与吸收（无介质场 ⇒ `len / c`、衰减因子 1.0，与 A1/A2 逐位相同）。
+    let (delay, atten) = seg_effect(cx.geo.medium, src, cx.listener.pos, c, cx.cfg.medium_step);
     let kind = if leak < 1.0 {
         PathKind::Transmitted
     } else {
@@ -226,8 +244,8 @@ fn push_direct(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) {
     };
     out.push(SoundPath {
         source: cx.si,
-        delay: dist / c,
-        gain: leak / (dist * dist),
+        delay,
+        gain: leak * atten / (dist * dist),
         dir: [dir.x, dir.y, dir.z],
         kind,
     });
@@ -265,10 +283,13 @@ fn push_portals(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) 
         let d2 = (cx.listener.pos - c).length().max(1e-3);
         let reach = d1 + d2;
         let dirv = (c - cx.listener.pos) * (1.0 / d2);
+        // A3：两段各自的介质时延/吸收（球面扩散仍用几何距离 `reach`）。
+        let (t1, a1) = seg_effect(cx.geo.medium, cx.src, c, cx.c, cx.cfg.medium_step);
+        let (t2, a2) = seg_effect(cx.geo.medium, c, cx.listener.pos, cx.c, cx.cfg.medium_step);
         out.push(SoundPath {
             source: cx.si,
-            delay: reach / cx.c,
-            gain: open / (reach * reach),
+            delay: t1 + t2,
+            gain: open * a1 * a2 / (reach * reach),
             dir: [dirv.x, dirv.y, dirv.z],
             kind: PathKind::Portal,
         });
@@ -325,10 +346,13 @@ fn push_reflections(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'
         let d1 = (hit - src).length().max(1e-3);
         let d2 = (l - hit).length().max(1e-3);
         let dirv = (hit - l) * (1.0 / d2);
+        // A3：两段各自的介质时延/吸收（吸声系数仍是面属性，两者相乘）。
+        let (t1, a1) = seg_effect(geo.medium, src, hit, c, cfg.medium_step);
+        let (t2, a2) = seg_effect(geo.medium, hit, l, c, cfg.medium_step);
         out.push(SoundPath {
             source: cx.si,
-            delay: (d1 + d2) / c,
-            gain: (1.0 - absorb.clamp(0.0, 1.0)) / ((d1 + d2) * (d1 + d2)),
+            delay: t1 + t2,
+            gain: (1.0 - absorb.clamp(0.0, 1.0)) * a1 * a2 / ((d1 + d2) * (d1 + d2)),
             dir: [dirv.x, dirv.y, dirv.z],
             kind: PathKind::Reflected,
         });

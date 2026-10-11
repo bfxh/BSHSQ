@@ -17,7 +17,8 @@
 // 用 `use vxl_phys::prelude::*;` 才是我们要给他们的便利，见 `docs/QUICKSTART.md`）。
 use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::{
-    jsonl as aco_jsonl, AcousticConfig, AcousticGeometry, AcousticsExt, Listener, Portal, SoundPath,
+    jsonl as aco_jsonl, AcousticConfig, AcousticGeometry, AcousticMedium, AcousticsExt,
+    LayeredMedium, Listener, Medium, Portal, SoundPath,
 };
 use vxl_phys_replay::Recorder;
 use vxl_phys_sense::{jsonl, Cue, SenseConfig, SenseExt};
@@ -215,15 +216,28 @@ struct Room {
 }
 
 impl Room {
-    fn geom(&self) -> AcousticGeometry<'_> {
+    fn geom<'a>(&'a self, medium: Option<&'a dyn AcousticMedium>) -> AcousticGeometry<'a> {
         AcousticGeometry {
             verts: &self.verts,
             tris: &self.tris,
             absorption: &self.absorb,
             transmission: &self.trans,
             portals: &self.portals,
+            medium,
         }
     }
+}
+
+/// **介质体积场**（A3）：地板附近一层"雾 / 湿热层"（声速略低、略有吸收），上面是常温空气。
+///
+/// 分层介质给**解析积分**（按层边界切段）⇒ 时延与衰减都不是采样近似。要换密度/温度剖面，
+/// 实现 `AcousticMedium` 交进来即可（也可用固定步长回退档）。
+fn medium() -> LayeredMedium {
+    let haze = Medium {
+        speed_of_sound: 330.0,
+        attenuation: 0.05,
+    };
+    LayeredMedium::split(1.0, haze, Medium::AIR)
 }
 
 /// 一间"声学房间"：地板（y = 0.25，与体素地面同高）+ 墙（z = 1.5，透射 0.02）+ **门洞开口**（全开）。
@@ -265,7 +279,8 @@ fn room() -> Room {
 fn acoustic_cmd(name: &str, ticks: usize) -> Result<String, String> {
     let mut w = scene(name)?;
     let room = room();
-    let geo = room.geom();
+    let field = medium();
+    let geo = room.geom(Some(&field));
     let cfg = AcousticConfig::default();
     let listener = Listener {
         pos: Vec3::new(0.0, 1.0, 3.0),
