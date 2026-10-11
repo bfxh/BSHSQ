@@ -17,7 +17,7 @@
 // 用 `use vxl_phys::prelude::*;` 才是我们要给他们的便利，见 `docs/QUICKSTART.md`）。
 use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::{
-    jsonl as aco_jsonl, AcousticConfig, AcousticGeometry, AcousticMedium, AcousticsExt,
+    jsonl as aco_jsonl, AcousticConfig, AcousticGeometry, AcousticMedium, AcousticsExt, Edge,
     LayeredMedium, Listener, Medium, Portal, SoundPath, BANDS,
 };
 use vxl_phys_replay::Recorder;
@@ -213,6 +213,8 @@ struct Room {
     absorb: Vec<[f32; BANDS]>,
     trans: Vec<[f32; BANDS]>,
     portals: Vec<Portal>,
+    /// **衍射棱**（A4）：门框靠外那一侧的竖棱 —— 声音会从门框绕到墙后（"拐角后仍可闻"）。
+    edges: Vec<Edge>,
 }
 
 impl Room {
@@ -223,6 +225,7 @@ impl Room {
             absorption: &self.absorb,
             transmission: &self.trans,
             portals: &self.portals,
+            edges: &self.edges,
             medium,
         }
     }
@@ -281,6 +284,11 @@ fn room() -> Room {
                 Vec3::new(-1.0, 2.5, 1.5),
             ],
             open: 1.0,
+        }],
+        edges: vec![Edge {
+            a: Vec3::new(1.0, 0.25, 1.5),
+            b: Vec3::new(1.0, 2.5, 1.5),
+            coeff: [0.5, 0.35, 0.2],
         }],
     }
 }

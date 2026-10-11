@@ -1,4 +1,4 @@
-//! # vxl-phys-acoustics —— 声学传播（射线追踪音频）**A1 + A2 + A3**
+//! # vxl-phys-acoustics —— 声学传播（射线追踪音频）**A1 + A2 + A3 + A4（衍射）**
 //!
 //! 设计与调研见 `docs/SURVEY-ACOUSTIC-RAYTRACING.md`（技术全景 / 系统与论文清单 / A1–A5 分期）。
 //! 本 crate 已落三期：
@@ -9,6 +9,10 @@
 //!   低/中/高：吸声、透射、介质吸收**逐带**，输出 [`SoundPath::bands`]）—— 每条路径的时延与
 //!   逐带衰减按沿途介质积分（分层介质给[解析积分](AcousticMedium::segment_exact)，其它场退回
 //!   固定步长中点法）。
+//! - **A4（衍射那一半）**：**绕射**（[`Edge`] = 作者显式声明的衍射棱）—— 棱上取 **Fermat 点**
+//!   （定次数二分，确定性），只在**阴影里**产出 `Diffracted` 路径，能量口径 `coeff_b · D(θ) ·
+//!   介质衰减 / (d1·d2)`，`D(θ) = (1 + cosθ)/2`（掠射时与自由场连续）。**散射系数与 UTD 的
+//!   Fresnel 积分仍未做**。
 //!
 //! ## 三条设计原则（文档 §4 的落实）
 //!
@@ -64,6 +68,8 @@ pub struct AcousticGeometry<'a> {
     pub transmission: &'a [[f32; BANDS]],
     /// **显式开口拓扑**（A2）：作者标的开口；空 = 场景没有开口（A1 行为）。
     pub portals: &'a [Portal],
+    /// **显式衍射棱拓扑**（A4）：作者标的棱；空 = 场景没有绕射（A1–A3 行为）。
+    pub edges: &'a [Edge],
     /// **介质体积场**（A3）：`None` = 均匀空气（用 [`AcousticConfig::speed_of_sound`]、无吸收，
     /// 数值与 A1 / A2 逐位相同）。
     pub medium: Option<&'a dyn AcousticMedium>,
@@ -77,6 +83,18 @@ pub struct AcousticGeometry<'a> {
 pub struct Portal {
     pub quad: [Vec3; 4],
     pub open: f32,
+}
+
+/// 一条**衍射棱**（A4）：两个端点 + 逐带**绕射系数**。
+///
+/// 与 [`Portal`] 同一条思路 —— **显式拓扑**：作者标哪条棱参与绕射（不从三角网格"自动认边"：
+/// 那要先定凸凹与共面语义，留作兜底路线，见设计文档 §8）。棱上任取不了点：本层取
+/// **Fermat 点**（让 `|P−声源| + |P−听者|` 最小的那个点，见 `fermat_point`）。
+pub struct Edge {
+    pub a: Vec3,
+    pub b: Vec3,
+    /// 逐带绕射系数（能量口径：`coeff_b · D(θ) · 介质衰减 / (d1·d2)`）；`0` = 该带不绕。
+    pub coeff: [f32; BANDS],
 }
 
 /// 听者（A1 只有一个点 + 半径：进入该球即可闻）。
@@ -94,6 +112,8 @@ pub struct AcousticConfig {
     pub max_reflections: u32,
     /// 每个声源最多尝试几个开口（A2；`0` = 不算穿孔传声）。
     pub max_portals: u32,
+    /// 每个声源最多尝试几条衍射棱（A4；`0` = 不算绕射）。
+    pub max_edges: u32,
     /// 介质积分的**采样步长**（米；只在中点法回退时用到，下限 `1e-3`）。解析积分（分层介质）
     /// 不受它影响。
     pub medium_step: f32,
@@ -107,13 +127,14 @@ impl Default for AcousticConfig {
             speed_of_sound: 343.0,
             max_reflections: 24,
             max_portals: 8,
+            max_edges: 8,
             medium_step: 0.5,
             max_paths: 16,
         }
     }
 }
 
-/// 路径种类（A2 起四档；A4 再加 `Diffracted`）。
+/// 路径种类（现在五档）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PathKind {
     /// 直线可达。
@@ -122,6 +143,8 @@ pub enum PathKind {
     Transmitted,
     /// 经一个**开口**（portal）穿过来（A2）。
     Portal,
+    /// 绕过一条**衍射棱**过来（A4；只在阴影里产出）。
+    Diffracted,
     /// 一次镜面反射。
     Reflected,
 }
@@ -155,6 +178,8 @@ pub struct AcousticStats {
     pub leaked: usize,
     /// 穿孔路径数（A2）。
     pub portals: usize,
+    /// 绕射路径数（A4）。
+    pub diffracted: usize,
     /// 反射路径数。
     pub reflected: usize,
     /// 因遮挡被丢的直达路径数。
@@ -208,6 +233,7 @@ impl AcousticsExt for World {
             };
             push_direct(out, &mut st, &cx);
             push_portals(out, &mut st, &cx);
+            push_diffraction(out, &mut st, &cx);
             push_reflections(out, &mut st, &cx);
         }
         st
@@ -333,6 +359,96 @@ fn push_portals(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) 
 /// 开口的中心（四个角的算术平均）——A2 把开口当点声源，取它的几何中心。
 fn centroid(quad: &[Vec3; 4]) -> Vec3 {
     (quad[0] + quad[1] + quad[2] + quad[3]) * 0.25
+}
+
+/// Fermat 二分次数：定次数、无早退 ⇒ 逐位可复现（`f32` 尾数 24 位，48 次远超够用）。
+const FERMAT_ITERS: u32 = 48;
+
+/// **A4：绕射（工程近似）** —— `声源 → 棱上的 Fermat 点 → 听者`，**只在阴影里**产出
+/// （直达没被挡就不算绕射，免得与直达重复计能；这也就是"拐角后仍可闻"的语义）。
+///
+/// 能量口径：`coeff_b · D(θ) · 介质衰减 / (d1·d2)` —— `1/(d1·d2)` 是 UTD 的**远场形状**，
+/// `D(θ) = (1 + cosθ)/2`（`θ` = 两段折线的夹角）：**掠射**（刚被挡）时 `D → 1`（与自由场连续），
+/// 越往阴影深处越小。⚠️ **不做** Fresnel 积分、也不做楔角相关的 UTD 系数（那是 A4 的另一半）。
+fn push_diffraction(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) {
+    if blocker(cx.geo, cx.src, cx.listener.pos).is_none() {
+        return;
+    }
+    for (tried, e) in cx.geo.edges.iter().enumerate() {
+        if tried as u32 >= cx.cfg.max_edges {
+            st.dropped_budget += 1;
+            break;
+        }
+        let p = fermat_point(e, cx.src, cx.listener.pos);
+        let (v1, v2) = (p - cx.src, cx.listener.pos - p);
+        let (d1, d2) = (v1.length(), v2.length());
+        if d1 <= 1e-3 || d2 <= 1e-3 {
+            continue;
+        }
+        if occluded(cx.geo, cx.src, p) || occluded(cx.geo, p, cx.listener.pos) {
+            continue;
+        }
+        if out.len() >= cx.cfg.max_paths {
+            st.dropped_budget += 1;
+            break;
+        }
+        let cos_t = (v1.dot(v2) / (d1 * d2)).clamp(-1.0, 1.0);
+        let dir_factor = 0.5 * (1.0 + cos_t);
+        let (t1, a1) = seg_effect(cx.geo.medium, cx.src, p, cx.c, cx.cfg.medium_step);
+        let (t2, a2) = seg_effect(cx.geo.medium, p, cx.listener.pos, cx.c, cx.cfg.medium_step);
+        let mut bands = [0.0f32; BANDS];
+        for (((o, k), x), y) in bands
+            .iter_mut()
+            .zip(e.coeff.iter())
+            .zip(a1.iter())
+            .zip(a2.iter())
+        {
+            *o = k * dir_factor * x * y / (d1 * d2);
+        }
+        let dirv = (p - cx.listener.pos) * (1.0 / d2);
+        out.push(SoundPath {
+            source: cx.si,
+            delay: t1 + t2,
+            bands,
+            gain: mid_band(&bands),
+            dir: [dirv.x, dirv.y, dirv.z],
+            kind: PathKind::Diffracted,
+        });
+        st.diffracted += 1;
+    }
+}
+
+/// 棱上让 `|P−src| + |P−dst|` 最小的点（P 限定在**线段** `a→b` 上）。
+///
+/// `f(u) = |P(u)−src| + |P(u)−dst|` 是 `u` 的**凸**函数，且
+/// `f'(u) = cos∠(dir, P−src) + cos∠(dir, P−dst)` 单调不减（每项导数 = `sin²/|P−·| ≥ 0`）
+/// ⇒ 在「两个投影夹出的区间」上**定次数二分**求驻点（凸 ⇒ 驻点即全局最小），
+/// 再把参数夹进 `[0, len]`：夹到端点就是"从棱的端点绕"，几何上正确（凸函数区间最小在端点）。
+fn fermat_point(e: &Edge, src: Vec3, dst: Vec3) -> Vec3 {
+    let seg = e.b - e.a;
+    let len = seg.length();
+    if len <= 1e-6 {
+        return e.a;
+    }
+    let dir = seg * (1.0 / len);
+    let ps = (src - e.a).dot(dir).clamp(0.0, len);
+    let pd = (dst - e.a).dot(dir).clamp(0.0, len);
+    let (mut lo, mut hi) = if ps <= pd { (ps, pd) } else { (pd, ps) };
+    if hi - lo <= 1e-7 {
+        return e.a + dir * (0.5 * (lo + hi));
+    }
+    for _ in 0..FERMAT_ITERS {
+        let mid = 0.5 * (lo + hi);
+        let p = e.a + dir * mid;
+        let (va, vb) = (p - src, p - dst);
+        let slope = va.dot(dir) / va.length().max(1e-6) + vb.dot(dir) / vb.length().max(1e-6);
+        if slope < 0.0 {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    e.a + dir * (0.5 * (lo + hi))
 }
 
 /// 一次镜面反射：**镜像源法**——镜像听者，与三角平面求交，命中点落在三角内且两段都不被挡 ⇒ 一条路径。
@@ -505,6 +621,7 @@ pub fn jsonl(paths: &[SoundPath]) -> String {
                 PathKind::Direct => "direct",
                 PathKind::Transmitted => "transmitted",
                 PathKind::Portal => "portal",
+                PathKind::Diffracted => "diffracted",
                 PathKind::Reflected => "reflected",
             },
             p.delay,
