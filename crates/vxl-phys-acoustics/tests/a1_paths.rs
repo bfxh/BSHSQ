@@ -9,7 +9,7 @@ use vxl_phys_acoustics::{
 };
 
 /// 一块 8×8 的地板（y = 0，两块三角）+ 一堵墙（可选，x = 0 平面、y∈[0,3]、z∈[-1,1]）。
-fn geo(with_wall: bool) -> (Vec<Vec3>, Vec<[u32; 3]>, Vec<f32>) {
+fn geo(with_wall: bool) -> (Vec<Vec3>, Vec<[u32; 3]>, Vec<f32>, Vec<f32>) {
     let mut verts = vec![
         Vec3::new(-4.0, 0.0, -4.0),
         Vec3::new(4.0, 0.0, -4.0),
@@ -18,6 +18,7 @@ fn geo(with_wall: bool) -> (Vec<Vec3>, Vec<[u32; 3]>, Vec<f32>) {
     ];
     let mut tris = vec![[0u32, 1, 2], [0, 2, 3]];
     let mut absorb = vec![0.25f32, 0.25];
+    let mut trans = vec![0.0f32, 0.0]; // A1 场景：面全不透（墙靠 `blocked` 丢，A2 的泄漏表另测）
     if with_wall {
         let base = verts.len() as u32;
         verts.extend([
@@ -29,8 +30,9 @@ fn geo(with_wall: bool) -> (Vec<Vec3>, Vec<[u32; 3]>, Vec<f32>) {
         ]);
         tris.extend([[base, base + 1, base + 2], [base, base + 2, base + 3]]);
         absorb.extend([0.9f32, 0.9]); // 强吸声的墙（挡直达，反射也弱）
+        trans.extend([0.0f32, 0.0]);
     }
-    (verts, tris, absorb)
+    (verts, tris, absorb, trans)
 }
 
 /// 一个"声源"：把一发冲击打进世界（`impacts` 是声学层的声源来源——与破坏/感官同源）。
@@ -69,11 +71,13 @@ fn listener_at(z: f32) -> Listener {
 /// **闭式对拍**：直达时延 = 距离/声速、增益 = 1/d²；反射路径长度 = 镜像距离（镜像源法的解析值）。
 #[test]
 fn closed_form_direct_and_first_reflection() {
-    let (verts, tris, absorb) = geo(false);
+    let (verts, tris, absorb, trans) = geo(false);
     let g = AcousticGeometry {
         verts: &verts,
         tris: &tris,
         absorption: &absorb,
+        transmission: &trans,
+        portals: &[],
     };
     let w = world_with_source(Vec3::new(0.0, 1.0, 0.0));
     let cfg = AcousticConfig::default();
@@ -117,11 +121,13 @@ fn closed_form_direct_and_first_reflection() {
 /// **遮挡**：墙立在声源与听者之间 ⇒ 直达被丢（`blocked > 0` 且没有 `Direct` 路径）。
 #[test]
 fn wall_blocks_the_direct_path() {
-    let (verts, tris, absorb) = geo(true);
+    let (verts, tris, absorb, trans) = geo(true);
     let g = AcousticGeometry {
         verts: &verts,
         tris: &tris,
         absorption: &absorb,
+        transmission: &trans,
+        portals: &[],
     };
     let w = world_with_source(Vec3::new(0.0, 1.0, 0.0));
     let mut paths: Vec<SoundPath> = Vec::new();
@@ -138,11 +144,13 @@ fn wall_blocks_the_direct_path() {
 /// **预算**：`max_paths` 顶格时按序截断并**上报**（`dropped_budget > 0`）——非空洞。
 #[test]
 fn budget_truncates_and_reports() {
-    let (verts, tris, absorb) = geo(false);
+    let (verts, tris, absorb, trans) = geo(false);
     let g = AcousticGeometry {
         verts: &verts,
         tris: &tris,
         absorption: &absorb,
+        transmission: &trans,
+        portals: &[],
     };
     let w = world_with_source(Vec3::new(0.0, 1.0, 0.0));
     let cfg = AcousticConfig {
@@ -162,11 +170,13 @@ fn budget_truncates_and_reports() {
 /// **零干扰**：开/关声学层，`state_hash` 逐位不变（只读消费者）。
 #[test]
 fn zero_interference_state_hash_is_bit_identical() {
-    let (verts, tris, absorb) = geo(false);
+    let (verts, tris, absorb, trans) = geo(false);
     let g = AcousticGeometry {
         verts: &verts,
         tris: &tris,
         absorption: &absorb,
+        transmission: &trans,
+        portals: &[],
     };
     let mut w = world_with_source(Vec3::new(0.0, 1.0, 0.0));
     let before = w.state_hash();

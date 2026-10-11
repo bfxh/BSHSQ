@@ -456,8 +456,8 @@ capabilities:
   - id: PHY-SCOPE-ACOUSTIC-PROPAGATION
     title: 声学传播（射线追踪音频：反射/衍射/遮挡 + 孔隙传声 + 介质体积）
     scope: included
-    implementation: absent
-    implementation_path: null
+    implementation: partial
+    implementation_path: crates/vxl-phys-acoustics/src/lib.rs
     evidence:
       - id: user_scope
         note: >-
@@ -483,6 +483,28 @@ capabilities:
           可复用 `TriMesh`/`VoxelVolume` 的几何与 `MeshGrid` 桶、`vxl-phys-broad` 的 BVH 射线查询、
           `vxl-phys-sense` 的 cue 流与工具链模板、`vxl-phys-field` 的场注册表。
           禁区：不往 `World` 加方法、不往 `Material` 塞声学字段（属性放外部表）、不在 `step()` 里做重活。
+      - id: a1_landed
+        note: >-
+          **A1 已落地（2026-10-11）**：新 crate `vxl-phys-acoustics` 的 `AcousticsExt`
+          （`impl AcousticsExt for World`，只持 `&self`）归约"**直达 + 一次镜面反射（镜像源法）+
+          遮挡**"——声源取 `World::impacts()`（与破坏/感官同源、事件驱动），几何由调用方以**建模面**
+          切片交进来（**不读** `BodySet` 的碰撞形状）。判据 `crates/vxl-phys-acoustics/tests/a1_paths.rs`
+          4 条：闭式对拍（增益 `1/d²`、时延 `d/c`、镜像距离）、墙挡直达（`blocked>0` 且 `direct==0`）、
+          路径预算顶格上报、调用前后 `state_hash` 逐位不变。
+      - id: a2_landed
+        note: >-
+          **A2 已落地（2026-10-11）**：**portal 穿孔传声** —— 开口由作者以 `Portal { quad, open }`
+          显式声明（**不看碰撞体**、也不要求几何里真挖了洞），传播时当**二级声源**：`声源 → 开口中心
+          → 听者` 两段都不被挡就产出一条 `Portal` 路径，增益 = **开启比例** / (d1+d2)²；
+          **无 portal 的墙按透射系数泄漏**（逐面 `AcousticGeometry::transmission` 外部表，`0` = 实墙）。
+          判据 `tests/a2_portals.rs` 4 条：关门 ⇒ 只剩透射泄漏 / 开门 ⇒ 恢复（≥20×）、缝宽 → 衰减
+          **严格单调且线性**、`transmission = 0` 的墙零泄漏、路径与开口**双预算**上报 + 逐字确定性。
+      - id: acoustic_not_done
+        note: >-
+          **仍未做（如实登记）**：A3 介质体积场（ρ / c / 吸收沿途衰减 + 频带）、A4 衍射（UTD 近似）与
+          散射系数、A5 动态源/听者 + 实时档（GPU 档可选）；`vxl-phys-cli` 的 `acoustic` 子命令（把 cue
+          流接进 `record / replay`）也还没加。portal 表示法按文档 §8 的取舍先落"显式图元"，
+          "体素空洞自动识别"（从占据位找连通孔）作兜底仍未做。低频不承诺 / 不做双耳渲染见文档 §7。
     required_evidence:
       - implementation_path
       - tests
@@ -490,7 +512,8 @@ capabilities:
     owner: maintainer
     notes: >-
       落点 = 新 crate `vxl-phys-acoustics`（门面之上、纯只读，API 走扩展 trait）。
-      首期 A1（静态直达+一次反射+遮挡）——低频波动效应**不承诺**（几何声学的边界，写进文档 §7）。
+      A1（静态直达 + 一次反射 + 遮挡）与 A2（portal 穿孔 + 透射泄漏）已落 —— 低频波动效应
+      **不承诺**（几何声学的边界，写进文档 §7）；A3–A5 未做。
 
   - id: PHY-SCOPE-HULL
     title: 多边形（凸体外壳）作为刚体形状
