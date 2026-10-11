@@ -58,7 +58,7 @@
 | 车辆 | 射线悬挂 + 刷子轮胎 | SPEC §4.10 | `vxl-phys-wheeled` 骨架 |
 | 机械/关节 | 约束族（铰链/齿轮/绳…） | SPEC §2.5 | `vxl-phys-mech` 骨架 |
 | 海洋 | 高度场/波浪 + 浮力采样 | SPEC §4.10 同族 | `vxl-phys-marine` 骨架 |
-| **声音 / 震动（感官输出）** | **求解事件**（冲击记录 / 接触流形 / 材质） | **只读归约**：事件 → cue（不带任何回写） | **`impacts` 已落地**（逐 tick 峰值冲击：provider / 体 / 接触点 / 法向接近速度 / 解算前速度）+ `Material{friction, restitution}` + `World::manifolds()`。见 §3.2（**新域，待落地**） |
+| **声音 / 震动（感官输出）** | **求解事件**（冲击记录 / 接触流形 / 材质） | **只读归约**：事件 → cue（不带任何回写） | **S1 已落地（2026-10-11）**：crate `vxl-phys-sense`（`SenseExt` 扩展 trait，`World` 零新方法）+ 判别器两侧：库侧 `tests/sense_contracts.rs`、工具链侧 `scripts/gate_sense.sh`（CI 承重 job `sense-gate`）。见 §3.2 |
 
 ### 3.1 高斯喷溅进物理的三层用法（新技术选型）
 
@@ -153,9 +153,28 @@
 | S3 | 材质表与资产映射（外部表 → 音色组 id） | 映射表缺项时**显式拒绝**（不静默用默认音） |
 | S4 | 震动设备输出（包络、上钳到 [0,1]、更新率/延迟口径） | 包络单调性与上钳边界 |
 
-**S1 的落点**：新建 crate `vxl-phys-sense`（`license = "MIT OR Apache-2.0"`，同各域 crate 惯例），
-`pub trait SenseExt` + `impl SenseExt for World`；**不碰 `vxl-phys` 的任何既有方法**。
-状态登记见 `docs/CAPABILITIES.yaml` 的 `PHY-SCOPE-SENSE`。
+**S1 的落点（已落地，2026-10-11）**：新建 crate `vxl-phys-sense`
+（`license = "MIT OR Apache-2.0"`，同各域 crate 惯例），`pub trait SenseExt` +
+`impl SenseExt for World`；**不碰 `vxl-phys` 的任何既有方法**——`World` 一个方法都没加，
+§7 那条"新加一域不必再往 `World` 添方法"的设计判据因此**成立**。
+
+| 件 | 落点 |
+|---|---|
+| 归约 API | `crates/vxl-phys-sense/src/lib.rs`：`Cue` / `SenseConfig` / `SenseStats` / `SenseExt` |
+| CLI（cue 流 dump） | `crates/vxl-phys-sense/src/bin/sense_dump.rs`（JSONL → stdout，统计 → stderr） |
+| 库侧判据（CI 三工具链） | `crates/vxl-phys-sense/tests/sense_contracts.rs`（4 条） |
+| 工具链侧门 | `scripts/gate_sense.sh`（两跑逐字节 + 预算上界 + 基线对拍；接进 `gate_all.sh` 与 CI `sense-gate`） |
+| 基线 | `bench/baselines/sense_dump_300x64.json`（含 cue 流 sha256） |
+
+**S1 基线读数**（体素地板 + 64 盒雨 / 300 tick / 预算 16）：冲击 2732 ⇒ cue 957、
+预算丢弃 1737、轻碰丢弃 38、峰值 16/tick。**场景空转会被判红**（判据自带"非空洞"检查）。
+
+**踩坑（写进判据的头注）**：冲击记录只对 `Shape::Provider`（体素/网格/喷溅）接触产生
+（见 `World::record_impacts`）——拿**静态盒**当地板会得到**空 cue 流**，四个判据一起红。
+工具链与判据的落地体必须是 provider。
+
+状态登记见 `docs/CAPABILITIES.yaml` 的 `PHY-SCOPE-SENSE`（`implementation: partial` = S1 落地、
+S2–S4 未做）。
 
 ## 4. 兼容矩阵（必须成立的耦合，每格 = 示例 + 测试）
 

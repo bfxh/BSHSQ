@@ -726,6 +726,26 @@ jobs:
           bash scripts/gate_bench.sh .
           bash scripts/gate_bench.sh . --strict
 
+  # ==================== 感官输出门（声音/震动 S1）：三条契约的工具链侧 ====================
+  # 判据：`sense_dump` 两跑 cue 流**逐字节**一致 + 每 tick 预算上界 + 与基线对拍
+  # （基线含流摘要 sha256 ⇒ 等价于"整个 cue 流逐字一致"）。
+  # 为什么能进 CI 而不用参考硬件：cue 的 `gain/approach` 与 `FINAL_HASH` 同源（都是同一批
+  # 速度/法线的 f32 运算）——仓库已证这些量跨 OS/CPU/编译器逐位一致；这道门就是那份前提的
+  # 持续验证。库侧的同一套契约在 `crates/vxl-phys-sense/tests/sense_contracts.rs`，
+  # 随三工具链矩阵跑（两侧都过才算这一域可用）。判据与基线：scripts/gate_sense.sh / bench/baselines/。
+  sense-gate:
+    name: 感官输出 (声音/震动 S1)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      - name: 感官输出门（确定性 + 预算 + 基线）
+        run: bash scripts/gate_sense.sh .
+
   # ==================== 汇总门：任一前置门未成功 → 红（Free 私有仓无必需检查，单状态即分支门） ====================
   gates-summary:
     name: 汇总（提交门）
@@ -745,6 +765,7 @@ jobs:
       - ratchet
       - scale
       - realism-bench
+      - sense-gate
     if: always()
     runs-on: ubuntu-latest
     steps:

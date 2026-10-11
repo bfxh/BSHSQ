@@ -115,6 +115,10 @@ step typos 0 /c/vxl-wl-tools/typos.exe .
 # 为什么它能进 CI 而计时门不能：这七个量**机器无关**（2026-10-09 跨 Windows/Linux 逐字一致）；
 # 体数扫描（bench/sweep_scale.py）是 E-REF 上的报告项，不在本门里判。
 step bench 0 bash scripts/gate_bench.sh .
+# 感官输出门（声音/震动 S1，`docs/ROUTE.md` §3.2）：CLI 两跑逐字一致 + 预算上界 + 基线对拍。
+# 与 crate 内 `tests/sense_contracts.rs`（库侧三条契约，随 workspace 测试在 CI 三工具链跑）
+# 是两侧同一套判据：库侧判行为、脚本侧判工具链产物。
+step sense 0 bash scripts/gate_sense.sh .
 
 echo "-- 行为门（三命令）"
 # **计时类门必须独占**：determinism / m0_gates / m1_islands / 金样门的判据都含时间，同机

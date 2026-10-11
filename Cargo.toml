@@ -25,6 +25,7 @@ members = [
     "crates/vxl-phys-gpu",
     "crates/vxl-phys-memfind",
     "crates/vxl-phys-ffi",
+    "crates/vxl-phys-sense",
 ]
 
 [workspace.package]
@@ -54,6 +55,8 @@ vxl-phys-destruction = { version = "0.1.0", path = "crates/vxl-phys-destruction"
 vxl-phys-replay = { version = "0.1.0", path = "crates/vxl-phys-replay" }
 # 门面（DAG 顶）：此前只有外部使用者；GPU 档的接线探针要建 `World` ⇒ 作为内部依赖登记。
 vxl-phys = { version = "0.1.0", path = "crates/vxl-phys" }
+# 感官输出域（声音/震动，`docs/ROUTE.md` §3.2）：只读消费者，依赖门面（DAG 顶之上再加一层）。
+vxl-phys-sense = { version = "0.1.0", path = "crates/vxl-phys-sense" }
 
 [profile.release]
 lto = "thin"

@@ -7,9 +7,9 @@
 
 ## 0. 库清单（依赖事实）
 
-- 工作区共 **20 个 crate**（⚠️ **2026-09-27 更正**：此前写 19——`Cargo.toml` 的 `members`
-  实为 20 项；差额来自后加的 `vxl-phys-gpu` / `vxl-phys-memfind` / `vxl-phys-ffi` /
-  `vxl-phys-splat` 等，本文件下方表格逐条未同步）。
+- 工作区共 **21 个 crate**（**2026-10-11 更新**：感官输出域 `vxl-phys-sense` 落地 S1 ⇒ 由
+  20 变 21。上一轮更正 2026-09-27：`Cargo.toml` 的 `members` 当时实为 20 项，差额来自后加的
+  `vxl-phys-gpu` / `vxl-phys-memfind` / `vxl-phys-ffi` / `vxl-phys-splat` 等）。
 - **外部依赖面**（⚠️ **2026-09-27 更正**：此前写"零外部依赖"——自 GPU 档起不再成立）：
   运行期 **2 件**——`xxhash-rust`（仅 `vxl-phys-replay`，xxh3-128 状态哈希）与 `wgpu`
   （仅 `vxl-phys-gpu`，GPU 档后端，传递依赖 101 个 crate）；另有 `loom` 为 `cfg(loom)`
@@ -95,6 +95,12 @@
 | crate | 职责 | 关键件 | 状态 |
 |---|---|---|---|
 | `vxl-phys` | `World` 组装（默认管线）+ **破坏/体素 API**（`add_voxel`/`carve_sphere`/`spawn_box_debris`/`apply_impact_destruction`）+ **流体 API**（`add_fluid`/`fluids`/`fluid_pass`）+ **介质通道 `medium_pass`**（喷溅场**只阻力**＝冻结行为；**流体＝浮力+阻力**，2a 施力侧 2026-09-22，见 `tests/fluid_coupling.rs`）+ CCD | `World::{step, add_*, providers, health, state_hash}` | ✅ | 
+
+### 感官输出层（输出侧；不改物理）
+
+| crate | 职责 | 关键件 | 状态 |
+|---|---|---|---|
+| `vxl-phys-sense` | **声音 / 震动（S1）**：冲击 → 感官 cue 的**只读**归约 + 预算/优先级 + cue 流 dump | `SenseExt`（`impl SenseExt for World`，`World` 零新方法）、`SenseConfig`、`SenseStats`、`Cue`、`write_jsonl`、bin `sense_dump` | 🟡 S1 落地（S2–S4 未做，见 `ROUTE.md` §3.2 分期表） |
 
 ## 3. 热 crate 的内部模块分类
 
