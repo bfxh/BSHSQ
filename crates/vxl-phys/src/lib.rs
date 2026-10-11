@@ -7,7 +7,6 @@
 //! 步进序（每子步）：
 //! 1. 力场 → 2. 速度积分 → 3. 宽相 → 4. 窄相 → 5. 求解 + 岛级休眠
 //!    → 6. 位置积分。
-//!
 //! 域通道（每 tick、体子步全部完成之后）：`fluid_pass` 推进全部流体系统（`World::add_fluid` 注册）、
 //! `rope_pass` 推进全部绳索（`World::add_rope` 注册，软体域/T1）；两者都空集短路。
 //!
@@ -32,6 +31,7 @@ pub use vxl_phys_terrain::TerrainSet;
 // ── 按域拆出的子模块（子目录 src/）
 mod arenas;
 mod impact;
+pub mod prelude;
 mod props;
 mod providers;
 mod types;

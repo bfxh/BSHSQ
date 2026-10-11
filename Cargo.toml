@@ -26,6 +26,7 @@ members = [
     "crates/vxl-phys-memfind",
     "crates/vxl-phys-ffi",
     "crates/vxl-phys-sense",
+    "crates/vxl-phys-cli",
 ]
 
 [workspace.package]
@@ -57,6 +58,8 @@ vxl-phys-replay = { version = "0.1.0", path = "crates/vxl-phys-replay" }
 vxl-phys = { version = "0.1.0", path = "crates/vxl-phys" }
 # 感官输出域（声音/震动，`docs/ROUTE.md` §3.2）：只读消费者，依赖门面（DAG 顶之上再加一层）。
 vxl-phys-sense = { version = "0.1.0", path = "crates/vxl-phys-sense" }
+# 命令行工具（对外工具链的样板：只用公共 API 跑场景 / 打哈希 / 导 cue 流）。
+vxl-phys-cli = { version = "0.1.0", path = "crates/vxl-phys-cli" }
 
 [profile.release]
 lto = "thin"
