@@ -25,7 +25,7 @@ fn compound_at_u16_max_children_is_accepted() {
 }
 
 #[test]
-#[should_panic(expected = "u16 通道上限")]
+#[should_panic(expected = "u16::MAX")]
 fn compound_beyond_u16_max_children_is_rejected_at_entry() {
     let mut w = World::new(PhysConfig::default());
     let kids = vec![child(); u16::MAX as usize + 1];

@@ -569,7 +569,7 @@ jobs:
           echo "唯一哈希数 = $n（应为 1；>1 即跨平台不一致）"
           test "$n" -eq 1
 
-  # ==================== 棘轮门禁（自 main 并入：27 个纯 stdlib Python 门 + selftest + probe） ====================
+  # ==================== 棘轮门禁（自 main 并入：纯 stdlib Python 门 + selftest + probe；条数以 `scripts/local_gate.py` 的 STEPS 为准） ====================
   # 入口 `scripts/local_gate.py` 是 **CI 专用**；本地全量验证仍走 `scripts/gate_all.sh`
   # （行为门 / 金样门 / 计时独占锁）。两者范围不同、不是重复入口——分支此前把自用的
   # local_gate 撤成指路牌，是因为当时它和 gate_all 功能重合；main 这版只跑静态细粒度门。
@@ -584,7 +584,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
           python-version: "3.11"
-      - name: 跑门禁（dag/rayon/unwrap/unsafe/linelen/glob/todo/god/cyc/nest/args + selftest + probe）
+      - name: 跑门禁（dag/rayon/unwrap/unsafe/linelen/usize/glob/todo/god/cyc/nest/args + selftest + probe）
         run: python scripts/local_gate.py
 
   # ==================== 报告层：覆盖率（不阻断；只跑 main/手动，**不进 PR 关键路径**） ====================

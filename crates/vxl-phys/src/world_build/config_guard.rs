@@ -75,6 +75,13 @@ fn positive(v: &mut f32, fallback: f32) -> u32 {
     }
 }
 
+/// 本机可用并行度（取不到 ⇒ 1）。线程预算用它当上界。
+fn parallelism() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+}
+
 /// 收口一张配置（就地改写，返回被修正的字段数）。
 pub(crate) fn sanitize(cfg: &mut PhysConfig) -> u32 {
     let d = PhysConfig::default();
@@ -115,6 +122,13 @@ pub(crate) fn sanitize(cfg: &mut PhysConfig) -> u32 {
     n += nonneg(&mut cfg.sleep_angular, d.sleep_angular);
     n += nonneg(&mut cfg.sleep_time, d.sleep_time);
     n += nonneg(&mut cfg.ccd_speed_threshold, d.ccd_speed_threshold);
+    // F-17：线程数。`ScopedPool` 每个并行区域开 `threads − 1` 个 OS 线程、与工作量无关
+    // ⇒ 超过本机并行度只多占线程（实测 2600 体 28 → 48 ms）而不增吞吐。0/1 是合法档（串行）。
+    let par = parallelism();
+    if cfg.threads > par {
+        cfg.threads = par;
+        n += 1;
+    }
     // 重力：一个 NaN 分量会让**全世界**在若干 tick 内 NaN（审计 F-08 实测 7/7）。
     if !(cfg.gravity.x.is_finite() && cfg.gravity.y.is_finite() && cfg.gravity.z.is_finite()) {
         cfg.gravity = d.gravity;

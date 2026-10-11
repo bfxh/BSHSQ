@@ -272,8 +272,8 @@ impl World {
     /// `space`/`feature` 两位共用它），子序号 ≥ 65536 回绕成 0 ⇒ 暖启动键与"非复合体"碰撞。
     pub fn add_compound(&mut self, children: Vec<CompoundChild>) -> u32 {
         assert!(
-            children.len() <= u16::MAX as usize,
-            "复合体子形状数 {} 超过 u16 通道上限（回绕会与'非复合体'键碰撞）",
+            children.iter().any(|c| !matches!(c.shape, Shape::Compound { .. })) && children.len() <= u16::MAX as usize,
+            "复合体子形状数 {} 不合法（空 / 只含嵌套复合体（会被丢弃 ⇒ 空壳、AABB 退化 ⇒ 病态惯量，审计 F-10）；> u16::MAX 会回绕，审计 F-13）",
             children.len()
         );
         self.narrow.add_compound(children)

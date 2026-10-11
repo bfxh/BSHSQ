@@ -137,7 +137,7 @@ impl UniformGrid {
                     if x < 0 || x >= nx as i32 {
                         continue;
                     }
-                    let idx = ((x as u32 * ny + y as u32) * nz + z as u32) as usize;
+                    let idx = (x as usize * ny as usize + y as usize) * nz as usize + z as usize;
                     for &j in self.bin_items(idx) {
                         let j = j as usize;
                         if j == i {

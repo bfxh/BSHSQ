@@ -242,7 +242,7 @@ impl GaussianSplatField {
             return;
         }
         let mut bins: Vec<Vec<u32>> = vec![Vec::new(); n_bins as usize];
-        let inv_bin = 1.0 / bin;
+        let (inv_bin, d1, d2) = (1.0 / bin, dims[1] as usize, dims[2] as usize);
         for (i, s) in self.splats.iter().enumerate() {
             // 逐核半径（各轴不同）：登记范围必须用**核自己的**半径，否则大核会漏。
             let r = Vec3::new(s.scale.x, s.scale.y, s.scale.z) * rc;
@@ -261,7 +261,7 @@ impl GaussianSplatField {
             for cx in c0.0..=c1.0 {
                 for cy in c0.1..=c1.1 {
                     for cz in c0.2..=c1.2 {
-                        let idx = ((cx * dims[1] + cy) * dims[2] + cz) as usize;
+                        let idx = (cx as usize * d1 + cy as usize) * d2 + cz as usize;
                         bins[idx].push(i as u32);
                     }
                 }

@@ -31,8 +31,19 @@ impl DefaultNarrowPhase {
     }
 
     /// 外壳点云 → 局部 AABB 半长（门面构 `Shape::ConvexHull` 用）。
+    ///
+    /// **退化外壳在此拒绝**（安全审计 F-10）：空 / 单点 / 全重复 / 共线点云的 AABB 至多 1 维，
+    /// `mass_props` 的 AABB 盒近似会把三条边兜底成 `2e-4` ⇒ `m ≈ 8e-9 kg`、`inv_mass ≈ 1.25e8`
+    /// （审计读数；与正常质量体接触时是 1e8 级质量比 ⇒ 必然爆）。**允许一条边为零**：仓内
+    /// `shape_support_matrix.rs` 用零厚度平板外壳与三角网对拍路线差异，那是合法用法。
     pub fn hull_half_extents(&self, id: u32) -> Vec3 {
-        self.hulls.half_extents(id)
+        let half = self.hulls.half_extents(id);
+        assert!(
+            ((half.x > 0.0) as u8 + (half.y > 0.0) as u8 + (half.z > 0.0) as u8) >= 2
+                && half.is_finite(),
+            "退化外壳（空/单点/重复/共线 ⇒ AABB ≤1 维）：m ≈1e-8 kg（安全审计 F-10）half={half:?}"
+        );
+        half
     }
 
     /// **凸体 Voronoi 预断裂**：原壳 ✕ 种子 ⇒ 逐格点云（凸、互斥、并集 = 原体）。

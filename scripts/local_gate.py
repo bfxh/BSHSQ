@@ -48,13 +48,13 @@ STEPS = [
     ("unwrap-gate",  ["scripts/unwrap_gate.py", "--git-tracked"]),
     ("unsafe-gate",  ["scripts/unsafe_gate.py", "--git-tracked"]),
     ("linelen-gate", ["scripts/linelen_gate.py", "--git-tracked"]),
+    # 「先转 usize 再算」的窄类型算术（安全审计 S2 的 lint 侧；零存量硬判，不是棘轮）。
+    ("usize-gate",   ["scripts/usize_gate.py", "--git-tracked"]),
     ("glob-gate",    ["scripts/glob_gate.py", "--git-tracked"]),
     ("todo-gate",    ["scripts/todo_gate.py", "--git-tracked"]),
-    # 本仓 god_gate 是可移植那版（配置驱动 + 棘轮基线 + --selftest 金丝雀），不认
-    # --git-tracked ⇒ 按它自己的口径调 --root，自检金丝雀单列一步。
+    # 本仓 god_gate 是可移植那版（配置驱动 + 棘轮基线 + --selftest 金丝雀），不认 --git-tracked ⇒ 按它自己的口径调 --root，自检金丝雀单列一步。
     ("god-gate",         ["scripts/god_gate.py", "--root", "."]),
     ("god-gate-selftest",["scripts/god_gate.py", "--selftest"]),
-
     ("cyc-gate",     ["scripts/cyc_gate.py", "--git-tracked"]),
     ("nest-gate",    ["scripts/nest_gate.py", "--git-tracked"]),
     ("args-gate",    ["scripts/args_gate.py", "--git-tracked"]),

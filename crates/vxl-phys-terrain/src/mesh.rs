@@ -96,7 +96,7 @@ pub struct TriMesh {
 struct MeshGrid {
     origin: Vec3,
     bin: f32,
-    dims: (u32, u32, u32),
+    dims: (usize, usize, usize),
     /// 桶 → 三角形索引（按三角形序登记 ⇒ 桶内升序 ⇒ 确定性）。
     bins: Vec<Vec<u32>>,
 }
@@ -210,9 +210,9 @@ impl TriMesh {
         let bin = mean_edge.max(MIN_BIN);
         let b = self.world_bounds();
         let dims = (
-            (((b.max.x - b.min.x) / bin).ceil() as u32).saturating_add(1),
-            (((b.max.y - b.min.y) / bin).ceil() as u32).saturating_add(1),
-            (((b.max.z - b.min.z) / bin).ceil() as u32).saturating_add(1),
+            (((b.max.x - b.min.x) / bin).ceil() as usize).saturating_add(1),
+            (((b.max.y - b.min.y) / bin).ceil() as usize).saturating_add(1),
+            (((b.max.z - b.min.z) / bin).ceil() as usize).saturating_add(1),
         );
         let n_bins = dims.0 as u64 * dims.1 as u64 * dims.2 as u64;
         if n_bins == 0 || n_bins > GRID_MAX_BINS {
@@ -229,19 +229,19 @@ impl TriMesh {
             let lo = a.min(c).min(d);
             let hi = a.max(c).max(d);
             let b0 = (
-                (((lo.x - b.min.x) * inv_bin).floor().max(0.0)) as u32,
-                (((lo.y - b.min.y) * inv_bin).floor().max(0.0)) as u32,
-                (((lo.z - b.min.z) * inv_bin).floor().max(0.0)) as u32,
+                (((lo.x - b.min.x) * inv_bin).floor().max(0.0)) as usize,
+                (((lo.y - b.min.y) * inv_bin).floor().max(0.0)) as usize,
+                (((lo.z - b.min.z) * inv_bin).floor().max(0.0)) as usize,
             );
             let b1 = (
-                (((hi.x - b.min.x) * inv_bin).ceil() as u32).min(dims.0 - 1),
-                (((hi.y - b.min.y) * inv_bin).ceil() as u32).min(dims.1 - 1),
-                (((hi.z - b.min.z) * inv_bin).ceil() as u32).min(dims.2 - 1),
+                (((hi.x - b.min.x) * inv_bin).ceil() as usize).min(dims.0 - 1),
+                (((hi.y - b.min.y) * inv_bin).ceil() as usize).min(dims.1 - 1),
+                (((hi.z - b.min.z) * inv_bin).ceil() as usize).min(dims.2 - 1),
             );
             for bx in b0.0..=b1.0 {
                 for by in b0.1..=b1.1 {
                     for bz in b0.2..=b1.2 {
-                        let i = ((bx * dims.1 + by) * dims.2 + bz) as usize;
+                        let i = (bx * dims.1 + by) * dims.2 + bz;
                         bins[i].push(ti as u32);
                     }
                 }
@@ -337,11 +337,11 @@ impl TriMesh {
                             if x < 0 || y < 0 || z < 0 {
                                 continue;
                             }
-                            let (x, y, z) = (x as u32, y as u32, z as u32);
+                            let (x, y, z) = (x as usize, y as usize, z as usize);
                             if x >= g.dims.0 || y >= g.dims.1 || z >= g.dims.2 {
                                 continue;
                             }
-                            let i = ((x * g.dims.1 + y) * g.dims.2 + z) as usize;
+                            let i = (x * g.dims.1 + y) * g.dims.2 + z;
                             if g.bins[i].is_empty() {
                                 continue;
                             }
