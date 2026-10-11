@@ -209,6 +209,8 @@ S2–S4 未做）。
 
 **落点**：新 crate `vxl-phys-acoustics`（门面之上、纯只读；API 走扩展 trait
 `impl AcousticsExt for World`，**不往 `World` 加方法**）。
+**工具链**：`vxl-phys-cli acoustic <voxel> [ticks]`（声学路径流 JSONL；与感官域的 `cue` 同款 ⇒
+直接复用 `record / replay` 做跨机器对拍）。
 **边界（写清）**：几何声学在低频失效（不承诺干涉/驻波）；衍射是近似；不做双耳渲染（HRTF 与卷积
 交给宿主音频引擎）；**确定性优先于"最真"**（禁 ML 代理与时间抖动）。
 状态登记见 `docs/CAPABILITIES.yaml` 的 `PHY-SCOPE-ACOUSTIC-PROPAGATION`
