@@ -31,7 +31,7 @@
 #    编辑后用解析器验一遍：
 #      python -c "import yaml;yaml.safe_load(open('docs/CAPABILITIES.yaml',encoding='utf-8'))"
 version: 1
-updated: "2026-10-09"
+updated: "2026-10-11"
 
 capabilities:
   # ── 面元力矩：刚体侧与布料侧是两件事，分开登记（文档点名的例子） ──
@@ -394,8 +394,8 @@ capabilities:
   - id: PHY-SCOPE-SENSE
     title: 声音 / 震动（感官输出：求解事件 → 音频/触觉 cue）
     scope: included
-    implementation: absent
-    implementation_path: null
+    implementation: partial
+    implementation_path: crates/vxl-phys-sense/src/lib.rs
     evidence:
       - id: user_scope
         note: >-
@@ -428,6 +428,22 @@ capabilities:
           分期：S1 冲击→cue 归约（强度取法向接近速度、位置取接触点）+ 预算与优先级 + dump；
           S2 持续接触（滑/滚）连续量；S3 材质表与资产映射（缺项显式拒绝，不静默用默认音）；
           S4 震动设备输出（包络 / 上钳 [0,1] / 更新率）。S1 落点 = 新 crate `vxl-phys-sense`。
+      - id: s1_landed
+        note: >-
+          **S1 已落地（2026-10-11）**：crate `vxl-phys-sense`——`pub trait SenseExt` +
+          `impl SenseExt for World`（`World` 一个方法都没加，那条设计判据成立），
+          `SenseConfig`（`max_cues_per_tick` / `min_approach` / `full_approach` / 两级优先级
+          阈值）、`SenseStats`（records / candidates / emitted / dropped_weak / dropped_budget
+          ——预算是否真的生效由它自证）、JSONL 写出（固定 6 位小数、不写时间戳/平台信息）。
+          判据两侧：库侧 `crates/vxl-phys-sense/tests/sense_contracts.rs`（4 条：零干扰 /
+          逐字一致 / 预算 top-k 保留最响 / 静置期不产 cue），工具链侧 `scripts/gate_sense.sh`
+          （CLI 两跑逐字节一致 + 预算上界 + 与 `bench/baselines/sense_dump_300x64.json` 对拍，
+          已接进 `scripts/gate_all.sh` 与 CI 的 `sense-gate` 承重 job）。
+      - id: s1_measurement
+        note: >-
+          基线场景（体素地板 + 64 盒雨 / 300 tick / 预算 16）：冲击 2732 次 ⇒ cue 957 条、
+          预算丢弃 1737 条、轻碰丢弃 38 条、峰值 16 条/tick（预算被顶满）。这组数是"预算真的
+          在做事"的读证；场景空转（0 冲击）会被判据直接判红，不许假绿。
     required_evidence:
       - implementation_path
       - tests

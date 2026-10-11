@@ -1100,6 +1100,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "vxl-phys-sense"
+version = "0.1.0"
+dependencies = [
+ "vxl-phys",
+ "vxl-phys-terrain",
+]
+
+[[package]]
 name = "vxl-phys-soft"
 version = "0.1.0"
 dependencies = [
