@@ -28,7 +28,8 @@
 //!    单调），没登记 portal 的墙按逐面**透射系数**（[`AcousticGeometry::transmission`]）少量泄漏。
 //! 3. **介质是体积参数场**（A3 已落）：[`AcousticGeometry::medium`] 由调用方给一个**只读**的
 //!    [`AcousticMedium`]（`None` = 均匀空气 = A1/A2 行为）；吸收按 `exp(-α·len)` 沿途累乘、
-//!    声速沿途积分。**折射（声线折转）仍未做** —— A3 的直线几何是显式边界（文档 §7）。
+//!    声速沿途积分；**折射（声线按 Snell 折转）**由介质自己给折线（[`AcousticMedium::refracted`]，
+//!    分层介质已实现，含**全反射**），本层只做逐段遮挡检查 —— 产出 `Refracted` 路径。
 //!
 //! ## 输出格式（A3 起，**换代一次**）
 //!
@@ -56,11 +57,13 @@
 #![forbid(unsafe_code)]
 
 mod auto_edge;
+mod diffract;
 mod medium;
 
 pub use auto_edge::EdgeDetect;
 pub use medium::{AcousticMedium, LayeredMedium, Medium, Slab};
 
+use diffract::push_diffraction;
 use medium::seg_effect;
 use vxl_phys::{Vec3, World};
 
@@ -136,6 +139,8 @@ pub struct AcousticConfig {
     /// 介质积分的**采样步长**（米；只在中点法回退时用到，下限 `1e-3`）。解析积分（分层介质）
     /// 不受它影响。
     pub medium_step: f32,
+    /// **折射追迹的定次数**（只给数值解法当上界；无早退 ⇒ 逐位可复现）。
+    pub refraction_iters: u32,
     /// 每 tick 最多产出多少条路径（硬预算）。
     pub max_paths: usize,
 }
@@ -149,6 +154,7 @@ impl Default for AcousticConfig {
             max_edges: 8,
             max_scatters: 8,
             medium_step: 0.5,
+            refraction_iters: 48,
             max_paths: 16,
         }
     }
@@ -211,6 +217,8 @@ pub enum PathKind {
     Diffracted,
     /// 由某个面的**漫反射**散射过来（A4 散射；面当二级声源）。
     Scattered,
+    /// 经介质层界面**折射**过来（A3 第二半；折线由介质给，[`AcousticMedium::refracted`]）。
+    Refracted,
     /// 一次镜面反射。
     Reflected,
 }
@@ -248,6 +256,8 @@ pub struct AcousticStats {
     pub diffracted: usize,
     /// 散射路径数（A4 散射）。
     pub scattered: usize,
+    /// 折射路径数（A3 第二半）。
+    pub refracted: usize,
     /// 反射路径数。
     pub reflected: usize,
     /// 因遮挡被丢的直达路径数。
@@ -302,6 +312,7 @@ impl AcousticsExt for World {
                 src,
             };
             push_direct(&mut found, &mut st, &cx);
+            push_refraction(&mut found, &mut st, &cx);
             push_portals(&mut found, &mut st, &cx);
             push_diffraction(&mut found, &mut st, &cx);
             push_reflections(&mut found, &mut st, &cx);
@@ -322,13 +333,13 @@ impl AcousticsExt for World {
 
 /// 一次归约的上下文（几何 + 听者 + 档 + 本次声源）——打包起来免得每个助手摊一长串形参
 /// （`args-gate` 的 soft 阈值实测把 7 个形参也算违规）。
-struct Ctx<'a> {
-    geo: &'a AcousticGeometry<'a>,
-    listener: &'a Listener,
-    cfg: &'a AcousticConfig,
-    c: f32,
-    si: u32,
-    src: Vec3,
+pub(crate) struct Ctx<'a> {
+    pub(crate) geo: &'a AcousticGeometry<'a>,
+    pub(crate) listener: &'a Listener,
+    pub(crate) cfg: &'a AcousticConfig,
+    pub(crate) c: f32,
+    pub(crate) si: u32,
+    pub(crate) src: Vec3,
 }
 
 /// 直达：连线被挡 ⇒ 若挡它的面**透射系数 > 0** 则按它泄漏成一条 `Transmitted`（A2：没有 portal
@@ -382,7 +393,7 @@ fn push_direct(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) {
 }
 
 /// **宽带口径**：取 [`BANDS`] 的中频带 —— 单频带档（三带同参）下与旧的标量口径逐位相同。
-fn mid_band(bands: &[f32; BANDS]) -> f32 {
+pub(crate) fn mid_band(bands: &[f32; BANDS]) -> f32 {
     bands[BANDS / 2]
 }
 
@@ -433,90 +444,42 @@ fn centroid(quad: &[Vec3; 4]) -> Vec3 {
     (quad[0] + quad[1] + quad[2] + quad[3]) * 0.25
 }
 
-/// Fermat 二分次数：定次数、无早退 ⇒ 逐位可复现（`f32` 尾数 24 位，48 次远超够用）。
-const FERMAT_ITERS: u32 = 48;
-
-/// **A4：绕射（工程近似）** —— `声源 → 棱上的 Fermat 点 → 听者`，**只在阴影里**产出
-/// （直达没被挡就不算绕射，免得与直达重复计能；这也就是"拐角后仍可闻"的语义）。
+/// **A3 第二半：折射** —— 声线在层界面上按 **Snell** 折转。折线由**介质自己**给
+/// （[`AcousticMedium::refracted`]：只有它知道层界），本层只做**逐段遮挡检查**。
 ///
-/// 能量口径：`coeff_b · D(θ) · 介质衰减 / (d1·d2)` —— `1/(d1·d2)` 是 UTD 的**远场形状**，
-/// `D(θ) = (1 + cosθ)/2`（`θ` = 两段折线的夹角）：**掠射**（刚被挡）时 `D → 1`（与自由场连续），
-/// 越往阴影深处越小。⚠️ **不做** Fresnel 积分、也不做楔角相关的 UTD 系数（那是 A4 的另一半）。
-fn push_diffraction(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) {
-    if blocker(cx.geo, cx.src, cx.listener.pos).is_none() {
+/// 球面扩散仍用**直线距离** `1/d²`（`d = |声源−听者|`）⇒ 介质均匀退化时它与直达那条**同值**
+/// （而均匀时介质会直接返回 `None`，所以不会重复计能）。
+fn push_refraction(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) {
+    let Some(m) = cx.geo.medium else {
         return;
-    }
-    for (tried, e) in cx.geo.edges.iter().enumerate() {
-        if tried as u32 >= cx.cfg.max_edges {
-            st.dropped_budget += 1;
-            break;
-        }
-        let p = fermat_point(e, cx.src, cx.listener.pos);
-        let (v1, v2) = (p - cx.src, cx.listener.pos - p);
-        let (d1, d2) = (v1.length(), v2.length());
-        if d1 <= 1e-3 || d2 <= 1e-3 {
-            continue;
-        }
-        if occluded(cx.geo, cx.src, p) || occluded(cx.geo, p, cx.listener.pos) {
-            continue;
-        }
-        let cos_t = (v1.dot(v2) / (d1 * d2)).clamp(-1.0, 1.0);
-        let dir_factor = 0.5 * (1.0 + cos_t);
-        let (t1, a1) = seg_effect(cx.geo.medium, cx.src, p, cx.c, cx.cfg.medium_step);
-        let (t2, a2) = seg_effect(cx.geo.medium, p, cx.listener.pos, cx.c, cx.cfg.medium_step);
-        let mut bands = [0.0f32; BANDS];
-        for (((o, k), x), y) in bands
-            .iter_mut()
-            .zip(e.coeff.iter())
-            .zip(a1.iter())
-            .zip(a2.iter())
-        {
-            *o = k * dir_factor * x * y / (d1 * d2);
-        }
-        let dirv = (p - cx.listener.pos) * (1.0 / d2);
-        out.push(SoundPath {
-            source: cx.si,
-            delay: t1 + t2,
-            bands,
-            gain: mid_band(&bands),
-            dir: [dirv.x, dirv.y, dirv.z],
-            kind: PathKind::Diffracted,
-        });
-        st.diffracted += 1;
-    }
-}
-
-/// 棱上让 `|P−src| + |P−dst|` 最小的点（P 限定在**线段** `a→b` 上）。
-///
-/// `f(u) = |P(u)−src| + |P(u)−dst|` 是 `u` 的**凸**函数，且
-/// `f'(u) = cos∠(dir, P−src) + cos∠(dir, P−dst)` 单调不减（每项导数 = `sin²/|P−·| ≥ 0`）
-/// ⇒ 在「两个投影夹出的区间」上**定次数二分**求驻点（凸 ⇒ 驻点即全局最小），
-/// 再把参数夹进 `[0, len]`：夹到端点就是"从棱的端点绕"，几何上正确（凸函数区间最小在端点）。
-fn fermat_point(e: &Edge, src: Vec3, dst: Vec3) -> Vec3 {
-    let seg = e.b - e.a;
-    let len = seg.length();
-    if len <= 1e-6 {
-        return e.a;
-    }
-    let dir = seg * (1.0 / len);
-    let ps = (src - e.a).dot(dir).clamp(0.0, len);
-    let pd = (dst - e.a).dot(dir).clamp(0.0, len);
-    let (mut lo, mut hi) = if ps <= pd { (ps, pd) } else { (pd, ps) };
-    if hi - lo <= 1e-7 {
-        return e.a + dir * (0.5 * (lo + hi));
-    }
-    for _ in 0..FERMAT_ITERS {
-        let mid = 0.5 * (lo + hi);
-        let p = e.a + dir * mid;
-        let (va, vb) = (p - src, p - dst);
-        let slope = va.dot(dir) / va.length().max(1e-6) + vb.dot(dir) / vb.length().max(1e-6);
-        if slope < 0.0 {
-            lo = mid;
-        } else {
-            hi = mid;
+    };
+    let l = cx.listener.pos;
+    let Some((kinks, delay, atten)) = m.refracted(cx.src, l, cx.cfg.refraction_iters) else {
+        return;
+    };
+    for w in kinks.windows(2) {
+        if occluded(cx.geo, w[0], w[1]) {
+            return; // 折线有一段被挡 ⇒ 整条不产出
         }
     }
-    e.a + dir * (0.5 * (lo + hi))
+    let Some(prev) = kinks.iter().rev().nth(1) else {
+        return;
+    };
+    let dist = (l - cx.src).length().max(1e-3);
+    let dirv = (l - *prev).normalize();
+    let mut bands = [0.0f32; BANDS];
+    for (b, a) in bands.iter_mut().zip(atten.iter()) {
+        *b = a / (dist * dist);
+    }
+    out.push(SoundPath {
+        source: cx.si,
+        delay,
+        bands,
+        gain: mid_band(&bands),
+        dir: [dirv.x, dirv.y, dirv.z],
+        kind: PathKind::Refracted,
+    });
+    st.refracted += 1;
 }
 
 /// **A4「散射」** —— 面当**二级声源**（漫反射口径）：面中心按 Lambertian 往听者方向辐射
@@ -694,7 +657,7 @@ fn inside_tri(a: Vec3, b: Vec3, c: Vec3, p: Vec3) -> bool {
 ///
 /// "第一个" = **索引序**（不是最近的那个）：只为确定性，A2 的透射系数取的就是它；判据里墙面
 /// 不会与别的面重叠，所以"索引序"与"最近"在真实场景里一致。
-fn blocker(geo: &AcousticGeometry<'_>, p: Vec3, q: Vec3) -> Option<usize> {
+pub(crate) fn blocker(geo: &AcousticGeometry<'_>, p: Vec3, q: Vec3) -> Option<usize> {
     let dir = q - p;
     let len = dir.length();
     if len <= 1e-6 {
@@ -738,7 +701,7 @@ fn blocker(geo: &AcousticGeometry<'_>, p: Vec3, q: Vec3) -> Option<usize> {
 }
 
 /// 线段是否被任何三角挡住（只看有没有，不看是谁）——A1 的旧口径，A2 起由 [`blocker`] 实现。
-fn occluded(geo: &AcousticGeometry<'_>, p: Vec3, q: Vec3) -> bool {
+pub(crate) fn occluded(geo: &AcousticGeometry<'_>, p: Vec3, q: Vec3) -> bool {
     blocker(geo, p, q).is_some()
 }
 
@@ -756,6 +719,7 @@ pub fn jsonl(paths: &[SoundPath]) -> String {
                 PathKind::Portal => "portal",
                 PathKind::Diffracted => "diffracted",
                 PathKind::Scattered => "scattered",
+                PathKind::Refracted => "refracted",
                 PathKind::Reflected => "reflected",
             },
             p.delay,
