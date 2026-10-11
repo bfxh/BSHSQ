@@ -158,7 +158,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
                 w.step();
                 w.sense_cues(&cfg, &mut cues);
             }
-            Ok(format!("{}", jsonl(&cues)))
+            Ok(jsonl(&cues))
         }
         "help" | "--help" | "-h" => Ok(USAGE.to_string()),
         other => Err(format!("未知子命令 `{other}`\n{USAGE}")),
