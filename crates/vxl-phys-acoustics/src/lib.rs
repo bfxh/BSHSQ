@@ -1,4 +1,4 @@
-//! # vxl-phys-acoustics —— 声学传播（射线追踪音频）**A1 + A2 + A3 + A4**
+//! # vxl-phys-acoustics —— 声学传播（射线追踪音频）**A1 + A2 + A3 + A4 + A5**
 //!
 //! 设计与调研见 `docs/SURVEY-ACOUSTIC-RAYTRACING.md`（技术全景 / 系统与论文清单 / A1–A5 分期）。
 //! 本 crate 已落三期：
@@ -14,6 +14,9 @@
 //!   `D(θ) = (1 + cosθ)/2`（掠射时与自由场连续）；**散射**（`scattering` 表）—— 镜面那条按
 //!   `(1 - s_b)` 打折、剩下的按**漫反射二级声源**给出 `Scattered` 路径。**UTD 的 Fresnel 积分
 //!   仍未做**。
+//! - **A5**：**动态源/听者 + 预算与实时档** —— 声源本来就逐 tick 从 `World::impacts()` 来（会动），
+//!   听者位置每次调用都由调用方给（会动）；本层补上**按优先级（能量）截断**与 [`AcousticTier`]
+//!   （**确定性**的工作量上界，不是墙钟预算）。**GPU 档仍未做**。
 //!
 //! ## 三条设计原则（文档 §4 的落实）
 //!
@@ -39,9 +42,10 @@
 //!    逐位不变；
 //! 2. **确定性**：三角按**索引序**扫描、路径按（声源序 → 三角序）产出，无 HashMap 迭代序、
 //!    无随机采样 ⇒ 同输入逐字相同的 cue 序列（可用 `vxl-phys-cli` 的 `record/replay` 对拍）；
-//! 3. **预算**：每 tick 的路径数（[`AcousticConfig::max_paths`]）与尝试的开口数
-//!    （[`AcousticConfig::max_portals`]）都有上界，超了按序截断并在
-//!    [`AcousticStats::dropped_budget`] 里**上报**（同 `FragmentBudget` 的口径）。
+//! 3. **预算**：每 tick 的**候选**（尝试的开口 / 衍射棱 / 散射面 / 反射面）都有上界；产出按
+//!    **优先级（能量）**截断到 [`AcousticConfig::max_paths`]（稳定排序 ⇒ 平局仍按产出顺序，
+//!    逐位可复现），两类丢弃都如实计入 [`AcousticStats::dropped_budget`]（同 `FragmentBudget`
+//!    的口径）。档位预设见 [`AcousticTier`]。
 
 #![forbid(unsafe_code)]
 
@@ -142,6 +146,50 @@ impl Default for AcousticConfig {
     }
 }
 
+/// **档位预设**（A5）：确定性的**工作量上界**组合 —— ⚠️ **不是墙钟预算**（本仓禁止时间相关的
+/// 非确定性：同输入必须逐位同输出，跟机器快慢、负载、帧率无关）。
+///
+/// 实时档收的是四件事：候选面/开口/棱/散射面的上界、以及产出条数（`max_paths`）与介质采样步长。
+/// 想做"帧率自适应"的话，请由**宿主**按自己的节奏选档（例如每 N 帧切一次 `Realtime`），
+/// 而不是让本层去看时钟。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AcousticTier {
+    /// 离线 / 烘焙：全量候选（= [`AcousticConfig::default`]）。
+    Offline,
+    /// 实时：每 tick 的候选与产出都收紧（游戏每帧都要出数）。
+    Realtime,
+    /// 极省：不算反射（`max_reflections = 0`），开口/棱/散射面各最多一个。
+    Minimal,
+}
+
+impl AcousticTier {
+    /// 本档的旋钮组合（**确定性**：与机器、负载、时间无关）。
+    pub fn config(self) -> AcousticConfig {
+        let base = AcousticConfig::default();
+        match self {
+            AcousticTier::Offline => base,
+            AcousticTier::Realtime => AcousticConfig {
+                max_reflections: 8,
+                max_portals: 4,
+                max_edges: 4,
+                max_scatters: 4,
+                medium_step: 1.0,
+                max_paths: 8,
+                ..base
+            },
+            AcousticTier::Minimal => AcousticConfig {
+                max_reflections: 0,
+                max_portals: 1,
+                max_edges: 1,
+                max_scatters: 1,
+                medium_step: 2.0,
+                max_paths: 4,
+                ..base
+            },
+        }
+    }
+}
+
 /// 路径种类（现在五档）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PathKind {
@@ -232,6 +280,8 @@ impl AcousticsExt for World {
         } else {
             343.0
         };
+        // 本 tick 的**候选**先收在 `found`，最后统一按优先级截断（见下面 A5 那段）。
+        let mut found: Vec<SoundPath> = Vec::new();
         // 声源按**记录序**、三角按**索引序**——确定性的两层（无排序、无哈希）。
         for (si, rec) in self.impacts().iter().enumerate() {
             let src = rec.point;
@@ -243,12 +293,21 @@ impl AcousticsExt for World {
                 si: si as u32,
                 src,
             };
-            push_direct(out, &mut st, &cx);
-            push_portals(out, &mut st, &cx);
-            push_diffraction(out, &mut st, &cx);
-            push_reflections(out, &mut st, &cx);
-            push_scatter(out, &mut st, &cx);
+            push_direct(&mut found, &mut st, &cx);
+            push_portals(&mut found, &mut st, &cx);
+            push_diffraction(&mut found, &mut st, &cx);
+            push_reflections(&mut found, &mut st, &cx);
+            push_scatter(&mut found, &mut st, &cx);
         }
+        // **A5：输出预算按优先级（能量）截断** —— 只留最响的 `room` 条。`sort_by` 是**稳定**排序
+        // ⇒ 增益相同时仍按产出顺序（逐位可复现）；多出来的如实计入 `dropped_budget`。
+        let room = cfg.max_paths.saturating_sub(out.len());
+        if found.len() > room {
+            found.sort_by(|a, b| b.gain.total_cmp(&a.gain));
+            st.dropped_budget += found.len() - room;
+            found.truncate(room);
+        }
+        out.extend(found);
         st
     }
 }
@@ -283,10 +342,6 @@ fn push_direct(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) {
     let dist = d.length().max(1e-3);
     // 听者半径只做**远场粗筛**（`radius` 的 1000 倍之外不产出；A3 起换成介质衰减与距离门）。
     if dist > cx.listener.radius.max(1e-3) * 1e3 {
-        return;
-    }
-    if out.len() >= cx.cfg.max_paths {
-        st.dropped_budget += 1;
         return;
     }
     // 约定：`dir` = **从听者指向来声**（空间化器要的就是入射方向，不是"声源→听者"）。
@@ -342,10 +397,6 @@ fn push_portals(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) 
         if occluded(cx.geo, cx.src, c) || occluded(cx.geo, c, cx.listener.pos) {
             continue;
         }
-        if out.len() >= cx.cfg.max_paths {
-            st.dropped_budget += 1;
-            break;
-        }
         let d1 = (c - cx.src).length().max(1e-3);
         let d2 = (cx.listener.pos - c).length().max(1e-3);
         let reach = d1 + d2;
@@ -400,10 +451,6 @@ fn push_diffraction(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'
         }
         if occluded(cx.geo, cx.src, p) || occluded(cx.geo, p, cx.listener.pos) {
             continue;
-        }
-        if out.len() >= cx.cfg.max_paths {
-            st.dropped_budget += 1;
-            break;
         }
         let cos_t = (v1.dot(v2) / (d1 * d2)).clamp(-1.0, 1.0);
         let dir_factor = 0.5 * (1.0 + cos_t);
@@ -509,10 +556,6 @@ fn push_scatter(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) 
         if occluded(cx.geo, cx.src, p) || occluded(cx.geo, p, cx.listener.pos) {
             continue;
         }
-        if out.len() >= cx.cfg.max_paths {
-            st.dropped_budget += 1;
-            break;
-        }
         let (t1, a1) = seg_effect(cx.geo.medium, cx.src, p, cx.c, cx.cfg.medium_step);
         let (t2, a2) = seg_effect(cx.geo.medium, p, cx.listener.pos, cx.c, cx.cfg.medium_step);
         let geom = 0.5 * area2 * cos_in * cos_out / (d1 * d1 * d2 * d2);
@@ -571,10 +614,6 @@ fn push_reflections(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'
         }
         if occluded(geo, src, hit) || occluded(geo, hit, l) {
             continue;
-        }
-        if out.len() >= cfg.max_paths {
-            st.dropped_budget += 1;
-            break;
         }
         let d1 = (hit - src).length().max(1e-3);
         let d2 = (l - hit).length().max(1e-3);
