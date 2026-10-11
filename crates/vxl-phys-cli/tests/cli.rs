@@ -75,6 +75,10 @@ fn acoustic_stream_is_jsonl_and_deterministic() {
         a.contains("\"kind\":\"diffracted\""),
         "流里必须有从门框绕过来的路径（A4）：{a}"
     );
+    assert!(
+        a.contains("\"kind\":\"scattered\""),
+        "流里必须有漫反射散射的路径（A4 散射）：{a}"
+    );
     // A3 频带：每行都要有逐带能量（格式换代一次，见 crate 头注）
     let lines = a.lines().count();
     let with_bands = a.lines().filter(|l| l.contains("\"bands\":[")).count();

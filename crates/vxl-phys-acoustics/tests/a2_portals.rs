@@ -38,6 +38,7 @@ impl Geo {
             tris: &self.tris,
             absorption: &self.absorb,
             transmission: &self.trans,
+            scattering: &[],
             portals: &self.portals,
             edges: &[],
             medium: None,
