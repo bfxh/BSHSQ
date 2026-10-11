@@ -138,52 +138,66 @@ pub fn run(args: &[String]) -> Result<String, String> {
     let sub = pos.first().copied().unwrap_or("help");
     let name = pos.get(1).copied().unwrap_or("drop");
     let ticks: usize = pos.get(2).and_then(|s| s.parse().ok()).unwrap_or(240);
+    // `record`/`replay` 的基线文件走第 4 个位置参数（不引 `--out/--in` 这类带值开关，参数解析保持零依赖）。
+    let path = pos.get(3).copied();
     match sub {
-        "demo" => {
-            let (w, poses) = run_scene(name, ticks)?;
-            if json {
-                return Ok(json_demo(name, ticks, &w, &poses));
-            }
-            let mut s = format!("场景 {name} / {ticks} tick：体 {} 具\n", w.bodies.len());
-            for (i, p) in poses.iter().enumerate().take(6) {
-                s.push_str(&format!("  体{i}: ({:.4}, {:.4}, {:.4})\n", p.x, p.y, p.z));
-            }
-            let rep = w.health();
-            s.push_str(&format!(
-                "  健康：清醒 {} / NaN {} / 接触点 {}\n",
-                rep.awake_bodies, rep.nan_bodies, rep.contacts
-            ));
-            Ok(s)
-        }
-        "hash" => {
-            let (mut w, _) = run_scene(name, ticks)?;
-            let h = w.state_hash();
-            if json {
-                return Ok(json_hash(name, ticks, h));
-            }
-            Ok(format!(
-                "{}\n（同一个场景两次跑必须给出同一个值——集成方的复现自检）\n",
-                h
-            ))
-        }
+        "demo" => demo_cmd(name, ticks, json),
+        "hash" => hash_cmd(name, ticks, json),
         // **集成方的 CI 自检**：同场景跑两遍、每 60 tick 采一个观测点，逐点比对 `state_hash`。
         "check" => check(name, ticks, json),
-        "cue" => {
-            let mut w = scene(name)?;
-            let cfg = SenseConfig::default();
-            let mut cues: Vec<Cue> = Vec::new();
-            for _ in 0..ticks {
-                w.step();
-                w.sense_cues(&cfg, &mut cues);
-            }
-            Ok(jsonl(&cues))
-        }
+        // **录观测点序列**（JSONL，一行一个 tick 的哈希）⇒ 给 `replay` 当基线。
+        "record" => record_cmd(name, ticks, path),
+        // **回放对拍**：重跑场景，与基线逐行比对（跨机器/跨版本的复现检查）。
+        "replay" => replay_cmd(name, ticks, path),
+        "cue" => cue_cmd(name, ticks),
         "help" => Ok(USAGE.to_string()),
         other => Err(format!("未知子命令 `{other}`\n{USAGE}")),
     }
 }
 
 /// `demo --json` 的机器可读末态（**键名是本工具对外的承诺**：脚本/CI 会按它取值）。
+/// `demo`：跑场景后按 `json` 打机器可读或人读摘要（抽出来是为了压 `run` 的圈复杂度）。
+fn demo_cmd(name: &str, ticks: usize, json: bool) -> Result<String, String> {
+    let (w, poses) = run_scene(name, ticks)?;
+    if json {
+        return Ok(json_demo(name, ticks, &w, &poses));
+    }
+    let mut s = format!("场景 {name} / {ticks} tick：体 {} 具\n", w.bodies.len());
+    for (i, p) in poses.iter().enumerate().take(6) {
+        s.push_str(&format!("  体{i}: ({:.4}, {:.4}, {:.4})\n", p.x, p.y, p.z));
+    }
+    let rep = w.health();
+    s.push_str(&format!(
+        "  健康：清醒 {} / NaN {} / 接触点 {}\n",
+        rep.awake_bodies, rep.nan_bodies, rep.contacts
+    ));
+    Ok(s)
+}
+
+/// `hash`：末态 `state_hash`（人读带提示，`--json` 给机器）。
+fn hash_cmd(name: &str, ticks: usize, json: bool) -> Result<String, String> {
+    let (mut w, _) = run_scene(name, ticks)?;
+    let h = w.state_hash();
+    if json {
+        return Ok(json_hash(name, ticks, h));
+    }
+    Ok(format!(
+        "{h}\n（同一个场景两次跑必须给出同一个值——集成方的复现自检）\n"
+    ))
+}
+
+/// `cue`：感官 cue 流（JSONL，一行一条；`cue` 的机器可读形式就是它本身）。
+fn cue_cmd(name: &str, ticks: usize) -> Result<String, String> {
+    let mut w = scene(name)?;
+    let cfg = SenseConfig::default();
+    let mut cues: Vec<Cue> = Vec::new();
+    for _ in 0..ticks {
+        w.step();
+        w.sense_cues(&cfg, &mut cues);
+    }
+    Ok(jsonl(&cues))
+}
+
 fn json_demo(name: &str, ticks: usize, w: &World, poses: &[Vec3]) -> String {
     let mut s = format!(
         "{{\"scene\":\"{name}\",\"ticks\":{ticks},\"bodies\":{},\"poses\":[",
@@ -206,6 +220,72 @@ fn json_demo(name: &str, ticks: usize, w: &World, poses: &[Vec3]) -> String {
 /// `hash --json`。
 fn json_hash(name: &str, ticks: usize, h: u128) -> String {
     format!("{{\"scene\":\"{name}\",\"ticks\":{ticks},\"state_hash\":\"0x{h:032x}\"}}\n")
+}
+
+/// `record`：给了文件就写盘并回报行数，没给就打流（两条分支抽出来是为了压 `run` 的圈复杂度）。
+fn record_cmd(name: &str, ticks: usize, path: Option<&str>) -> Result<String, String> {
+    let text = record_text(name, ticks)?;
+    let Some(p) = path else {
+        return Ok(text);
+    };
+    match std::fs::write(p, &text) {
+        Ok(()) => Ok(format!("已写入 {p}（{} 个观测点）\n", text.lines().count())),
+        Err(e) => Err(format!("写不了 {p}：{e}")),
+    }
+}
+
+/// `replay`：基线文件是**必需**的（缺了就是用法错误，不该静默什么都不比）。
+fn replay_cmd(name: &str, ticks: usize, path: Option<&str>) -> Result<String, String> {
+    match path {
+        Some(p) => replay(name, ticks, p),
+        None => Err("replay 需要基线文件：`replay <场景> [ticks] <基线.jsonl>`".to_string()),
+    }
+}
+
+/// 观测点周期（ticks/行）——`record` 与 `replay` 共用的**格式常量**（改它 = 换格式）。
+const PERIOD: u64 = 60;
+
+/// 逐 tick 推进，每 [`PERIOD`] tick 写一行 `{"tick":..,"state_hash":"0x.."}`（JSONL）。
+fn record_text(name: &str, ticks: usize) -> Result<String, String> {
+    let mut w = scene(name)?;
+    let mut s = String::new();
+    for t in 0..ticks as u64 {
+        w.step();
+        if (t + 1) % PERIOD == 0 {
+            s.push_str(&format!(
+                "{{\"tick\":{},\"state_hash\":\"0x{:032x}\"}}\n",
+                t + 1,
+                w.state_hash()
+            ));
+        }
+    }
+    Ok(s)
+}
+
+/// 重跑场景并与基线文件**逐字**比对（行数不同也算不一致 ⇒ 报首个差异观测点）。
+fn replay(name: &str, ticks: usize, path: &str) -> Result<String, String> {
+    let want = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) => return Err(format!("读不了 {path}：{e}")),
+    };
+    let got = record_text(name, ticks)?;
+    for (i, (w, g)) in want.lines().zip(got.lines()).enumerate() {
+        if w != g {
+            return Err(format!(
+                "FAIL：第 {} 个观测点起不一致\n  基线 {w}\n  本次 {g}\n（跨机器/跨版本复现失败：先确认档位与版本）",
+                i + 1
+            ));
+        }
+    }
+    let (wl, gl) = (want.lines().count(), got.lines().count());
+    if wl != gl {
+        return Err(format!(
+            "FAIL：观测点行数不同（基线 {wl} vs 本次 {gl}）——tick 数或档位不一样？"
+        ));
+    }
+    Ok(format!(
+        "PASS：{name} / {ticks} tick / {gl} 个观测点与 {path} 逐字一致\n"
+    ))
 }
 
 /// 跑两遍同一场景，逐观测点比对 `state_hash`（`Recorder` 是公共 API 里最小的"观测点"容器）。
@@ -251,6 +331,8 @@ vxl-phys —— vxl_phys 的命令行入口
   vxl-phys hash  <drop|stack> [ticks]              末态 state_hash（可复现自检）
   vxl-phys check <drop|stack|cloth|voxel> [ticks]  跑两遍、逐观测点比对哈希（CI 自检；不一致退出码 2）
   vxl-phys cue   <voxel> [ticks]                   感官 cue 流（JSONL；只有 voxel 是 provider 地面）
+  vxl-phys record <scene> [ticks] [基线.jsonl]      录观测点序列（JSONL；省略文件则打到 stdout）
+  vxl-phys replay <scene> [ticks] <基线.jsonl>      与基线逐行对拍（跨机器/跨版本复现检查）
   vxl-phys help                                    本说明
 任意子命令都可加 `--json`：输出机器可读 JSON（cue 本来就是 JSONL）。
 ";

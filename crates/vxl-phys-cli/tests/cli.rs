@@ -92,3 +92,42 @@ fn check_is_a_ci_gate() {
         "{j}"
     );
 }
+
+/// `record` / `replay`：录基线再回放 ⇒ PASS；**把基线改坏 ⇒ 必须 FAIL**（证明这门不是橡皮图章）。
+#[test]
+fn record_then_replay_round_trips_and_catches_tampering() {
+    let p = std::env::temp_dir()
+        .join("vxl_phys_cli_replay_baseline.jsonl")
+        .to_string_lossy()
+        .to_string();
+    let rec = ok(&["record", "drop", "180", &p]);
+    assert!(
+        rec.contains("已写入") && rec.contains("3 个观测点"),
+        "{rec}"
+    );
+    let got = ok(&["replay", "drop", "180", &p]);
+    assert!(got.contains("PASS"), "原样回放必须 PASS：{got}");
+    // 篡改基线（往第一行的哈希里插一个字符）⇒ 回放必须 FAIL
+    let tampered = std::fs::read_to_string(&p)
+        .unwrap_or_default()
+        .replacen("0x", "0x0", 1);
+    std::fs::write(&p, tampered).ok();
+    let bad = err(&["replay", "drop", "180", &p]);
+    assert!(
+        bad.contains("FAIL") && bad.contains("不一致"),
+        "篡改必须被抓到：{bad}"
+    );
+    std::fs::remove_file(&p).ok();
+}
+
+/// `record` 不带文件 ⇒ 直接打流（给管道用）；`replay` 缺基线 ⇒ 响亮拒绝。
+#[test]
+fn record_to_stdout_and_replay_without_baseline() {
+    let out = ok(&["record", "stack", "60"]);
+    assert!(
+        out.starts_with('{') && out.contains("\"state_hash\":\"0x"),
+        "{out}"
+    );
+    let e = err(&["replay", "stack", "60"]);
+    assert!(e.contains("基线文件"), "{e}");
+}
