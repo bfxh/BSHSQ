@@ -1,0 +1,347 @@
+//! # vxl-phys-acoustics —— 声学传播（射线追踪音频）**A1**
+//!
+//! 设计与调研见 `docs/SURVEY-ACOUSTIC-RAYTRACING.md`（技术全景 / 系统与论文清单 / A1–A5 分期）。
+//! 本 crate 落 **A1**：静态场景的
+//! **直达 + 一次镜面反射（镜像源法）+ 遮挡**，单频带材质表（吸声系数）。
+//!
+//! ## 三条设计原则（文档 §4 的落实）
+//!
+//! 1. **声学几何 ≠ 碰撞几何**：[`AcousticGeometry`] 由调用方以**建模面**（顶点 + 三角 + 逐面
+//!    吸声系数）交进来；本层**不读** `World` 的碰撞形状，也不要求被挡的墙存在于物理世界。
+//!    （判据 `acoustic_geometry_is_independent_of_collision_shapes` 钉住这条。）
+//! 2. **缝隙/开口是显式拓扑**（A2）：A1 只做"封闭三角面"的反射与遮挡；开口当二级声源、
+//!    无 portal 墙按透射系数泄漏，留到 A2。
+//! 3. **介质是体积参数场**（A3）：A1 只有**常数声速**（[`AcousticConfig::speed_of_sound`]）；
+//!    密度/吸收的空间变化留到 A3。
+//!
+//! ## 三条契约（与 `vxl-phys-sense` 同款，CI 可判）
+//!
+//! 1. **零干扰**：[`AcousticsExt::acoustic_cues`] 只持有 `&self` ⇒ 开/关声学层，`state_hash`
+//!    逐位不变；
+//! 2. **确定性**：三角按**索引序**扫描、路径按（声源序 → 三角序）产出，无 HashMap 迭代序、
+//!    无随机采样 ⇒ 同输入逐字相同的 cue 序列（可用 `vxl-phys-cli` 的 `record/replay` 对拍）；
+//! 3. **预算**：每 tick 产出的路径数（[`AcousticConfig::max_paths`]）有上界，超了按序截断并
+//!    在 [`AcousticStats::dropped_budget`] 里**上报**（同 `FragmentBudget` 的口径）。
+
+#![forbid(unsafe_code)]
+
+use vxl_phys::{Vec3, World};
+
+/// **声学几何**（建模面：顶点 + 三角 + 逐面吸声系数，三者等长于三角数）。
+///
+/// `absorption[i] ∈ [0,1]`：1 = 全吸（无声反射），0 = 全反射。**外部表**——不往 `Material` 塞
+/// 声学字段（那是物理侧棘轮管的类型）。
+pub struct AcousticGeometry<'a> {
+    pub verts: &'a [Vec3],
+    pub tris: &'a [[u32; 3]],
+    pub absorption: &'a [f32],
+}
+
+/// 听者（A1 只有一个点 + 半径：进入该球即可闻）。
+pub struct Listener {
+    pub pos: Vec3,
+    pub radius: f32,
+}
+
+/// 声学档（A1 的全部旋钮）。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AcousticConfig {
+    /// 声速（m/s）；空气常温 ≈ 343。
+    pub speed_of_sound: f32,
+    /// 一次反射的最大候选面数（`0` = 只算直达；预算口径见模块头注）。
+    pub max_reflections: u32,
+    /// 每 tick 最多产出多少条路径（硬预算）。
+    pub max_paths: usize,
+}
+
+impl Default for AcousticConfig {
+    fn default() -> Self {
+        Self {
+            speed_of_sound: 343.0,
+            max_reflections: 24,
+            max_paths: 16,
+        }
+    }
+}
+
+/// 路径种类（A1 只有两档；A2 起加 `Portal`、A4 加 `Diffracted`）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PathKind {
+    /// 直线可达。
+    Direct,
+    /// 一次镜面反射。
+    Reflected,
+}
+
+/// 一条可闻路径（输出层的原子单位；上层把它卷成 SIR 再与干信号卷积）。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SoundPath {
+    /// 声源序号（= `World::impacts()` 的记录序）。
+    pub source: u32,
+    /// 到达时延（秒）。
+    pub delay: f32,
+    /// 能量增益（直达 = `1/d²`；反射再乘 `(1 - absorption)`）。
+    pub gain: f32,
+    /// 到达方向（单位；从听者指向来声）。
+    pub dir: [f32; 3],
+    pub kind: PathKind,
+}
+
+/// 一次归约的统计（"预算真的生效了没有"由它自证）。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AcousticStats {
+    /// 声源数（= 本 tick 的冲击记录数）。
+    pub sources: usize,
+    /// 直达路径数。
+    pub direct: usize,
+    /// 反射路径数。
+    pub reflected: usize,
+    /// 因遮挡被丢的直达路径数。
+    pub blocked: usize,
+    /// 因超预算被丢的路径数。
+    pub dropped_budget: usize,
+}
+
+/// **声学传播域的扩展 API**（`impl AcousticsExt for World`）——同感官域：**不往 `World` 加方法**。
+pub trait AcousticsExt {
+    /// 归约**本 tick**的可闻路径，**追加**到 `out`（返回 [`AcousticStats`]）。
+    ///
+    /// 声源取 `World::impacts()`（逐 tick 峰值冲击的接触点）——与破坏管线、感官域**同源**；
+    /// 没有冲击的 tick 自然产出 0 条路径（事件驱动）。
+    fn acoustic_cues(
+        &self,
+        geo: &AcousticGeometry<'_>,
+        listener: &Listener,
+        cfg: &AcousticConfig,
+        out: &mut Vec<SoundPath>,
+    ) -> AcousticStats;
+}
+
+impl AcousticsExt for World {
+    fn acoustic_cues(
+        &self,
+        geo: &AcousticGeometry<'_>,
+        listener: &Listener,
+        cfg: &AcousticConfig,
+        out: &mut Vec<SoundPath>,
+    ) -> AcousticStats {
+        let mut st = AcousticStats {
+            sources: self.impacts().len(),
+            ..AcousticStats::default()
+        };
+        let c = if cfg.speed_of_sound > 0.0 {
+            cfg.speed_of_sound
+        } else {
+            343.0
+        };
+        // 声源按**记录序**、三角按**索引序**——确定性的两层（无排序、无哈希）。
+        for (si, rec) in self.impacts().iter().enumerate() {
+            let src = rec.point;
+            let cx = Ctx {
+                geo,
+                listener,
+                cfg,
+                c,
+                si: si as u32,
+                src,
+            };
+            push_direct(out, &mut st, &cx);
+            push_reflections(out, &mut st, &cx);
+        }
+        st
+    }
+}
+
+/// 一次归约的上下文（几何 + 听者 + 档 + 本次声源）——打包起来免得每个助手摊一长串形参
+/// （`args-gate` 的 soft 阈值实测把 7 个形参也算违规）。
+struct Ctx<'a> {
+    geo: &'a AcousticGeometry<'a>,
+    listener: &'a Listener,
+    cfg: &'a AcousticConfig,
+    c: f32,
+    si: u32,
+    src: Vec3,
+}
+
+/// 直达：连线被任何三角挡住 ⇒ 丢（A1 不做衍射/泄漏，A2 起补）。
+fn push_direct(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) {
+    let (src, c) = (cx.src, cx.c);
+    let d = cx.listener.pos - src;
+    if occluded(cx.geo, src, cx.listener.pos) {
+        st.blocked += 1;
+        return;
+    }
+    let dist = d.length().max(1e-3);
+    // 听者半径在 A1 只做**远场粗筛**（`radius` 的 1000 倍之外不产出；A3 起换成介质衰减与距离门）。
+    if dist > cx.listener.radius.max(1e-3) * 1e3 {
+        return;
+    }
+    if out.len() >= cx.cfg.max_paths {
+        st.dropped_budget += 1;
+        return;
+    }
+    // 约定：`dir` = **从听者指向来声**（空间化器要的就是入射方向，不是"声源→听者"）。
+    let dir = ((src - cx.listener.pos) * (1.0 / dist)).normalize();
+    out.push(SoundPath {
+        source: cx.si,
+        delay: dist / c,
+        gain: 1.0 / (dist * dist),
+        dir: [dir.x, dir.y, dir.z],
+        kind: PathKind::Direct,
+    });
+    st.direct += 1;
+}
+
+/// 一次镜面反射：**镜像源法**——镜像听者，与三角平面求交，命中点落在三角内且两段都不被挡 ⇒ 一条路径。
+fn push_reflections(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) {
+    let (src, c, geo, cfg) = (cx.src, cx.c, cx.geo, cx.cfg);
+    let mut tried = 0u32;
+    for (ti, tri) in geo.tris.iter().enumerate() {
+        if tried >= cfg.max_reflections {
+            break;
+        }
+        let Some((a, b, cc, absorb)) = tri_of(geo, ti, *tri) else {
+            continue;
+        };
+        let n = (b - a).cross(cc - a);
+        let ln = n.length();
+        if ln <= 1e-9 {
+            continue; // 退化面：不参与反射
+        }
+        tried += 1;
+        let n = n * (1.0 / ln);
+        // 镜像听者：`l' = l - 2·((l - a)·n)·n`
+        let l = cx.listener.pos;
+        let lp = l - n * (2.0 * (l - a).dot(n));
+        let seg = lp - src;
+        let denom = seg.dot(n);
+        if denom.abs() <= 1e-9 {
+            continue; // 与面平行：无镜面反射点
+        }
+        let t = (a - src).dot(n) / denom;
+        if !(0.0..=1.0).contains(&t) {
+            continue;
+        }
+        let hit = src + seg * t;
+        if !inside_tri(a, b, cc, hit) {
+            continue;
+        }
+        if occluded(geo, src, hit) || occluded(geo, hit, l) {
+            continue;
+        }
+        if out.len() >= cfg.max_paths {
+            st.dropped_budget += 1;
+            break;
+        }
+        let d1 = (hit - src).length().max(1e-3);
+        let d2 = (l - hit).length().max(1e-3);
+        let dirv = (hit - l) * (1.0 / d2);
+        out.push(SoundPath {
+            source: cx.si,
+            delay: (d1 + d2) / c,
+            gain: (1.0 - absorb.clamp(0.0, 1.0)) / ((d1 + d2) * (d1 + d2)),
+            dir: [dirv.x, dirv.y, dirv.z],
+            kind: PathKind::Reflected,
+        });
+        st.reflected += 1;
+    }
+}
+
+/// 取三角的三顶点与吸声系数（索引越界 / 表短 ⇒ `None`，与 `TriMesh` 的"丢坏三角"同口径）。
+fn tri_of(geo: &AcousticGeometry<'_>, ti: usize, tri: [u32; 3]) -> Option<(Vec3, Vec3, Vec3, f32)> {
+    let n = geo.verts.len();
+    if tri.iter().any(|&k| k as usize >= n) {
+        return None;
+    }
+    let absorb = *geo.absorption.get(ti)?;
+    Some((
+        geo.verts[tri[0] as usize],
+        geo.verts[tri[1] as usize],
+        geo.verts[tri[2] as usize],
+        absorb,
+    ))
+}
+
+/// 点是否在三角内（重心坐标，带 1e-5 的边界容差）。
+fn inside_tri(a: Vec3, b: Vec3, c: Vec3, p: Vec3) -> bool {
+    let v0 = c - a;
+    let v1 = b - a;
+    let v2 = p - a;
+    let d00 = v0.dot(v0);
+    let d01 = v0.dot(v1);
+    let d11 = v1.dot(v1);
+    let d20 = v2.dot(v0);
+    let d21 = v2.dot(v1);
+    let den = d00 * d11 - d01 * d01;
+    if den.abs() <= 1e-12 {
+        return false;
+    }
+    let u = (d11 * d20 - d01 * d21) / den;
+    let v = (d00 * d21 - d01 * d20) / den;
+    u >= -1e-5 && v >= -1e-5 && u + v <= 1.0 + 1e-5
+}
+
+/// 线段 `p→q` 是否被任何三角挡住（Möller–Trumbore；端点共面不计）。
+fn occluded(geo: &AcousticGeometry<'_>, p: Vec3, q: Vec3) -> bool {
+    let dir = q - p;
+    let len = dir.length();
+    if len <= 1e-6 {
+        return false;
+    }
+    let dir = dir * (1.0 / len);
+    for tri in geo.tris.iter() {
+        let n = geo.verts.len();
+        if tri.iter().any(|&k| k as usize >= n) {
+            continue;
+        }
+        let (a, b, c) = (
+            geo.verts[tri[0] as usize],
+            geo.verts[tri[1] as usize],
+            geo.verts[tri[2] as usize],
+        );
+        let e1 = b - a;
+        let e2 = c - a;
+        let pv = dir.cross(e2);
+        let det = e1.dot(pv);
+        if det.abs() <= 1e-9 {
+            continue;
+        }
+        let inv = 1.0 / det;
+        let tv = p - a;
+        let u = tv.dot(pv) * inv;
+        if !(-1e-6..=1.0 + 1e-6).contains(&u) {
+            continue;
+        }
+        let qv = tv.cross(e1);
+        let v = dir.dot(qv) * inv;
+        if v < -1e-6 || u + v > 1.0 + 1e-6 {
+            continue;
+        }
+        let t = e2.dot(qv) * inv;
+        if t > 1e-4 && t < len - 1e-4 {
+            return true;
+        }
+    }
+    false
+}
+
+/// cue 流 → JSONL（一行一条；固定 6 位小数 ⇒ 可逐字对拍，接上 `vxl-phys-cli` 的 `record/replay`）。
+pub fn jsonl(paths: &[SoundPath]) -> String {
+    let mut s = String::new();
+    for p in paths {
+        s.push_str(&format!(
+            "{{\"source\":{},\"kind\":\"{}\",\"delay\":{:.6},\"gain\":{:.6},\"dir\":[{:.6},{:.6},{:.6}]}}\n",
+            p.source,
+            match p.kind {
+                PathKind::Direct => "direct",
+                PathKind::Reflected => "reflected",
+            },
+            p.delay,
+            p.gain,
+            p.dir[0],
+            p.dir[1],
+            p.dir[2]
+        ));
+    }
+    s
+}
