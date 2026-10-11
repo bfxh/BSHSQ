@@ -32,6 +32,7 @@ pub use vxl_phys_terrain::TerrainSet;
 // ── 按域拆出的子模块（子目录 src/）
 mod arenas;
 mod impact;
+pub mod prelude;
 mod props;
 mod providers;
 mod types;
@@ -45,8 +46,7 @@ mod world_step;
 mod world_struct;
 pub(crate) use self::props::*;
 pub use self::world_step::{conversion::VoxelConversionExt, destruction::DestructionExt};
-pub use self::{arenas::*, impact::*, providers::*, types::*, world_soft::*, world_struct::*};
-// ↑ 子模块顶层条目再导出（impl-only 模块不入 glob，避免 unused）
+pub use self::{arenas::*, impact::*, providers::*, types::*, world_soft::*, world_struct::*}; // ↑ 子模块顶层条目再导出（impl-only 模块不入 glob，避免 unused）
 
 #[cfg(test)]
 mod tests;
