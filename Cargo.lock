@@ -1027,6 +1027,7 @@ name = "vxl-phys-cli"
 version = "0.1.0"
 dependencies = [
  "vxl-phys",
+ "vxl-phys-replay",
  "vxl-phys-sense",
  "vxl-phys-soft",
  "vxl-phys-terrain",

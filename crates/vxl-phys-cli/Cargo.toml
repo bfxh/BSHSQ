@@ -9,5 +9,6 @@ description = "vxl_phys 的命令行工具：跑示例场景 / 打状态哈希 /
 # 只用**公共 API**（门面 + 感官域 + 体素几何）：这个 crate 的存在本身就是"别人怎么调"的样板。
 vxl-phys = { workspace = true }
 vxl-phys-sense = { workspace = true }
+vxl-phys-replay = { workspace = true }
 vxl-phys-soft = { workspace = true }
 vxl-phys-terrain = { workspace = true }
