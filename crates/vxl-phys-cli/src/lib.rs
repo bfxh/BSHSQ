@@ -6,6 +6,8 @@
 //! - `demo <drop|stack|cloth> [ticks]`：跑一个最小场景，打印末态摘要；
 //! - `hash <drop|stack> [ticks]`：打印末态 `state_hash`（**两次跑必须同值** ⇒ 集成方的复现自检）；
 //! - `cue <drop> [ticks]`：打印感官 cue 流（JSONL，一行一条，见 `vxl-phys-sense`）。
+//! - `acoustic <voxel> [ticks]`：打印声学路径流（JSONL，一行一条，见 `vxl-phys-acoustics`）——
+//!   **声学几何是声明的"房间"**（地板 + 带开口的墙），与碰撞体无关。
 //!
 //! 依赖面刻意压在"一个门面 + 两个域 crate"上：要让别人敢接，先得证明外部视角够用。
 
@@ -14,6 +16,9 @@
 // ⚠️ 本仓 `glob-gate` 对新文件的 `use ...::*` 是硬判 ⇒ 这里**逐项具名导入**（调用方自己那边
 // 用 `use vxl_phys::prelude::*;` 才是我们要给他们的便利，见 `docs/QUICKSTART.md`）。
 use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys_acoustics::{
+    jsonl as aco_jsonl, AcousticConfig, AcousticGeometry, AcousticsExt, Listener, Portal, SoundPath,
+};
 use vxl_phys_replay::Recorder;
 use vxl_phys_sense::{jsonl, Cue, SenseConfig, SenseExt};
 use vxl_phys_soft::{ClothSheet, Stiffness};
@@ -150,6 +155,8 @@ pub fn run(args: &[String]) -> Result<String, String> {
         // **回放对拍**：重跑场景，与基线逐行比对（跨机器/跨版本的复现检查）。
         "replay" => replay_cmd(name, ticks, path),
         "cue" => cue_cmd(name, ticks),
+        // **第二条输出侧域**：声学路径流（走声明的"房间"几何，与碰撞体无关）。
+        "acoustic" => acoustic_cmd(name, ticks),
         "help" => Ok(USAGE.to_string()),
         other => Err(format!("未知子命令 `{other}`\n{USAGE}")),
     }
@@ -196,6 +203,82 @@ fn cue_cmd(name: &str, ticks: usize) -> Result<String, String> {
         w.sense_cues(&cfg, &mut cues);
     }
     Ok(jsonl(&cues))
+}
+
+/// 声学几何的**声明式房间**（`acoustic` 子命令用）：顶点 / 三角 / 吸声 / 透射 / 开口。
+struct Room {
+    verts: Vec<Vec3>,
+    tris: Vec<[u32; 3]>,
+    absorb: Vec<f32>,
+    trans: Vec<f32>,
+    portals: Vec<Portal>,
+}
+
+impl Room {
+    fn geom(&self) -> AcousticGeometry<'_> {
+        AcousticGeometry {
+            verts: &self.verts,
+            tris: &self.tris,
+            absorption: &self.absorb,
+            transmission: &self.trans,
+            portals: &self.portals,
+        }
+    }
+}
+
+/// 一间"声学房间"：地板（y = 0.25，与体素地面同高）+ 墙（z = 1.5，透射 0.02）+ **门洞开口**（全开）。
+///
+/// 它**不是**碰撞几何（`scene()` 里那些盒/体素才是）—— 这正是"声学几何 ≠ 碰撞几何"的样板：
+/// 关上门（`open: 0.0`）就只剩墙的透射泄漏，开门则房间外听得见。
+fn room() -> Room {
+    let verts = vec![
+        Vec3::new(-4.0, 0.25, -4.0),
+        Vec3::new(4.0, 0.25, -4.0),
+        Vec3::new(4.0, 0.25, 4.0),
+        Vec3::new(-4.0, 0.25, 4.0),
+        Vec3::new(-4.0, 0.25, 1.5),
+        Vec3::new(4.0, 0.25, 1.5),
+        Vec3::new(4.0, 3.0, 1.5),
+        Vec3::new(-4.0, 3.0, 1.5),
+    ];
+    Room {
+        verts,
+        tris: vec![[0u32, 1, 2], [0, 2, 3], [4, 5, 6], [4, 6, 7]],
+        absorb: vec![0.2f32, 0.2, 0.9, 0.9],
+        trans: vec![0.0f32, 0.0, 0.02, 0.02],
+        portals: vec![Portal {
+            quad: [
+                Vec3::new(-1.0, 0.25, 1.5),
+                Vec3::new(1.0, 0.25, 1.5),
+                Vec3::new(1.0, 2.5, 1.5),
+                Vec3::new(-1.0, 2.5, 1.5),
+            ],
+            open: 1.0,
+        }],
+    }
+}
+
+/// `acoustic`：声学路径流（JSONL，一行一条；机器可读形式就是它本身）。
+///
+/// 听者站在墙**外侧**（z = 3.0）⇒ 听到的是"隔壁房间"的冲击：穿门洞的 `portal` 路径 +
+/// 墙的透射泄漏 `transmitted` + 反射。逐 tick 归约（每 tick 用干净缓冲 ⇒ 预算按 tick 算）。
+fn acoustic_cmd(name: &str, ticks: usize) -> Result<String, String> {
+    let mut w = scene(name)?;
+    let room = room();
+    let geo = room.geom();
+    let cfg = AcousticConfig::default();
+    let listener = Listener {
+        pos: Vec3::new(0.0, 1.0, 3.0),
+        radius: 0.5,
+    };
+    let mut all: Vec<SoundPath> = Vec::new();
+    for _ in 0..ticks {
+        w.step();
+        let mut tick: Vec<SoundPath> = Vec::new();
+        w.acoustic_cues(&geo, &listener, &cfg, &mut tick);
+        all.extend(tick);
+    }
+    Ok(aco_jsonl(&all))
 }
 
 fn json_demo(name: &str, ticks: usize, w: &World, poses: &[Vec3]) -> String {
@@ -331,6 +414,7 @@ vxl-phys —— vxl_phys 的命令行入口
   vxl-phys hash  <drop|stack> [ticks]              末态 state_hash（可复现自检）
   vxl-phys check <drop|stack|cloth|voxel> [ticks]  跑两遍、逐观测点比对哈希（CI 自检；不一致退出码 2）
   vxl-phys cue   <voxel> [ticks]                   感官 cue 流（JSONL；只有 voxel 是 provider 地面）
+  vxl-phys acoustic <voxel> [ticks]                声学路径流（JSONL；声学几何是声明的房间，与碰撞体无关）
   vxl-phys record <scene> [ticks] [基线.jsonl]      录观测点序列（JSONL；省略文件则打到 stdout）
   vxl-phys replay <scene> [ticks] <基线.jsonl>      与基线逐行对拍（跨机器/跨版本复现检查）
   vxl-phys help                                    本说明
