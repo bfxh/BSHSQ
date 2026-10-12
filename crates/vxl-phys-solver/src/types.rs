@@ -33,6 +33,10 @@ pub(crate) struct PointConstraint {
     /// 30 Hz 动/60 Hz 静态、ζ=10）——限制迭代增益、深堆不依赖跨层链收敛。
     pub(crate) cfm: f32,
     pub(crate) friction: f32,
+    /// **沿 `t2` 的摩擦系数**（K5 各向异性：`friction` 是沿 `t1` 的那一份）。
+    /// `friction2 == friction` ⇒ 各向同性 ⇒ 求解环走原式（**逐位不变**）；
+    /// 不等 ⇒ 椭圆锥（见 `iterate_island_constraints`）。
+    pub(crate) friction2: f32,
     pub(crate) pn: f32,
     pub(crate) pt1: f32,
     pub(crate) pt2: f32,

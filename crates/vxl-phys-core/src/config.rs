@@ -25,8 +25,19 @@ pub enum FrictionModel {
     Coulomb { mu: f32 },
     /// 静+动（μs, μk）+ 临界速度 v_crit（Stribeck 线化）。
     StaticKinetic { mu_s: f32, mu_k: f32, v_crit: f32 },
-    /// 各向异性：两主轴 μ1/μ2 + 方向角（弧度，体局部 XZ 面；传送带/履带用）。
-    Anisotropic { mu1: f32, mu2: f32, angle: f32 },
+    /// 各向异性：两主轴 μ1/μ2 + 方向角（弧度，体局部 XZ 面；传送带/履带用）
+    /// + **传送带切向速度 `belt`**（m/s，沿 μ1 轴；0 = 关）。
+    ///
+    /// 方向应用（K5，2026-10-12 落地）：接触面内把 μ1 轴**投影**成切向基 `t1`，
+    /// 两轴在**对齐基**里独立上钳（沿 t1 的 μ1、沿 t2 的 μ2，取同一条 √(μ·μ) 组合律）；
+    /// `belt` 把该方向的**切向目标速度**钉到带速 ⇒ 静止的"跑步机面"也能拖动载荷。
+    /// `μ1 == μ2 且 belt == 0` 按各向同性处理（走原路径，**逐位不变**）。
+    Anisotropic {
+        mu1: f32,
+        mu2: f32,
+        angle: f32,
+        belt: f32,
+    },
 }
 
 impl FrictionModel {
@@ -273,6 +284,7 @@ impl PhysConfig {
                     mu1: 0.7,
                     mu2: 0.5,
                     angle: 0.0,
+                    belt: 0.0,
                 };
             }
             Preset::Extreme => {
@@ -283,6 +295,7 @@ impl PhysConfig {
                     mu1: 0.8,
                     mu2: 0.6,
                     angle: 0.0,
+                    belt: 0.0,
                 };
             }
         }

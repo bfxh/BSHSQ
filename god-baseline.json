@@ -101,8 +101,8 @@
    "max_type_members": 23
   },
   "crates/vxl-phys-core/src/config.rs": {
-   "file_lines": 326,
-   "max_fn_lines": 42,
+   "file_lines": 339,
+   "max_fn_lines": 44,
    "max_type_members": 32
   },
   "crates/vxl-phys-core/src/grid.rs": {
@@ -126,7 +126,7 @@
    "max_type_members": 3
   },
   "crates/vxl-phys-core/src/material.rs": {
-   "file_lines": 121,
+   "file_lines": 123,
    "max_fn_lines": 22,
    "max_type_members": 3
   },
@@ -996,12 +996,17 @@
    "max_type_members": 0
   },
   "crates/vxl-phys-solver/src/constraint.rs": {
-   "file_lines": 436,
-   "max_fn_lines": 104,
+   "file_lines": 453,
+   "max_fn_lines": 107,
    "max_type_members": 6
   },
+  "crates/vxl-phys-solver/src/constraint/friction.rs": {
+   "file_lines": 130,
+   "max_fn_lines": 73,
+   "max_type_members": 0
+  },
   "crates/vxl-phys-solver/src/helpers.rs": {
-   "file_lines": 136,
+   "file_lines": 161,
    "max_fn_lines": 30,
    "max_type_members": 0
   },
@@ -1051,7 +1056,7 @@
    "max_type_members": 0
   },
   "crates/vxl-phys-solver/src/types.rs": {
-   "file_lines": 227,
+   "file_lines": 231,
    "max_fn_lines": 28,
    "max_type_members": 21
   },
@@ -1458,6 +1463,11 @@
   "crates/vxl-phys/tests/float_quiet_probe.rs": {
    "file_lines": 770,
    "max_fn_lines": 114,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys/tests/friction_anisotropy_contracts.rs": {
+   "file_lines": 208,
+   "max_fn_lines": 40,
    "max_type_members": 0
   },
   "crates/vxl-phys/tests/fluid_boundary.rs": {

@@ -2,21 +2,35 @@
 use super::*;
 use vxl_phys_narrow::ContactPoint;
 
+mod friction;
+use friction::{friction_frame, material_of, tangent_setup};
+
+/// **切向目标速度** = 锚点漂移回拉 + **传送带带速**（K5）。
+///
+/// ⚠️ **带面在滑 ⇒ 不做锚点回拉**：回拉的目标是"材料点回正"，而带面上的分离**就是**真实滑移
+/// （同 `DRIFT_STICK_RATIO` 的判据）——两者对着干，实测稳态只能到 0.37 m/s 而带速是 0.6
+/// （`friction_anisotropy_contracts.rs` A2）。各向同性时 `belt` 恒 0 ⇒ 与旧式逐位相同。
+fn tangential_target(
+    warm_pt: Option<WarmPoint>,
+    belt: f32,
+    mu: f32,
+    drift: Vec3,
+    sp: &SolverParams,
+    t: (Vec3, Vec3),
+) -> (f32, f32) {
+    if belt == 0.0 {
+        tangential_drift(warm_pt, mu, drift, sp, t.0, t.1)
+    } else {
+        (belt, 0.0)
+    }
+}
+
 /// 材质对的有效摩擦/恢复：摩擦按材质对组合（§4.4/§4.5）；静+动档 μ 随预解
 /// 相对切向速度在 [μk, μs] 线化过渡（vt 取首个接触点，确定性）。
+
 fn material_pair(bodies: &BodySet, m: &Manifold, a: usize, b: usize) -> (f32, f32) {
-    let mat_a = bodies
-        .material
-        .get(a)
-        .and_then(|&id| bodies.materials.get(id as usize))
-        .copied()
-        .unwrap_or_default();
-    let mat_b = bodies
-        .material
-        .get(b)
-        .and_then(|&id| bodies.materials.get(id as usize))
-        .copied()
-        .unwrap_or_default();
+    let mat_a = material_of(bodies, a);
+    let mat_b = material_of(bodies, b);
     let stribeck = matches!(
         mat_a.friction,
         vxl_phys_core::FrictionModel::StaticKinetic { .. }
@@ -360,7 +374,9 @@ pub(crate) fn build_constraint(
     } else {
         Some(&warm_slots[warm_slot as usize].1)
     };
-    let (t1, t2) = tangents(m.normal);
+    // K5：各向异性 ⇒ 切向基取主轴投影 + 带速（`None` ⇒ 原路径，逐位不变）。
+    let frame = friction_frame(bodies, a, b, m.normal, m);
+    let (t1, t2, mu_stick, belt) = tangent_setup(frame, m.normal, mu);
     let pos_a = bodies.position[a];
     let pos_b = bodies.position[b];
     // 接触回收（Rapier `contact_recycling` 同族）：锚点存双方体局部坐标，
@@ -393,7 +409,7 @@ pub(crate) fn build_constraint(
         let vn = (vb - va).dot(m.normal);
         let is_static_pair = bodies.inv_mass[a] == 0.0 || bodies.inv_mass[b] == 0.0;
         let (rhs, cfm) = soft_contact(g.depth, vn, e, e_threshold, sp, is_static_pair);
-        let (trhs1, trhs2) = tangential_drift(warm_pt, mu, g.drift, sp, t1, t2);
+        let (trhs1, trhs2) = tangential_target(warm_pt, belt, mu_stick, g.drift, sp, (t1, t2));
 
         pts[npts as usize] = PointConstraint {
             ra,
@@ -411,7 +427,8 @@ pub(crate) fn build_constraint(
             depth0: g.depth0,
             rhs,
             cfm,
-            friction: mu,
+            friction: frame.map_or(mu, |f| f.mu1),
+            friction2: frame.map_or(mu, |f| f.mu2),
             pn: warm_pt.map(|w| w.pn).unwrap_or(0.0),
             pt1: warm_pt.map(|w| w.pt1).unwrap_or(0.0),
             pt2: warm_pt.map(|w| w.pt2).unwrap_or(0.0),
