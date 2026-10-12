@@ -1,4 +1,4 @@
-// **声学核（GPU 档 M1/M2/M3）**：每个 `(声源, 听者)` 对是一个独立工作项。
+// **声学核（GPU 档 M1/M2/M3/M4）**：每个 `(声源, 听者)` 对是一个独立工作项。
 //
 // - `direct`（M1）：直达 —— 遮挡 + `dist/speed` 与 `1/dist²`；
 // - `reflect`（M2）：**一次镜面反射**（镜像源法）—— 逐三角找镜像路径，取**最强那条**
@@ -6,15 +6,22 @@
 // - `diffract`（M3）：**绕射**（工程近似）—— 逐棱取 **Fermat 点**（定次数 48 的二分，与 CPU
 //   的 `FERMAT_ITERS` 同值 ⇒ 同样的定次数、无早退），**只在阴影里**产出（直达通视就整对跳过），
 //   取最强那条棱（平局按棱序号取小）；增益 `coeff·(1+cosθ)/2/(d₁·d₂)`、时延 `(d₁+d₂)/speed`。
+// - `scatter`（M4）：**漫反射散射**（面当二级声源，Lambertian 工程口径）—— 逐三角取**面中心**，
+//   要求声源/听者在**同侧**（法向朝声源那侧、两个余弦 > 0）且两条腿都不被挡，取**最强那个面**
+//   （平局按三角序号取小）；增益 `s·cos_in·cos_out·A/(d₁²·d₂²)`（`A = |cross|/2`）、
+//   时延 `(d₁+d₂)/speed`。
 //
 // 与 CPU 端 `vxl-phys-acoustics` 的对应那几条**同口径**：
 //   ① 遮挡：Möller–Trumbore，端点共面不计（±1e-6 的边界容差，与 CPU 同款）；
 //   ② 时延 = `dist / speed`、增益 = `1 / dist²`（球面扩散）；
 //   ③ 逐轴展开、不用内建 `dot`/`cross`（归约序未规定 —— 与 `body_integrate.wgsl` 同一纪律）。
 //
-// **量纲/边界**：只做这三条。散射（M4）与介质积分（M5）、以及绕射里的 Fresnel 积分仍在 CPU 侧；
-// 这里要钉的是
+// **量纲/边界**：只做这四条。介质积分（M5）、以及绕射里的 Fresnel 积分仍在 CPU 侧；这里要钉的是
 // "同一批输入 ⇒ 与 CPU 参考**逐对一致**（浮点容差、拓扑逐位）"。
+//
+// ⚠️ **两条刻意的独立口径**（别当成 bug）：① `reflect` 只按 `(1-a)` 打折，**不做** CPU 侧
+// "开散射时镜面那条再乘 `(1-s)`"的分工（能量守恒式分工要等两条腿在卡上合流的那一片）；
+// ② 各入口的系数都是**单频带标量**（频带表还没上卡）。
 
 struct Params {
     n_src: u32,
@@ -39,6 +46,8 @@ struct Params {
 @group(0) @binding(6) var<storage, read> edges: array<vec4<f32>>;
 /// 逐棱绕射系数（**单频带口径**：频带表还没上卡，见 `docs/SURVEY-ACOUSTIC-RAYTRACING.md` §9）。
 @group(0) @binding(7) var<storage, read> edge_coeff: array<f32>;
+/// 逐三角**散射系数**（**单频带口径**；`0` = 纯镜面 ⇒ 不参与散射）。
+@group(0) @binding(8) var<storage, read> scatter_coef: array<f32>;
 
 /// Fermat 二分次数：定次数、无早退 ⇒ 逐位可复现（与 CPU 的 `FERMAT_ITERS` 同值）。
 const FERMAT_ITERS: u32 = 48u;
@@ -285,4 +294,60 @@ fn diffract(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
     out[i] = vec4<f32>(select(0.0, 1.0, best_gain > 0.0), best_delay, best_gain, best_edge);
+}
+
+@compute @workgroup_size(64)
+fn scatter(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= P.n_src * P.n_lst) {
+        return;
+    }
+    let s = srcs[i / P.n_lst].xyz;
+    let l = dsts[i % P.n_lst].xyz;
+    var best_gain = 0.0;
+    var best_delay = 0.0;
+    var best_tri = -1.0;
+    for (var t = 0u; t < P.n_tris; t = t + 1u) {
+        let k = scatter_coef[t];
+        if (k <= 0.0) {
+            continue;
+        }
+        let a = tris[t * 3u].xyz;
+        let b = tris[t * 3u + 1u].xyz;
+        let c = tris[t * 3u + 2u].xyz;
+        let cr = cross3(b - a, c - a);
+        let area2 = len3(cr);
+        if (area2 <= 1e-9) {
+            continue; // 退化面：没有面积，不参与散射
+        }
+        let p = (a + b + c) * (1.0 / 3.0);
+        let v1 = s - p;
+        let v2 = l - p;
+        let d1 = len3(v1);
+        let d2 = len3(v2);
+        if (d1 <= 1e-3 || d2 <= 1e-3) {
+            continue;
+        }
+        // 法向朝"声源那一侧"：声与听者必须**同侧**，才谈得上反射式散射。
+        var n = cr * (1.0 / area2);
+        if (dot3(n, v1) < 0.0) {
+            n = -n;
+        }
+        let cos_in = max(dot3(n, v1 * (1.0 / d1)), 0.0);
+        let cos_out = max(dot3(n, v2 * (1.0 / d2)), 0.0);
+        if (cos_in <= 0.0 || cos_out <= 0.0) {
+            continue;
+        }
+        if (blocked_any(s, p) || blocked_any(p, l)) {
+            continue;
+        }
+        let geom = 0.5 * area2 * cos_in * cos_out / (d1 * d1 * d2 * d2);
+        let g = clamp(k, 0.0, 1.0) * geom;
+        if (g > best_gain) {
+            best_gain = g;
+            best_delay = (d1 + d2) / P.speed;
+            best_tri = f32(t);
+        }
+    }
+    out[i] = vec4<f32>(select(0.0, 1.0, best_gain > 0.0), best_delay, best_gain, best_tri);
 }
