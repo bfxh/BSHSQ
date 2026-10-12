@@ -44,6 +44,7 @@ mod solve;
 mod types;
 pub(crate) use self::ang::angular_rows;
 pub(crate) use self::linalg::*;
+mod project;
 pub use self::types::*;
 // ↑ 子模块顶层条目再导出（impl-only 模块不入 glob，避免 unused）
 

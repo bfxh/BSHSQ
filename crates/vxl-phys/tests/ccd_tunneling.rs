@@ -9,10 +9,10 @@
 //! | ③ 开 CCD、目标**在运动**（移动墙） | 必**穿**（目标集只留"静态/沉睡"） |
 //! | ④ 对照：开 CCD、静态墙 | 停在墙前 ✅ |
 //!
-//! 本文件把五条都钉住：① 是**文档化的边界**（默认关；改默认值必须同时改这里与模块头注），
-//! ①′ 是**关档的语义**（无穿透保证，且**取决于采样相位** —— 给出必然穿的对齐相位，
-//! 反面的"被相位接住"写在头注里），②③ 是 F-15 修好的（限速到预算覆盖得了的速度；
-//! 目标集含运动体 + 相对运动判据），④ 静态墙对照。
+//! 本文件把五条都钉住：① **默认档 = 选择性**（10 m/s，§4.3 与 skin 0.02 成对；改默认值必须
+//! 同时改这里与模块头注），①′ 是**关档的语义**（无穿透保证，且**取决于采样相位** —— 给出
+//! 必然穿的对齐相位，反面的"被相位接住"写在头注里），②③ 是 F-15 修好的（限速到预算覆盖
+//! 得了的速度；目标集含运动体 + 相对运动判据），④ 静态墙对照。
 
 use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
 
@@ -56,20 +56,43 @@ fn scene(speed: f32, ccd: bool, max_vel: f32, wall_moves: bool) -> (World, usize
     (w, ball as usize, wall as usize)
 }
 
-/// **① 默认档 = 文档化的边界**：`ccd_speed_threshold` 默认 `INFINITY`（关）。审计实测：默认档下
-/// 2000 m/s 的球（被 `max_linear_velocity` 钳到 100 m/s ⇒ 1.67 m/tick，是 0.1 m 墙厚的 16 倍）
-/// **会**穿过薄墙；本仓同一档位下是否穿还取决于**相位**（子步落点 vs 墙带宽度）——所以这条
-/// 判据只钉"默认档没有穿透保证"这个**决策点**：谁要把 CCD 改成默认开，必须同时改这里与
-/// `world_ccd/sweep.rs`、`vxl-phys-solver/src/ccd.rs` 的头注。
-/// ⚠️ **2026-10-13 实测：默认开已被自己的门挡下**（改成 10 m/s 后 R6 关节链的分离 13× 恶化，
-/// `sep_p99` 0.00966 → 0.12382、>5cm 违规率 0 → 1.97%）⇒ 默认保持关，互锁记在
-/// `OPEN-PROBLEMS.md` P17，快照判据见 `tests/ccd_joint_interlock.rs`。
+/// **① 默认档 = 选择性**（§4.12 的应然，2026-10-13 落地）：默认 `10 m/s`（与 §4.3 的 skin `0.02`
+/// **成对**：0.02/0.01/0.005/0.002 ↔ 10/5/2/1）。
+///
+/// 行为判据：2000 m/s 的球被 `max_linear_velocity` 钳到 100 m/s（0.83 m/子步，是 0.1 m 墙厚的 8 倍），
+/// 但它**同时**满足尺寸比判据（单帧位移 ≥ 0.5×最小半长）⇒ 默认档下扫掠接管、停在墙前。
+/// ⚠️ 历史：首次落它被 `OPEN-PROBLEMS.md` **P17**（CCD 钳位 × 关节互锁：R6 球链分离 13×）挡下；
+/// P17 已修（`vxl-phys-solver/src/joints/project.rs`：钳后按关节连通分量做位置级投影）
+/// ⇒ 本判据与 `tests/ccd_joint_interlock.rs` 一起转绿。
 #[test]
-fn ccd_is_off_by_default_and_that_is_documented() {
-    assert!(
-        PhysConfig::default().ccd_speed_threshold.is_infinite(),
-        "默认档 CCD 是关的（互锁未解，见 OPEN-PROBLEMS P17）；改默认值要一并改文档与判据"
+fn ccd_is_selective_by_default() {
+    assert_eq!(
+        PhysConfig::default().ccd_speed_threshold,
+        10.0,
+        "默认 = §4.3 的 CCD 档（skin 0.02 成对 10 m/s）；改默认值要一并改文档与判据"
     );
+    let mut w = World::new(PhysConfig::default()); // ← 完全默认档
+    w.add_static(
+        Shape::Box {
+            half: Vec3::new(2.0, 2.0, 0.05),
+        },
+        Vec3::ZERO,
+        Quat::IDENTITY,
+    );
+    let ball = w.add_dynamic(
+        Shape::Box {
+            half: Vec3::splat(0.05),
+        },
+        Vec3::new(0.0, 0.0, -40.0),
+        Quat::IDENTITY,
+        2000.0,
+    ) as usize;
+    w.bodies.linvel[ball] = Vec3::new(0.0, 0.0, 2000.0);
+    for _ in 0..240 {
+        w.step();
+    }
+    let z = w.bodies.position[ball].z;
+    assert!(z < 0.0, "默认档（选择性）就该挡住 2000 m/s 的球（z = {z}）");
 }
 
 /// **①′ 关档 = 无穿透保证（取决于相位）**：这里把起点**对齐到采样格点** —— 速度被钳到 100 m/s、

@@ -11,8 +11,9 @@
 //! **机制**（推断，未逐行验证）：扫掠命中后把体**钳位到上一安全采样点**并清法向速度，
 //! 这一步只看单体的位移、**不看关节约束** ⇒ 相邻链节的钳位彼此不一致 ⇒ 锚点分离被拉大。
 //!
-//! ⚠️ 本文件**钉的是"已知缺陷"**（同 `ccd_tunneling.rs` 的 ① 用"默认关"钉边界的手续）：
-//! 互锁修好后应把断言改成 `sep_p99 ≤ 0.012`、`>5cm = 0` —— 那时本文件与 P17 一起转绿。
+//! ✅ **2026-10-13 已修**（`joints/project.rs`：CCD 之后按关节连通分量做**位置级投影**）：
+//! 上表"开档"那行现在是 **`sep_p99 = 0.00986`、`>5cm = 0.000%`**（与关档同一量级）。
+//! 本文件因此从"缺陷快照"变成**回归判据**：两档都必须过 R6 门。
 use vxl_phys::{Joint, JointKind, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_core::Mat3;
 
@@ -69,9 +70,11 @@ fn chain(ccd: f32, ticks: usize) -> (f32, f32) {
     (p99, v5)
 }
 
-/// **已知互锁的现状快照**：显式开 CCD ⇒ 关节分离被拉大（修好后本判据应改成 `≤ 0.012 / =0`）。
+/// **回归判据（P17 修好之后）**：开/关两档的关节分离都必须过 R6 门（`≤0.012 / =0`）。
+/// 修法见 `vxl-phys-solver/src/joints/project.rs`（CCD 之后按**关节连通分量**做位置级投影；
+/// 只修被钳体那一条会把误差推给邻接 ⇒ 必须闭包整条链）。
 #[test]
-fn ccd_deviation_grows_on_jointed_chain_known_interlock() {
+fn ccd_does_not_break_jointed_chain() {
     let (p99_off, v5_off) = chain(f32::INFINITY, 600);
     let (p99_on, v5_on) = chain(10.0, 600);
     println!(
@@ -82,7 +85,7 @@ fn ccd_deviation_grows_on_jointed_chain_known_interlock() {
         "关档（默认）必须过 R6 门（sep_p99 ≤ 0.012、>5cm = 0）：实得 {p99_off} / {v5_off}"
     );
     assert!(
-        p99_on > 0.05 && v5_on > 1.0,
-        "现状：开 CCD 会把关节分离拉大（P17 的互锁）—— 若这里红了，说明互锁已被修好：请把本判据改成 `≤ 0.012 / =0` 并销掉 P17（实得 {p99_on} / {v5_on}）"
+        p99_on <= 0.012 && v5_on == 0.0,
+        "开 CCD（10 m/s）也必须过 R6 门（P17 的互锁已修：位置级投影把锚点拉回）——实得 {p99_on} / {v5_on}"
     );
 }

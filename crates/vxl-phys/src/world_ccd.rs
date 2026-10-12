@@ -12,9 +12,10 @@ impl World {
     ///
     /// **审计 F-15 的两处修复在 `sweep.rs`**：② 采样预算不够覆盖位移时**限速**而不是静默截段；
     /// ③ 目标集**含运动体**并按相对运动采样与判定（响应仍是非弹性的单向近似，双向留给 M2）。
-    pub(crate) fn ccd_pass(&mut self, dt: f32) {
+    /// 返回**本子步被标记要扫掠的体**（供 CCD 之后的关节位置投影用；关档/无标记 ⇒ 空）。
+    pub(crate) fn ccd_pass(&mut self, dt: f32) -> Vec<usize> {
         if !self.config.ccd_speed_threshold.is_finite() {
-            return;
+            return Vec::new();
         }
         let n = self.bodies.len();
         let flagged: Vec<usize> = (0..n)
@@ -23,5 +24,6 @@ impl World {
         for &i in &flagged {
             sweep::sweep(self, i, dt);
         }
+        flagged
     }
 }
