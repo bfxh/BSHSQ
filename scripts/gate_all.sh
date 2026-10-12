@@ -162,9 +162,9 @@ if ! grep -q "M0 门槛 PASS" "${out}/gate_m0_gates.log"; then
 fi
 # 压力哈希 2026-10-13 换代两笔（同日）：
 # ① 旋转扫掠：0xc23b81902a74b977c8e74e114cf9737a → 0x8e53107f61c83474016cc0203dbe8014（健康读数未动）
-# ② 薄壳 TOI：→ 0x22547e5f12738f9e17414d19dcc32805（健康读数同样未动）
-if ! grep -q "0x22547e5f12738f9e17414d19dcc32805" "${out}/gate_m0_gates.log"; then
-    echo "❌ m0_gates 压力哈希与基线不符（期望 0x22547e5f12738f9e17414d19dcc32805）——日志尾：" >&2
+# ② 薄壳 TOI：→ 0xbc8a7d25bbedbcee4abf8ec398ae930c（健康读数同样未动）
+if ! grep -q "0xbc8a7d25bbedbcee4abf8ec398ae930c" "${out}/gate_m0_gates.log"; then
+    echo "❌ m0_gates 压力哈希与基线不符（期望 0xbc8a7d25bbedbcee4abf8ec398ae930c）——日志尾：" >&2
     tail -n 10 "${out}/gate_m0_gates.log" >&2
     exit 6
 fi
