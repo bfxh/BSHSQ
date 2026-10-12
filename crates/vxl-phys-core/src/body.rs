@@ -9,7 +9,7 @@
 //!
 //! 确定性约束（§5）：所有遍历按体索引升序；写入顺序固定。
 
-use crate::mass::mass_props;
+use crate::mass::{mass_props, MassProps};
 use crate::math::{Quat, Vec3};
 use crate::mem::{PoseArray, VelArray};
 use crate::shape::Shape;
@@ -20,6 +20,12 @@ pub type BodyId = u32;
 pub enum BodyType {
     Static,
     Dynamic,
+    /// **运动学体**（M2 / `PLAN-kinematic.md`）：位置由宿主驱动、动力学上像静态
+    /// （`inv_mass = local_inv_inertia = 0`），但**速度是输入**且**进岛**（A 档：并岛）。
+    ///
+    /// 与 `Static` 的区别只有一条：它的速度会被求解器看见（摩擦因此携带载荷）；
+    /// 与 `Dynamic` 的区别也只有一条：它不受力、不被冲量改写。
+    Kinematic,
 }
 
 /// 结构化数组（SoA）刚体集合。
@@ -65,6 +71,20 @@ impl BodySet {
         self.inv_mass[i] > 0.0
     }
 
+    /// 运动学体（速度是输入、质量无限）。见 [`BodyType::Kinematic`]。
+    #[inline]
+    pub fn is_kinematic(&self, i: usize) -> bool {
+        self.body_type[i] == BodyType::Kinematic
+    }
+
+    /// **参与求解的动体**（动 + 运动学）：岛划分、宽相"会动的那一半"、接触相对速度
+    /// 都用它；静态体不参与。⚠️ 别把它当 `is_dynamic` 用 —— 施力/冲量/受力的地方
+    /// 必须仍然用 `is_dynamic`（运动学体不受力）。
+    #[inline]
+    pub fn is_dynamic_or_kinematic(&self, i: usize) -> bool {
+        self.is_dynamic(i) || self.body_type[i] == BodyType::Kinematic
+    }
+
     /// 注册材质，返回材质 id。
     pub fn add_material(
         &mut self,
@@ -80,33 +100,19 @@ impl BodySet {
         self.material[i] = material;
     }
 
-    pub fn push_static(&mut self, shape: Shape, position: Vec3, rotation: Quat) -> BodyId {
-        let id = self.shape.len() as BodyId;
-        self.shape.push(shape);
-        self.body_type.push(BodyType::Static);
-        self.position.push(position, rotation);
-        self.linvel.push(Vec3::ZERO, Vec3::ZERO);
-        self.inv_mass.push(0.0);
-        self.local_inv_inertia.push(Vec3::ZERO);
-        self.force.push(Vec3::ZERO);
-        self.torque.push(Vec3::ZERO);
-        self.awake.push(true);
-        self.sleep_timer.push(0.0);
-        self.material.push(0);
-        id
-    }
-
-    pub fn push_dynamic(
+    /// 三个 push 的公共体（**唯一**维护点：热/冷组字段必须同序 push）。
+    /// 形参收口成 `MassProps`（`args-gate`：软阈值 7）—— 零质量那一档见 [`massless`]。
+    fn push_raw(
         &mut self,
         shape: Shape,
         position: Vec3,
         rotation: Quat,
-        density: f32,
+        ty: BodyType,
+        mp: MassProps,
     ) -> BodyId {
-        let mp = mass_props(&shape, density);
         let id = self.shape.len() as BodyId;
         self.shape.push(shape);
-        self.body_type.push(BodyType::Dynamic);
+        self.body_type.push(ty);
         self.position.push(position, rotation);
         self.linvel.push(Vec3::ZERO, Vec3::ZERO);
         self.inv_mass.push(mp.inv_mass);
@@ -117,6 +123,26 @@ impl BodySet {
         self.sleep_timer.push(0.0);
         self.material.push(0);
         id
+    }
+
+    pub fn push_static(&mut self, shape: Shape, position: Vec3, rotation: Quat) -> BodyId {
+        self.push_raw(shape, position, rotation, BodyType::Static, massless())
+    }
+
+    /// 运动学体（M2）：质量无限、不受力，但速度是输入且进岛（A 档并岛）。
+    pub fn push_kinematic(&mut self, shape: Shape, position: Vec3, rotation: Quat) -> BodyId {
+        self.push_raw(shape, position, rotation, BodyType::Kinematic, massless())
+    }
+
+    pub fn push_dynamic(
+        &mut self,
+        shape: Shape,
+        position: Vec3,
+        rotation: Quat,
+        density: f32,
+    ) -> BodyId {
+        let mp = mass_props(&shape, density);
+        self.push_raw(shape, position, rotation, BodyType::Dynamic, mp)
     }
 
     /// 姿态（位置 + 旋转）只读快照。
@@ -150,7 +176,7 @@ impl BodySet {
 
     #[inline]
     pub fn wake(&mut self, i: usize) {
-        if self.is_dynamic(i) {
+        if self.is_dynamic_or_kinematic(i) {
             self.awake[i] = true;
             self.sleep_timer[i] = 0.0;
         }
@@ -192,6 +218,17 @@ impl BodySet {
         let l = r.cross(impulse);
         let dw = self.apply_world_inv_inertia(i, l);
         self.set_angvel_raw(i, self.angvel(i) + dw);
+    }
+}
+
+/// **零质量属性**（静态体与运动学体共用）：`inv_mass = 0` ⇒ 不受力、不被冲量改写；
+/// `local_inv_inertia = ZERO` ⇒ 世界逆惯量矩阵为零矩阵 ⇒ 求解环里对它的冲量施加是空操作。
+/// （运动学体与静态体的**唯一**差别只有"速度是否被求解器看见"，不在质量表上。）
+fn massless() -> MassProps {
+    MassProps {
+        mass: 0.0,
+        inv_mass: 0.0,
+        local_inv_inertia: Vec3::ZERO,
     }
 }
 

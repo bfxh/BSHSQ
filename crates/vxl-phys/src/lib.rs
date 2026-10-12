@@ -40,11 +40,13 @@ mod world_body;
 mod world_build;
 mod world_ccd;
 mod world_health;
+mod world_kinematic;
 mod world_mesh;
 mod world_soft;
 mod world_step;
 mod world_struct;
 pub(crate) use self::props::*;
+pub use self::world_kinematic::KinematicExt;
 pub use self::world_step::{conversion::VoxelConversionExt, destruction::DestructionExt};
 pub use self::{arenas::*, impact::*, providers::*, types::*, world_soft::*, world_struct::*}; // ↑ 子模块顶层条目再导出（impl-only 模块不入 glob，避免 unused）
 

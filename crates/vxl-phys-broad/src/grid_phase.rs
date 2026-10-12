@@ -112,9 +112,9 @@ impl BroadPhase for GridBroadPhase {
             self.aabbs.push(aabb);
         }
 
-        // 静态：仅插入。
+        // 静态：仅插入（运动学体**不在此列**：它归"会动的那一半"）。
         for i in 0..n {
-            if bodies.is_dynamic(i) {
+            if bodies.is_dynamic_or_kinematic(i) {
                 continue;
             }
             let Some((cmin, cmax)) = self.span(&self.aabbs[i]) else {
@@ -125,7 +125,7 @@ impl BroadPhase for GridBroadPhase {
         }
         // 动态：先全部插入（dyn-dyn 去重靠 j > i），再统一查询。
         for i in 0..n {
-            if !bodies.is_dynamic(i) {
+            if !bodies.is_dynamic_or_kinematic(i) {
                 continue;
             }
             let Some((cmin, cmax)) = self.span(&self.aabbs[i]) else {
@@ -136,7 +136,7 @@ impl BroadPhase for GridBroadPhase {
         }
         // 查询。
         for i in 0..n {
-            if !bodies.is_dynamic(i) {
+            if !bodies.is_dynamic_or_kinematic(i) {
                 continue;
             }
             let Some((cmin, cmax)) = self.span(&self.aabbs[i]) else {

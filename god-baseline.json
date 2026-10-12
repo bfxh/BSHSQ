@@ -96,9 +96,9 @@
    "max_type_members": 3
   },
   "crates/vxl-phys-core/src/body.rs": {
-   "file_lines": 235,
+   "file_lines": 272,
    "max_fn_lines": 22,
-   "max_type_members": 19
+   "max_type_members": 23
   },
   "crates/vxl-phys-core/src/config.rs": {
    "file_lines": 326,
@@ -164,6 +164,11 @@
    "file_lines": 90,
    "max_fn_lines": 22,
    "max_type_members": 2
+  },
+  "crates/vxl-phys-core/tests/kinematic_body.rs": {
+   "file_lines": 66,
+   "max_fn_lines": 39,
+   "max_type_members": 0
   },
   "crates/vxl-phys-core/tests/loom_primitives.rs": {
    "file_lines": 56,
@@ -576,7 +581,7 @@
    "max_type_members": 0
   },
   "crates/vxl-phys-integrate/src/lib.rs": {
-   "file_lines": 113,
+   "file_lines": 115,
    "max_fn_lines": 35,
    "max_type_members": 2
   },
@@ -776,8 +781,8 @@
    "max_type_members": 4
   },
   "crates/vxl-phys-replay/src/lib.rs": {
-   "file_lines": 279,
-   "max_fn_lines": 35,
+   "file_lines": 281,
+   "max_fn_lines": 36,
    "max_type_members": 3
   },
   "crates/vxl-phys-soft/src/cloth.rs": {
@@ -1031,13 +1036,13 @@
    "max_type_members": 0
   },
   "crates/vxl-phys-solver/src/solver_impl.rs": {
-   "file_lines": 661,
+   "file_lines": 664,
    "max_fn_lines": 87,
    "max_type_members": 12
   },
   "crates/vxl-phys-solver/src/solver_impl/sleep.rs": {
-   "file_lines": 186,
-   "max_fn_lines": 63,
+   "file_lines": 190,
+   "max_fn_lines": 65,
    "max_type_members": 3
   },
   "crates/vxl-phys-solver/src/stats.rs": {
@@ -1251,7 +1256,7 @@
    "max_type_members": 5
   },
   "crates/vxl-phys/src/lib.rs": {
-   "file_lines": 53,
+   "file_lines": 55,
    "max_fn_lines": 0,
    "max_type_members": 0
   },
@@ -1314,6 +1319,11 @@
    "file_lines": 32,
    "max_fn_lines": 25,
    "max_type_members": 1
+  },
+  "crates/vxl-phys/src/world_kinematic.rs": {
+   "file_lines": 64,
+   "max_fn_lines": 16,
+   "max_type_members": 3
   },
   "crates/vxl-phys/src/world_mesh.rs": {
    "file_lines": 95,
@@ -1468,6 +1478,11 @@
   "crates/vxl-phys/tests/fluid_reaction_torque.rs": {
    "file_lines": 278,
    "max_fn_lines": 77,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys/tests/kinematic_contracts.rs": {
+   "file_lines": 350,
+   "max_fn_lines": 54,
    "max_type_members": 0
   },
   "crates/vxl-phys/tests/mesh_vs_mesh.rs": {
@@ -1755,7 +1770,7 @@
   },
   "crates/vxl-phys-core::BodySet": {
    "fields": 12,
-   "methods": 19
+   "methods": 23
   },
   "crates/vxl-phys-core::CollisionProvider": {
    "fields": 0,

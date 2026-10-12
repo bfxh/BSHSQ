@@ -122,8 +122,8 @@ impl World {
                 rot: self.bodies.rot(i),
                 linvel: self.bodies.linvel[i],
                 // **角速度**（§8.4.29 / 2c-1）：接触几何要跟着转动走。**静态体与睡眠体一律 0**
-                // （睡眠体对软体域呈现静态，§8.4.27）。
-                angvel: if self.bodies.is_dynamic(i) && self.bodies.awake[i] {
+                // （睡眠体对软体域呈现静态，§8.4.27）；**运动学体算**（转盘要带着布料走）。
+                angvel: if self.bodies.is_dynamic_or_kinematic(i) && self.bodies.awake[i] {
                     self.bodies.angvel(i)
                 } else {
                     Vec3::ZERO

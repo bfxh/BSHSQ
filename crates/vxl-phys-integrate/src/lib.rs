@@ -52,9 +52,11 @@ impl Integrator {
     }
 
     /// 位置积分：x += v·dt；q = integrate_angular(q, ω, dt)。
+    /// **运动学体同在这条路上**：它的 `v/ω` 是宿主输入（不受力、不被冲量改写），
+    /// 位置按同一 `x += v·dt` 推进 —— 这就是"位移驱动"落地的那一半（`PLAN-kinematic` K1）。
     pub fn integrate_positions(bodies: &mut BodySet, dt: f32) {
         for i in 0..bodies.len() {
-            if !bodies.is_dynamic(i) || !bodies.awake[i] {
+            if !bodies.is_dynamic_or_kinematic(i) || !bodies.awake[i] {
                 continue;
             }
             bodies.position[i] = bodies.position[i] + bodies.linvel[i] * dt;

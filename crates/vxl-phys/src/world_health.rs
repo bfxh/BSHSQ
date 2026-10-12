@@ -11,8 +11,8 @@ impl World {
             if !self.bodies.position[i].is_finite() || !self.bodies.linvel[i].is_finite() {
                 rep.nan_bodies += 1;
             }
-            // 活跃度只对动体有意义（静态 marker 恒置 awake=true 但不参与休眠）。
-            if self.bodies.is_dynamic(i) && self.bodies.awake[i] {
+            // 活跃度只对"会动的"有意义（静态 marker 恒置 awake=true 但不参与休眠；运动学体算）。
+            if self.bodies.is_dynamic_or_kinematic(i) && self.bodies.awake[i] {
                 rep.awake_bodies += 1;
             }
         }

@@ -97,7 +97,9 @@ fn gather(world: &mut World, i: usize, swept: Aabb) -> (Vec<(u32, u32)>, Vec<Tar
         targets.push(Target {
             id: ju,
             q1: world.bodies.position[ju],
-            vel: if world.bodies.is_dynamic(ju) {
+            // 目标的速度：**运动学体也算**（移动的墙/平台必须在相对运动里带上自己的速度，
+            // 否则"移动目标必穿"这条又会回来 —— 见 `ROUTE.md` 的 CCD 三处修复）。
+            vel: if world.bodies.is_dynamic_or_kinematic(ju) {
                 world.bodies.linvel[ju]
             } else {
                 Vec3::ZERO
