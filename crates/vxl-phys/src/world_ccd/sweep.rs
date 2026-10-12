@@ -19,8 +19,19 @@
 //!    ⇒ 移动墙必穿（审计实测）。现在把动态目标也纳入，并按**相对运动**采样与判定
 //!    （目标位置随采样时刻推进、闭合判据用法向**相对**速度）。响应仍是 M1 口径的非弹性
 //!    停（只改动体的法向速度）——**双向冲量留给 M2**，这里如实标出，不假装它是完备解。
+//! 4. **旋转扫掠**（2026-10-13）：判据只看线速度时，**细长体高速自旋**（尖端 `ω×r` 可达
+//!    数十 m/s，质心却接近静止）既不会被标记、采样也只插位置不插姿态 ⇒ 尖端直接扫过薄墙。
+//!    现在：标记口径 = 最大点速（`ccd.rs`）、采样同时插**姿态**、闭合判据用**接触点速度**
+//!    `v + ω×r`（`BodySet::velocity_at`）、命中后**位置与姿态一起**钳回上一安全采样点。
+//!    `ω = 0` 时这四条全部退化为旧式（**逐位不变**）。
+//!    实测（`tests/ccd_rotational_sweep.rs`，4×4 cm 小柱、`substeps = 1`）：峰值埋深 0.0078 → **0.0000**、
+//!    杆心漂移 46.9 m → **0.0000**（关档时位置校正会把自旋杆弹飞）。
+//!    ⚠️ 已知限制（本片**有意不做**，见 `OPEN-PROBLEMS.md` P18）：① 目标侧只带**平移**速度
+//!    ——自旋目标的姿态/角速度不进采样；② **转动响应不做** ⇒ 自旋体在障碍前"空转顶住"
+//!    （姿态被钳住、`ω` 不被吸收），离散管线随后按住它。代价实测：`m0_gates` 门槛档
+//!    末态活跃 13 → 19、深穿透 tick 80 → 97，但最大深穿透 0.659 → **0.409**（换代账见 RECIPES 换代链）。
 
-use vxl_phys_core::{Aabb, Vec3};
+use vxl_phys_core::{Aabb, Quat, Vec3};
 use vxl_phys_narrow::NarrowPhase;
 
 use crate::ccd;
@@ -29,16 +40,33 @@ use crate::World;
 /// **限速到预算覆盖得了的速度**（审计 F-15 ②）：段长 ≤ 0.5×最小半长 ⇒
 /// `v_max = ccd_max_steps × 0.5·ext / dt`。默认档下这条基本不触发（100 m/s 的位移在
 /// 64 段 × 0.5·ext 之内），只有把 `max_linear_velocity` 放开到几千 m/s 才会咬住。
+///
+/// **旋转扫掠（2026-10-13）**：预算覆盖的是**点速** `|v| + |ω|·r_bound`（尖端才是会穿的那个点）
+/// ⇒ 超预算时按**同一个比例**把线速度与角速度一起压（本 tick 的轨迹形状不变、只是走慢一点）。
+/// 只压线速度是**无益**的：自旋本身没被覆盖，尖端照样穿（实测过一版：自旋体线速度被清零、
+/// 绕桩照切）。也**不能只压角速度**：那会平白吃掉平动那部分的覆盖。
+/// `ω = 0` ⇒ `|v| + 0` 与旧式同条件、同比例（**逐位不变**）。
 fn clamp_one(world: &mut World, i: usize, dt: f32) {
     let ext = ccd::min_half_extent(&world.bodies.shape[i]);
     if !ext.is_finite() || ext <= 0.0 || !dt.is_finite() || dt <= 0.0 {
         return;
     }
     let budget = world.config.ccd_max_steps.max(1) as f32;
+    let omega = world.bodies.angvel(i);
+    let r = ccd::bounding_radius(&world.bodies.shape[i]);
+    let spin = if r.is_finite() {
+        omega.length() * r
+    } else {
+        0.0
+    };
+    let point = world.bodies.linvel[i].length() + spin;
     let v_max = budget * (ext * 0.5) / dt;
-    let sp = world.bodies.linvel[i].length();
-    if sp > v_max && sp > 0.0 {
-        world.bodies.linvel[i] *= v_max / sp;
+    if point > v_max && point > 0.0 {
+        let s = v_max / point;
+        world.bodies.linvel[i] *= s;
+        if spin > 0.0 {
+            world.bodies.set_angvel_raw(i, omega * s);
+        }
     }
 }
 
@@ -68,21 +96,55 @@ struct Target {
 
 /// 一次扫掠的不变量（`p0 = p1 − v·dt`、段数/段长），打包起来免得每个助手都摊一长串参数
 /// （`args-gate` 的 soft 阈值实测把 7 个形参也算违规）。
+///
+/// **旋转扫掠（2026-10-13）**：`omega`/`q1` 让采样把**姿态**也按时间插值
+/// （`q(t) = q1 ⊖ ω·(dt − t)`）——旧实现只插位置、姿态用 tick 末那一份 ⇒ 自旋细杆的
+/// 尖端扫过的位置**根本没被测到**（见 `ccd.rs` 的模块头注）。
 struct Scan {
     p0: Vec3,
     p1: Vec3,
     v: Vec3,
+    /// 体自身的角速度（姿态插值用）。
+    omega: Vec3,
+    /// tick 末姿态（采样后必须原样放回）。
+    q1: Quat,
     dt: f32,
     sub: f32,
     steps: u32,
 }
 
-/// 扫掠 AABB（`p0..p1` 膨胀 `skin`）。
-fn swept_aabb(p0: Vec3, p1: Vec3, skin: f32) -> Aabb {
+/// 扫掠 AABB（`p0..p1` 膨胀 `skin` **+ 转动摆幅** `|ω|·r_bound·dt`）。
+/// `ω = 0` ⇒ 加宽量 0（既有场景逐位不变）。
+fn swept_aabb(p0: Vec3, p1: Vec3, skin: f32, swing: f32) -> Aabb {
+    let m = skin + swing;
     Aabb {
-        min: p0.min(p1) - Vec3::splat(skin),
-        max: p0.max(p1) + Vec3::splat(skin),
+        min: p0.min(p1) - Vec3::splat(m),
+        max: p0.max(p1) + Vec3::splat(m),
     }
+}
+
+/// 转动摆幅：本子步内**尖端**最多能扫过多远（`|ω|·r_bound·dt`；不可用 ⇒ 0）。
+fn swing_of(shape: &vxl_phys_core::Shape, omega: Vec3, dt: f32) -> f32 {
+    let r = ccd::bounding_radius(shape);
+    if !r.is_finite() || omega == Vec3::ZERO {
+        return 0.0;
+    }
+    omega.length() * r * dt
+}
+
+/// 采样时刻 `t` 的姿态写回：`q(t) = q1 ⊖ ω·(dt − t)`（从 tick 末姿态往回退）。
+/// `ω = 0` ⇒ **一个字节都不写**（既有场景逐位不变）；`t ≥ dt` ⇒ 原样写回 `q1`
+/// （不经 `integrate_angular`/`normalize`，免得二次归一化扰动末位）。
+fn put_rot(world: &mut World, i: usize, sc: &Scan, t: f32) {
+    if sc.omega == Vec3::ZERO {
+        return;
+    }
+    let q = if t >= sc.dt {
+        sc.q1
+    } else {
+        sc.q1.integrate_angular(-sc.omega, sc.dt - t)
+    };
+    world.bodies.set_rot(i, q);
 }
 
 /// 扫掠 AABB → `(窄相配对, 目标表)`。**目标表含运动体**（审计 F-15 ③）：旧实现把动态体整条
@@ -113,17 +175,27 @@ fn gather(world: &mut World, i: usize, swept: Aabb) -> (Vec<(u32, u32)>, Vec<Tar
     (pairs, targets)
 }
 
-/// 沿段推进采样，返回首个"正在接近"的命中 `(采样时刻, 指向动体的法线, 对方体号)`。
+/// 一次命中：采样时刻、指向动体的法线、对方体号。
+#[derive(Clone, Copy)]
+struct Hit {
+    t: f32,
+    n: Vec3,
+    other: usize,
+}
+
+/// 沿段推进采样，返回首个"正在接近"的命中。
 fn scan(
     world: &mut World,
     i: usize,
     sc: &Scan,
     pairs: &[(u32, u32)],
     targets: &[Target],
-) -> Option<(f32, Vec3, usize)> {
+) -> Option<Hit> {
     for s in 1..=sc.steps {
         let t = sc.sub * s as f32;
         world.bodies.position[i] = sc.p0 + sc.v * t;
+        // **姿态也按时间插值**（旋转扫掠）：旧实现只插位置 ⇒ 自旋的尖端扫过的位置没被测到。
+        put_rot(world, i, sc, t);
         // 运动目标随采样时刻推进（静态/沉睡目标 `vel = 0` ⇒ 位置不变）。
         for tg in targets {
             if tg.vel != Vec3::ZERO {
@@ -146,10 +218,24 @@ fn scan(
             let n_into_body = if m.a == i as u32 { -m.normal } else { m.normal };
             // **只有"正在接近表面"的采样才算命中**：贴地滑行/静置的体每个采样都天生有接触，
             // 按"有接触即命中"会把它钳回起点、原地锁死（实测：弹体滑到墙前 0.1 m 停住）。
-            // 判据用**相对速度**（审计 F-15 ③）：目标迎面开来时，静止的动体也在关闭。
-            let v_rel = sc.v - world.bodies.linvel[other];
+            // 判据用**接触点速度**（旋转扫掠 2026-10-13）：`v + ω×r` —— 纯自旋体的质心速度
+            // 可以是 0，但接触点正压向表面；只看质心速度 ⇒ 自旋体永远"不闭合"、扫掠形同虚设。
+            // `ω = 0` ⇒ `velocity_at` 退化成 `sc.v`（既有场景逐位不变）。
+            // 目标侧只带**平移**速度（自旋目标的姿态/角速度不进采样，见模块头注 ④）。
+            let point = m
+                .points
+                .first()
+                .map_or(world.bodies.position[i], |p| p.point);
+            let v_pt = world
+                .bodies
+                .velocity_at(i, point - world.bodies.position[i]);
+            let v_rel = v_pt - world.bodies.linvel[other];
             if n_into_body.dot(v_rel) < 0.0 {
-                return Some((t, n_into_body, other));
+                return Some(Hit {
+                    t,
+                    n: n_into_body,
+                    other,
+                });
             }
         }
     }
@@ -169,39 +255,58 @@ fn restore_targets(world: &mut World, targets: &[Target]) {
 /// "相对法向速度"清零 ⇒ 结果像"球把墙拖走"（实测两体都以球的速度前进）。沿法线做标准一维
 /// 非弹性冲量后：轻球被重墙挡下、墙几乎不动；静态目标 `inv_mass = 0` ⇒ 退化成原写法
 /// （与 M1 逐位一致）。双向**转动**耦合仍留给 M2，这里如实标出。
-fn resolve(world: &mut World, i: usize, sc: &Scan, hit: Option<(f32, Vec3, usize)>) {
-    let Some((t_hit, n_into_body, other)) = hit else {
+fn resolve(world: &mut World, i: usize, sc: &Scan, hit: Option<Hit>) {
+    let Some(h) = hit else {
         world.bodies.position[i] = sc.p1;
+        // 采样借出去的姿态要还回来（`ω = 0` ⇒ 不写）。
+        put_rot(world, i, sc, sc.dt);
         return;
     };
-    let t_safe = (t_hit - sc.sub).max(0.0);
+    let (other, n_into_body) = (h.other, h.n);
+    let t_safe = (h.t - sc.sub).max(0.0);
     world.bodies.position[i] = sc.p0 + sc.v * t_safe;
+    // **姿态也钳到安全采样点**：只钳位置、姿态留在 tick 末 ⇒ 自旋的尖端仍然插在墙里
+    // （那正是旋转扫掠要解决的事）。
+    put_rot(world, i, sc, t_safe);
+    // 平动响应：**M1 口径未变**（质心相对速度的非弹性停，按质量分摊）。
     let v_rel = sc.v - world.bodies.linvel[other];
     let vn = v_rel.dot(n_into_body);
-    if vn >= 0.0 {
-        return;
-    }
     let (ia, ib) = (world.bodies.inv_mass[i], world.bodies.inv_mass[other]);
     let denom = ia + ib;
-    if denom > 0.0 {
+    if vn < 0.0 && denom > 0.0 {
         let jn = -vn / denom;
         world.bodies.linvel[i] += n_into_body * (jn * ia);
         world.bodies.linvel[other] -= n_into_body * (jn * ib);
     }
+    // ⚠️ **转动响应有意不做**（本片只到"被检出 + 采样到 + 姿态钳回安全采样点"）：两种写法都试过，
+    // 都被实测反例挡下 ——
+    // ① 只按**角向**有效质量收口会过冲：2 m 细杆 ω=40 顶薄墙时 ω 被收到 **−7**（标准点冲量给
+    //    ≈20），差一个 `(1/m + k)/k` 的因子，等于凭空反弹；
+    // ② 用**完整**点冲量（线性 + 角向）则给细杆的**自旋轴**注入巨大扭转：细杆绕自身长轴的逆惯量
+    //    ~1200 ⇒ 4 cm 小柱的擦碰把 |ω| 顶到 **504 rad/s**（对拍：不做响应 38.4、关档 40）。
+    // ⇒ 结果如实标出：自旋体在障碍前**姿态被钳住、ω 不被吸收**（"空转顶住"），离散管线随后
+    // 按住它（判据 `tests/ccd_rotational_sweep.rs` 把这三种读数都钉住）。转动响应留给 M2 的
+    // 转动耦合（TGS-Soft 接触），不在这里硬塞一个会过头或会扭爆的近似。
 }
 
 /// 单个体 `i` 本 tick 的保守推进扫掠（见模块头注）。
 pub(crate) fn sweep(world: &mut World, i: usize, dt: f32) {
     let v = world.bodies.linvel[i];
+    let omega = world.bodies.angvel(i);
+    let steps = ccd::step_count(&world.bodies, i, &world.config, dt);
     let sc = Scan {
         p1: world.bodies.position[i],
         p0: world.bodies.position[i] - v * dt,
         v,
+        omega,
+        q1: world.bodies.rot(i),
         dt,
-        sub: dt / ccd::step_count(&world.bodies, i, &world.config, dt) as f32,
-        steps: ccd::step_count(&world.bodies, i, &world.config, dt),
+        sub: dt / steps as f32,
+        steps,
     };
-    let swept = swept_aabb(sc.p0, sc.p1, world.config.contact_skin);
+    // 扫掠 AABB 还要含**转动摆幅**（否则自旋体的尖端扫过的空间连宽相都过不了）。
+    let swing = swing_of(&world.bodies.shape[i], omega, dt);
+    let swept = swept_aabb(sc.p0, sc.p1, world.config.contact_skin, swing);
     let (pairs, targets) = gather(world, i, swept);
     let hit = scan(world, i, &sc, &pairs, &targets);
     restore_targets(world, &targets);

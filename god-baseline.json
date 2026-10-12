@@ -986,7 +986,7 @@
    "max_type_members": 0
   },
   "crates/vxl-phys-solver/src/ccd.rs": {
-   "file_lines": 74,
+   "file_lines": 124,
    "max_fn_lines": 22,
    "max_type_members": 0
   },
