@@ -521,9 +521,10 @@ capabilities:
       - id: acoustic_not_done
         note: >-
           **仍未做（如实登记）**：UTD 的 **Fresnel 积分**（A4 的 `D(θ)` 与漫反射口径都是工程近似）、
-          **GPU 档落了直达 + 一次反射 + 绕射 + 散射（M1/M2/M3/M4）**：介质积分仍未上卡（见
+          **GPU 档五条腿全落（M1–M5：直达 / 一次反射 / 绕射 / 散射 / 介质积分）**（见
           `a5_gpu_direct_kernel` / `a5_gpu_reflect_kernel` / `a5_gpu_diffract_kernel` /
-          `a5_gpu_scatter_kernel`；本层已落批处理入口与逐位等价契约，见 `a5_gpu_base`）。
+          `a5_gpu_scatter_kernel` / `a5_gpu_medium_kernel`；本层已落批处理入口与逐位等价契约，
+          见 `a5_gpu_base`）。卡上仍没有的是**多次反射**（混响尾巴）与**绕射的 Fresnel 积分**。
           portal 与衍射棱都按文档 §8 的取舍先落"显式图元"（衍射棱另有兜底，见下条）；
           **"体素空洞自动识别"**（从占据位找连通孔）仍未做。低频不承诺 / **不做双耳渲染**见文档 §7
           （2026-10-12 起有**单声道**离线渲染供试听与对表，见 `a6_audio_render`；HRTF/双耳仍归宿主）。
@@ -614,7 +615,7 @@ capabilities:
           判据 = **拓扑（遮挡分类）逐位 + 浮点（时延/增益）相对 1e-4**；无适配器则打印 `[SKIP]`。
           实测（本机）：`NVIDIA GeForce RTX 4060 Ti | Vulkan | DiscreteGpu` 上 6 对全对。
           ⚠️ **CI 不覆盖**（既有口径 `cargo test --workspace --exclude vxl-phys-gpu`：headless 运行器
-          无 GPU）⇒ 这条路只能在本机或 GPU 探针 job 上验；**介质积分仍未上卡**。
+          无 GPU）⇒ 这条路只能在本机或 GPU 探针 job 上验；**五条腿（M1–M5）此后都已上卡**。
       - id: a5_gpu_reflect_kernel
         note: >-
           **GPU 档的「一次镜面反射」（M2）已落地（2026-10-12）**：`acoustic.wgsl` 加 `reflect` 入口 ——
@@ -683,6 +684,27 @@ capabilities:
           面排第二 ⇒ 必须选第二条；再把那个强面的系数设 0 ⇒ 落回小面）；同输入两跑**逐位一致** +
           空散射表 ⇒ 一对也不产出。实测（本机 RTX 4060 Ti | Vulkan）：五段 7.3 s 全过；与
           直达/反射/绕射三条探针一起复跑也全过。⚠️ CI 同样不覆盖（`--exclude vxl-phys-gpu`）。
+      - id: a5_gpu_medium_kernel
+        note: >-
+          **GPU 档的「介质积分」（M5）已落地（2026-10-12）**：`acoustic.wgsl` 加 `medium` 入口 ——
+          **水平层表 + 定步数中点采样**（`medium_steps`，`0` 按 1 算；无早退 ⇒ 逐位可复现）：
+          逐子段取中点查层表拿 `(c, α_低, α_中, α_高)`，累加 `Σ len/c` 与 `Π exp(-α_b·len)`；
+          输出行是 `(用时, 衰减低, 衰减中, 衰减高)` —— **这条没有 hit 位**（直线段永远算得出来）。
+          层表按 `y` 升序、不重叠，取**第一命中**，没命中就是空气（`speed` + 零吸收）。
+          宿主侧新增 `Slab` / `MediumOut` / `MediumIn` / `medium_on_adapter` 与**自有绑定布局**
+          （`0` 参数 / `1` 起点 / `2` 终点 / `9` 层表 / `4` 输出；M1–M4 那套不动）；`Params` 的
+          三个占位 pad 换成 `n_slabs` / `medium_steps` / `_pad`（仍是 32 B），宿主侧收口成
+          `Params` 镜像结构体（形参到 7 个会撞 args-gate 软阈值），回读抽成两个入口共用的 `read_rows`。
+          ⚠️ **折线（折射）由宿主逐段调用后组合**：时延**相加**、衰减**相乘** —— 两者都是可分量
+          ⇒ 与"一次算完折线"等价（判据里钉了组合性；⚠️ 严格成立的前提是同一采样集合）。
+          探针 `crates/vxl-phys-gpu/tests/acoustic_medium_probe.rs`：段 `(0,0,0)→(0,4,0)`、
+          层界 `y = 2`、**每段 8 步**（子段 0.5 m、中点 y = 0.25…3.75 ⇒ 前 4 个中点在下层、
+          后 4 个在上层）⇒ 参照是**手算的跨层分段和**（`2/c_下 + 2/c_上` 与
+          `exp(-0.8 / -1.6 / -3.2)`）。六段判据：纯空气/层表没覆盖 = 闭式 `len/speed`；均匀层 =
+          `exp(-α·len)`（`e^-1 / e^-2 / e^-4`）；**跨层中点采样**手算分段和；单调性（吸收越大越弱、
+          声速越大越快）；**组合性**（4 m 16 步 = 两段 2 m 各 8 步，逐段相加/相乘）；确定性 +
+          `steps = 0` 按 1 算。实测（本机 RTX 4060 Ti | Vulkan）：六段 14–18 s 全过；
+          五条探针一起复跑也全过。⚠️ CI 同样不覆盖（`--exclude vxl-phys-gpu`）。
       - id: cli_wired
         note: >-
           **工具链已接（2026-10-11）**：`vxl-phys-cli acoustic <voxel> [ticks]` 打声学路径流（JSONL，

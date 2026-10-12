@@ -4,8 +4,8 @@
 //! 的头注里）：M1 直达（遮挡走 Möller–Trumbore，端点共面不计；`dist/speed` 与 `1/dist²`）、
 //! M2 一次镜面反射（镜像源法，逐对取最强那条）、M3 绕射（棱上 Fermat 点 +
 //! `coeff·(1+cosθ)/2/(d₁·d₂)`，只在阴影里产出）、M4 散射（面当二级声源，Lambertian：
-//! `s·cos_in·cos_out·A/(d₁²·d₂²)`，同侧 + 两腿不挡，取最强那个面）。介质积分仍留 CPU 侧 ——
-//! 这里要钉的是
+//! `s·cos_in·cos_out·A/(d₁²·d₂²)`，同侧 + 两腿不挡，取最强那个面）、M5 介质积分（水平层表 +
+//! 定步数中点采样：`Σ len/c` 与 `Π exp(-α_b·len)`）。这里要钉的是
 //! "同一批输入 ⇒ 与 CPU 参考**逐对一致**"（浮点容差、拓扑逐位），探针见
 //! `tests/acoustic_*_probe.rs`。
 //!
@@ -90,17 +90,55 @@ pub struct SceneIn<'a> {
     pub speed: f32,
 }
 
-/// `Params`（与 `acoustic.wgsl` 的 `struct Params` 逐字段对齐：32 B）。
-fn params_bytes(n_src: u32, n_lst: u32, n_tris: u32, speed: f32, n_edges: u32) -> Vec<u8> {
+/// `Params` 的宿主侧镜像（**字段顺序与 `acoustic.wgsl` 的 `struct Params` 一一对应**：32 B）。
+///
+/// 打成结构体不是为了好看：`n_slabs` / `medium_steps` 上来之后形参到 7 个，撞本仓 `args-gate`
+/// 的软阈值 ⇒ 收口成一份"参数镜像"（顺便把布局写在一处，改字段只改这里）。
+#[derive(Clone, Copy, Debug, Default)]
+struct Params {
+    n_src: u32,
+    n_lst: u32,
+    n_tris: u32,
+    speed: f32,
+    n_edges: u32,
+    n_slabs: u32,
+    medium_steps: u32,
+    /// ⚠️ uniform 结构体必须补到 16 的倍数（少一个 pad 整块错位）。
+    _pad: u32,
+}
+
+/// 序列化成 WGSL uniform 的字节（32 B；顺序 = 字段声明顺序）。
+fn params_bytes(p: &Params) -> Vec<u8> {
     let mut b = Vec::with_capacity(32);
-    for v in [n_src, n_lst, n_tris] {
+    for v in [p.n_src, p.n_lst, p.n_tris] {
         b.extend_from_slice(&v.to_le_bytes());
     }
-    b.extend_from_slice(&speed.to_le_bytes());
-    // ⚠️ uniform 结构体必须补到 16 的倍数（少一个 pad 整块错位）。
-    b.extend_from_slice(&n_edges.to_le_bytes());
-    b.extend_from_slice(&[0u8; 12]);
+    b.extend_from_slice(&p.speed.to_le_bytes());
+    for v in [p.n_edges, p.n_slabs, p.medium_steps, p._pad] {
+        b.extend_from_slice(&v.to_le_bytes());
+    }
     b
+}
+
+/// 一个**水平层**（介质）：`y ∈ [y_lo, y_hi]` 内声速 `c`、逐带吸收 `alpha`（1/m）。
+///
+/// `alpha` 是 **3 个频带**，与 `vxl-phys-acoustics::BANDS` **同值**（GPU 档不引那个 crate：
+/// 依赖面只留 `wgpu` + `vxl-phys-core`，所以这个 3 是**显式约定**，改那边要同步这里）。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Slab {
+    pub y_lo: f32,
+    pub y_hi: f32,
+    pub c: f32,
+    pub alpha: [f32; 3],
+}
+
+/// 一段（直线）路径的**介质积分**读数。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MediumOut {
+    /// 走完这段的**用时**（秒）＝ `Σ len_i / c_i`（逐采样点）。
+    pub time: f32,
+    /// 逐带**衰减因子**＝ `Π exp(-α_b·len)`（1 = 不衰减；3 带同 [`Slab::alpha`]）。
+    pub atten: [f32; 3],
 }
 
 /// 平铺 `vec4`：每个 `Vec3` 占 4 个 f32（第 4 个补 0）⇒ 与 WGSL 的 `array<vec4<f32>>` 对齐。
@@ -161,13 +199,14 @@ fn upload(device: &wgpu::Device, sc: &SceneIn<'_>) -> (Buffers, u64) {
     };
     let pb = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("acoustic.params"),
-        contents: &params_bytes(
-            sc.srcs.len() as u32,
-            sc.dsts.len() as u32,
-            sc.tris.len() as u32,
-            sc.speed,
-            sc.edges.len() as u32,
-        ),
+        contents: &params_bytes(&Params {
+            n_src: sc.srcs.len() as u32,
+            n_lst: sc.dsts.len() as u32,
+            n_tris: sc.tris.len() as u32,
+            speed: sc.speed,
+            n_edges: sc.edges.len() as u32,
+            ..Params::default()
+        }),
         usage: wgpu::BufferUsages::UNIFORM,
     });
     let sb = mk_storage("acoustic.srcs", &vec4_bytes(sc.srcs));
@@ -288,7 +327,12 @@ fn run_entry(
     dispatch(&mut enc, &pipe, &bg, (b.n_pairs as u32).div_ceil(64).max(1));
     enc.copy_buffer_to_buffer(&b.ob, 0, &b.rb, 0, out_bytes);
     queue.submit(Some(enc.finish()));
-    let slice = b.rb.slice(..);
+    read_rows(device, &b.rb, b.n_pairs)
+}
+
+/// 回读 `n` 行（每行 4 个 `f32`）—— M1–M4 与 M5 两个入口共用。
+fn read_rows(device: &wgpu::Device, rb: &wgpu::Buffer, n: usize) -> Vec<[f32; 4]> {
+    let slice = rb.slice(..);
     let (tx, rx) = std::sync::mpsc::channel();
     slice.map_async(wgpu::MapMode::Read, move |r| {
         tx.send(r).ok();
@@ -301,8 +345,8 @@ fn run_entry(
         .ok();
     rx.recv().ok();
     let data = crate::mapped::mapped_view(slice);
-    let mut rows = Vec::with_capacity(b.n_pairs);
-    for k in 0..b.n_pairs {
+    let mut rows = Vec::with_capacity(n);
+    for k in 0..n {
         let o = k * 16;
         let f = |j: usize| {
             f32::from_le_bytes([
@@ -315,7 +359,7 @@ fn run_entry(
         rows.push([f(0), f(1), f(2), f(3)]);
     }
     drop(data);
-    b.rb.unmap();
+    rb.unmap();
     rows
 }
 
@@ -467,5 +511,161 @@ pub fn scattered_on_adapter(
             tri: row[3],
         });
     }
+    Ok((name, out))
+}
+
+/// **介质积分的入参**（M5）：这条腿不吃几何/材质表/棱，只吃"一批直线段 + 一张水平层表"。
+pub struct MediumIn<'a> {
+    /// 段起点（与 `dsts` 成对：对序 = `srcs[i] * n_lst + dsts[i]`）。
+    pub srcs: &'a [Vec3],
+    /// 段终点。
+    pub dsts: &'a [Vec3],
+    /// 水平层表（按 `y` 升序、不重叠；**空表 = 纯空气**）。
+    pub slabs: &'a [Slab],
+    /// 每段的**定步数**（`0` 按 1 算）—— 定步数、无早退 ⇒ 逐位可复现。
+    pub steps: u32,
+    /// 空气声速（层表没覆盖到的采样点用它）。
+    pub speed: f32,
+}
+
+/// 层表平铺：每条 2 个 `vec4`（`y_lo|y_hi|c|α_低`、`α_中|α_高|0|0`）。
+fn slabs_bytes(slabs: &[Slab]) -> Vec<u8> {
+    let mut vals = Vec::with_capacity(slabs.len() * 8);
+    for s in slabs {
+        vals.extend_from_slice(&[s.y_lo, s.y_hi, s.c, s.alpha[0]]);
+        vals.extend_from_slice(&[s.alpha[1], s.alpha[2], 0.0, 0.0]);
+    }
+    f32_bytes(&vals)
+}
+
+/// 空层表时的哑表（`n_slabs = 0` ⇒ 核内一次都不读它；只为让绑定非零长）。
+const ZERO_SLAB: Slab = Slab {
+    y_lo: 0.0,
+    y_hi: 0.0,
+    c: 0.0,
+    alpha: [0.0; 3],
+};
+
+/// 介质核的缓冲（与 M1–M4 那套**不共用**：绑定布局不一样 ⇒ 各建自己的）。
+struct MediumBuffers {
+    pb: wgpu::Buffer,
+    sb: wgpu::Buffer,
+    db: wgpu::Buffer,
+    lb: wgpu::Buffer,
+    ob: wgpu::Buffer,
+    rb: wgpu::Buffer,
+    n_pairs: usize,
+}
+
+/// 上传介质核的输入。
+fn upload_medium(device: &wgpu::Device, mi: &MediumIn<'_>) -> MediumBuffers {
+    let n_pairs = mi.srcs.len() * mi.dsts.len();
+    let mk_storage = |label: &str, bytes: &[u8]| {
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(label),
+            contents: bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        })
+    };
+    let out_bytes = (n_pairs * 16) as u64;
+    MediumBuffers {
+        pb: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("medium.params"),
+            contents: &params_bytes(&Params {
+                n_src: mi.srcs.len() as u32,
+                n_lst: mi.dsts.len() as u32,
+                speed: mi.speed,
+                n_slabs: mi.slabs.len() as u32,
+                medium_steps: mi.steps,
+                ..Params::default()
+            }),
+            usage: wgpu::BufferUsages::UNIFORM,
+        }),
+        sb: mk_storage("medium.srcs", &vec4_bytes(mi.srcs)),
+        db: mk_storage("medium.dsts", &vec4_bytes(mi.dsts)),
+        lb: mk_storage(
+            "medium.slabs",
+            &slabs_bytes(if_empty(mi.slabs, &[ZERO_SLAB])),
+        ),
+        ob: device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("medium.out"),
+            size: out_bytes,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        }),
+        rb: device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("medium.rb"),
+            size: out_bytes,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        }),
+        n_pairs,
+    }
+}
+
+/// 跑 `medium` 入口并回读（自有绑定布局：`0` 参数 / `1` 起点 / `2` 终点 / `9` 层表 / `4` 输出）。
+fn run_medium_entry(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    b: &MediumBuffers,
+) -> Vec<[f32; 4]> {
+    let out_bytes = (b.n_pairs * 16) as u64;
+    let bgl = mk_layout(
+        device,
+        "medium.bgl",
+        &[
+            (0, Kind::Uniform),
+            (1, Kind::Ro),
+            (2, Kind::Ro),
+            (9, Kind::Ro),
+            (4, Kind::Rw),
+        ],
+    );
+    // ⚠️ 这个变量名必须是 `shader`（词汇门只豁免这一种写法，见 `scripts/vocab_scan.sh` 头部）。
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("acoustic.wgsl"),
+        source: wgpu::ShaderSource::Wgsl(include_str!("acoustic.wgsl").into()),
+    });
+    let pipe = mk_pipe(device, &bgl, &shader, "medium.pipe", "medium");
+    let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("medium.bg"),
+        layout: &bgl,
+        entries: &[
+            ent(0, &b.pb),
+            ent(1, &b.sb),
+            ent(2, &b.db),
+            ent(9, &b.lb),
+            ent(4, &b.ob),
+        ],
+    });
+    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("medium.enc"),
+    });
+    dispatch(&mut enc, &pipe, &bg, (b.n_pairs as u32).div_ceil(64).max(1));
+    enc.copy_buffer_to_buffer(&b.ob, 0, &b.rb, 0, out_bytes);
+    queue.submit(Some(enc.finish()));
+    read_rows(device, &b.rb, b.n_pairs)
+}
+
+/// 在指定适配器上跑一趟**介质积分核**（M5）：直线段上按定步数中点采样，返回 `(用时, 逐带衰减)`。
+///
+/// 折线（折射的折线）不在这里：宿主**逐段调用**后把时延相加、衰减相乘 —— 两者都是可分量 ⇒
+/// 与"一次算完整条折线"等价（判据 `tests/acoustic_medium_probe.rs` 钉了这条组合性）。
+pub fn medium_on_adapter(
+    adapter_index: usize,
+    mi: &MediumIn<'_>,
+) -> Result<(String, Vec<MediumOut>), String> {
+    let (name, device, queue) = crate::probe::device_for(adapter_index)?;
+    if mi.srcs.is_empty() || mi.dsts.is_empty() {
+        return Ok((name, Vec::new()));
+    }
+    let b = upload_medium(&device, mi);
+    let out = run_medium_entry(&device, &queue, &b)
+        .into_iter()
+        .map(|r| MediumOut {
+            time: r[0],
+            atten: [r[1], r[2], r[3]],
+        })
+        .collect();
     Ok((name, out))
 }
