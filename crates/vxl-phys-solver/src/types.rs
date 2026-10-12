@@ -56,6 +56,8 @@ pub(crate) struct SolverParams {
     pub(crate) cfm_dyn: f32,
     pub(crate) cfm_static: f32,
     pub(crate) max_corr: f32,
+    /// **滚动阻力系数**（米 = 等效力臂；0 = 关）。见 `PhysConfig::roll_resistance`。
+    pub(crate) roll_res: f32,
 }
 
 impl SolverParams {
@@ -88,6 +90,7 @@ impl SolverParams {
             cfm_dyn,
             cfm_static,
             max_corr: cfg.max_corrective_velocity,
+            roll_res: cfg.roll_resistance,
         }
     }
 }
@@ -108,6 +111,10 @@ pub(crate) struct ContactConstraint {
     pub(crate) points: [PointConstraint; 4],
     /// 本流形实际点数（≤4）。
     pub(crate) npts: u8,
+    /// **滚动阻力系数**（米 = 等效力臂；0 ⇒ 不建滚动阻力行）。
+    pub(crate) roll_res: f32,
+    /// 滚动阻力行的冲量累加器（本子步内跨迭代累计；**不做跨帧暖启动**，理由见 `solve_rolling`）。
+    pub(crate) roll_imp: f32,
 }
 
 /// **岛级并行的内部拆分**（诊断；T4「碎片雨扩展比」为何饱和就看这几个数）。

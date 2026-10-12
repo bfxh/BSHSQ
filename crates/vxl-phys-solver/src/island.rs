@@ -130,11 +130,18 @@ pub(crate) fn solve_constraint(
                         group_apply(lv, av, local_of, iw, im, bi, p.rb, imp, false);
                     }
                 }
+                // 滚动阻力行（`roll_res == 0` ⇒ 首行短路；默认档零成本）。
+                if c.roll_res > 0.0 {
+                    solve_rolling(c, av, local_of, iw);
+                }
             }
         }
     }
     resid
 }
+
+mod rolling;
+use rolling::solve_rolling;
 
 /// 每岛构建约束（岛内流形序 = 全局流形序，§4.14）。
 #[allow(clippy::too_many_arguments)]

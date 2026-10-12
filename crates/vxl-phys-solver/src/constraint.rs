@@ -447,5 +447,7 @@ pub(crate) fn build_constraint(
         warm_space,
         points: pts,
         npts,
+        roll_res: sp.roll_res,
+        roll_imp: 0.0,
     });
 }
