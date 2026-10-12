@@ -18,14 +18,15 @@
 //! ## 边界（如实登记）
 //!
 //! 单声道（**不做** HRTF/双耳、不做多普勒、不做空气非线性）；时延量化到**整数采样**（48 kHz 下
-//! ≈ 21 µs，远低于可闻的时延分辨）；**没有混响尾巴** —— 本层只渲染显式路径（直达/一次反射/
-//! 绕射/散射/折射/穿孔/透射），多次反射仍在路线图外。
+//! ≈ 21 µs，远低于可闻的时延分辨）；**早期声只渲显式路径**（直达/一次反射/绕射/散射/折射/穿孔/
+//! 透射）—— 晚期混响由 A7 的 [`mix_reverb_into`] 补（统计口径，可选）。
 //!
 //! ## 确定性
 //!
 //! 采样率与时长都是定值、滤波器是一阶 IIR（定状态、逐样本）、时延取整数采样、全程 `f32`、
 //! 伪随机激励是**定种 LCG** ⇒ 同输入两跑**逐位相同**（判据 `tests/a6_audio.rs`）。
 
+use crate::reverb::ReverbParams;
 use crate::{SoundPath, BANDS};
 use std::fs;
 
@@ -204,6 +205,62 @@ pub fn impulse_response(paths: &[SoundPath], cfg: &AudioConfig) -> Clip {
     let mut dry = vec![0.0f32; cfg.samples()];
     dry[0] = 1.0;
     render(paths, &dry, cfg)
+}
+
+/// 把**统计混响尾巴**（A7，[`ReverbParams`]）叠进输出 —— `dry` 是这一声的干信号、
+/// `t0_seconds` 是它的发生时刻。
+///
+/// 口径：**能量包络跟随**（不做真卷积）—— 尾巴的幅度跟干信号的**逐带能量包络**、按 `RT60`
+/// 指数衰减，再乘**定种噪声**（逐带不同种子）与干湿比。理由：真卷积是 `O(N·M)`
+/// （10 s 干信号 × 2 s 尾巴、48 kHz ⇒ ~1e10 次乘加），而晚段本来就是统计量 ⇒ 不值得为它上一次 FFT。
+/// **冲激情形与真卷积一致**（冲激的能量包络就是它自己 ⇒ 尾巴是"指数衰减的噪声"）。
+pub fn mix_reverb_into(
+    out: &mut [f32],
+    dry: &[f32],
+    rv: &ReverbParams,
+    t0_seconds: f32,
+    sample_rate: u32,
+) {
+    if out.is_empty() || dry.is_empty() || !rv.is_on() {
+        return;
+    }
+    let bands = split3(dry, sample_rate);
+    // 尾巴从**平均自由程之后**接上（`4V/(S·c)`）—— 晚段不可能比这更早。
+    let start = at(t0_seconds + rv.onset, sample_rate);
+    if start >= out.len() {
+        return;
+    }
+    for (b, (band, level)) in bands.iter().zip(rv.mix.iter()).enumerate() {
+        let mix = *level;
+        if mix <= 0.0 {
+            continue;
+        }
+        // -60 dB ⇒ `τ = RT60 / ln(1000)`；能量域每采样衰减 = 幅度衰减的平方。
+        let tau = (rv.rt60[b] / 6.907_755).max(1e-3);
+        let decay = (-1.0 / (tau * sample_rate as f32)).exp();
+        let keep = decay * decay;
+        // ⚠️ 种子**随发声时刻变**：不这么干的话，每个事件的尾巴都是**同一段噪声** ⇒ 多声事件会
+        // **相干叠加**（实测 214 声的峰值 13.4，归一化后早期声全被压没了）✗。换种子之后各事件的
+        // 尾巴不相干（功率相加），密集场景的尾巴变厚是对的、也不会爆表。
+        let mut seed: u32 = 0x2545_F491
+            ^ ((b as u32 + 1).wrapping_mul(2_654_435_761))
+            ^ (start as u32).wrapping_mul(2_246_822_519);
+        let mut energy = 0.0f32;
+        // ⚠️ **归一化因子 `sqrt(1 − keep)`**：`energy` 是"指数加权累积"的（稳态 ≈ `band_rms²/(1−keep)`），
+        // 不归一化的话持续声源的尾巴会长出 `sqrt(1/(1−keep)) ≈ 40×`（实测：一段素材渲出来峰值 2.87，
+        // 归一化后早期声被压掉 9 dB ✗）。乘上它，尾巴的幅度包络才真的是 `≈ mix · 干信号包络`
+        // （模块与 `reverb::MIX` 的头注一直是这么写的），冲激情形只差一个常数因子（形状不变）。
+        let norm = (1.0 - keep).sqrt();
+        for (j, slot) in out[start..].iter_mut().enumerate() {
+            let x = band.get(j).copied().unwrap_or(0.0);
+            // 递归的能量包络：`Σ_{i<=j} x_i² · decay^(2(j-i))` ⇒ O(N) 且数值稳定。
+            energy = x * x + energy * keep;
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let noise = (seed >> 8) as f32 / 8_388_608.0 - 1.0; // u24 → [-1, 1)
+                                                                // 均匀噪声方差 1/3 ⇒ 乘 √3 让 `mix` 的口径落在"幅度量级"上。
+            *slot += 1.732_050_8 * mix * noise * energy.sqrt() * norm;
+        }
+    }
 }
 
 /// 一记**确定性的"拍手"**：指数衰减的伪随机噪声（定种 LCG ⇒ 逐位可复现），峰值归一到 1。
