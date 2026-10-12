@@ -19,7 +19,7 @@
 //!
 //! 单声道（**不做** HRTF/双耳、不做多普勒、不做空气非线性）；时延量化到**整数采样**（48 kHz 下
 //! ≈ 21 µs，远低于可闻的时延分辨）；**早期声只渲显式路径**（直达/一次反射/绕射/散射/折射/穿孔/
-//! 透射）—— 晚期混响由 A7 的 [`mix_reverb_into`] 补（统计口径，可选）。
+//! 透射）—— 晚期混响由 A7 的 [`mix_reverb_tail`] 补（卷积口径，可选）。
 //!
 //! ## 确定性
 //!
@@ -207,71 +207,97 @@ pub fn impulse_response(paths: &[SoundPath], cfg: &AudioConfig) -> Clip {
     render(paths, &dry, cfg)
 }
 
-/// 把**统计混响尾巴**（A7，[`ReverbParams`]）叠进输出 —— `dry` 是这一声的干信号、
-/// `t0_seconds` 是它的发生时刻。
+/// 把一段干信号按**发生时刻**摊进缓冲（混响尾巴的输入轨用；越界丢弃）。
 ///
-/// 口径：**能量包络跟随**（不做真卷积）—— 尾巴的幅度跟干信号的**逐带能量包络**、按 `RT60`
-/// 指数衰减，再乘**定种噪声**（逐带不同种子）与干湿比。理由：真卷积是 `O(N·M)`
-/// （10 s 干信号 × 2 s 尾巴、48 kHz ⇒ ~1e10 次乘加），而晚段本来就是统计量 ⇒ 不值得为它上一次 FFT。
-/// **冲激情形与真卷积一致**（冲激的能量包络就是它自己 ⇒ 尾巴是"指数衰减的噪声"）。
-pub fn mix_reverb_into(
-    out: &mut [f32],
-    dry: &[f32],
-    rv: &ReverbParams,
-    t0_seconds: f32,
-    sample_rate: u32,
-) {
-    if out.is_empty() || dry.is_empty() || !rv.is_on() {
+/// 为什么单独一个函数：尾巴的卷积要**整条轨**（见 [`mix_reverb_tail`]），而这条轨就是"每次
+/// 发声的干信号按时刻相加"—— 与 [`mix_into`] 放路径的区别是这里**不加路径增益/不逐带缩放**。
+pub fn place_into(out: &mut [f32], dry: &[f32], t0_seconds: f32, sample_rate: u32) {
+    if out.is_empty() || dry.is_empty() {
         return;
     }
-    let bands = split3(dry, sample_rate);
-    // 尾巴从**平均自由程之后**接上（`4V/(S·c)`）—— 晚段不可能比这更早。
-    let start = at(t0_seconds + rv.onset, sample_rate);
+    let start = at(t0_seconds, sample_rate);
     if start >= out.len() {
         return;
     }
+    for (i, x) in dry.iter().enumerate() {
+        let j = start + i;
+        if j >= out.len() {
+            break;
+        }
+        out[j] += *x;
+    }
+}
+
+/// 把**统计混响尾巴**（A7，[`ReverbParams`]）叠进输出 —— `dry_track` 是**整条干信号轨**
+/// （每次发声的干信号按发生时刻摊在时间轴上的总和）。
+///
+/// 口径：**用稀疏衰减核做卷积** —— 尾巴 = `干信号 ⊛ 核`，核是 **velvet 噪声**（每 ~1 ms 一个
+/// 随机 ±1 脉冲）乘逐带指数衰减（幅度在 `RT60` 处掉 60 dB）。**这才是一条真正的混响**：
+/// 进去什么内容，尾巴里就是什么内容（弦进、弦出）。
+///
+/// ⚠️ 血泪教训（2026-10-12，用户原话"好多噪音和气的声音"）：上一版是**包络 × 白噪**（不做卷积），
+/// 它把干信号的**内容**换成了噪声 ⇒ 正弦的尾巴是"气声/呼吸声"，不是混响 ✗。代价是现在真要做卷积
+/// （`O(干信号长度 × 核脉冲数)`，~1 ms 间距下每条带几百个脉冲 ⇒ 数秒级），但这是**唯一能听**的路。
+///
+/// ⚠️ 因为贵，约定：**宿主把整条干信号轨摊好、只调一次**（卷积是线性的 ⇒ 与逐事件调用等价）。
+/// 整条尾巴按 `onset`（平均自由程 / 声速）整体延后。
+pub fn mix_reverb_tail(out: &mut [f32], dry_track: &[f32], rv: &ReverbParams, sample_rate: u32) {
+    if out.is_empty() || dry_track.is_empty() || !rv.is_on() {
+        return;
+    }
+    // 尾巴从**平均自由程之后**接上（`4V/(S·c)`）—— 晚段不可能比这更早。
+    let start = at(rv.onset, sample_rate);
+    if start >= out.len() {
+        return;
+    }
+    let n_tail = out.len() - start;
+    let bands = split3(dry_track, sample_rate);
+    // 脉冲间距：~1 ms ⇒ 1000 个/秒的 velvet 噪声。
+    let spacing = ((sample_rate as f32 / 900.0).round() as usize).max(1);
     for (b, (band, level)) in bands.iter().zip(rv.mix.iter()).enumerate() {
         let mix = *level;
         if mix <= 0.0 {
             continue;
         }
-        // -60 dB ⇒ `τ = RT60 / ln(1000)`；能量域每采样衰减 = 幅度衰减的平方。
+        // 幅度衰减常数：`RT60` 处掉 60 dB（幅度 ×1e-3）⇒ `τ = RT60 / ln(1000)`。
         let tau = (rv.rt60[b] / 6.907_755).max(1e-3);
-        let decay = (-1.0 / (tau * sample_rate as f32)).exp();
-        let keep = decay * decay;
-        // ⚠️ 种子**随发声时刻变**：不这么干的话，每个事件的尾巴都是**同一段噪声** ⇒ 多声事件会
-        // **相干叠加**（实测 214 声的峰值 13.4，归一化后早期声全被压没了）✗。换种子之后各事件的
-        // 尾巴不相干（功率相加），密集场景的尾巴变厚是对的、也不会爆表。
-        let mut seed: u32 = 0x2545_F491
-            ^ ((b as u32 + 1).wrapping_mul(2_654_435_761))
-            ^ (start as u32).wrapping_mul(2_246_822_519);
-        // ⚠️ **噪声也要逐带限带 + 逐带归一**：白噪一路顶到 24 kHz、三条带还共用同一段噪声的话，
-        // 尾巴的高频是**干信号的 7 倍**（实测 6/12 kHz：0.0007 vs 0.0001）⇒ 听感就是"电锯烤铁"。
-        // 这里把同一段噪声过一遍**同一套分频器**（带 b 只用带 b 的那一份），再按该带 RMS 归一到
-        // 单位幅度 ⇒ 尾巴的频谱**跟着干信号走**（闷的素材得到闷的尾巴），高频那份还按它自己的
-        // RT60 先衰减完。
-        let mut raw = vec![0.0f32; out.len() - start];
-        for v in raw.iter_mut() {
+        let secs = (rv.rt60[b] * 1.5).max(0.02);
+        // ⚠️ 先算成变量再转 `usize`（`usize-gate` 认「括号里先乘再转 usize」那个写法）。
+        let secs_samples = secs * sample_rate as f32;
+        let len = (secs_samples as usize).min(n_tail).max(1);
+        let mut taps: Vec<(usize, f32)> = Vec::with_capacity(len / spacing + 2);
+        let mut seed: u32 = 0x9E37_79B9 ^ ((b as u32 + 1).wrapping_mul(2_654_435_761));
+        let mut j = 0usize;
+        while j < len {
             seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-            *v = (seed >> 8) as f32 / 8_388_608.0 - 1.0; // u24 → [-1, 1)
+            let sign = if (seed >> 9) & 1 == 1 { 1.0 } else { -1.0 };
+            let amp = sign * (-(j as f32) / (tau * sample_rate as f32)).exp();
+            taps.push((j, amp));
+            j += spacing;
         }
-        let nb = split3(&raw, sample_rate);
-        let band_rms = {
-            let sum: f32 = nb[b].iter().map(|v| v * v).sum();
-            (sum / nb[b].len().max(1) as f32).sqrt().max(1e-6)
-        };
-        let mut energy = 0.0f32;
-        // ⚠️ **归一化因子 `sqrt(1 − keep)`**：`energy` 是"指数加权累积"的（稳态 ≈ `band_rms²/(1−keep)`），
-        // 不归一化的话持续声源的尾巴会长出 `sqrt(1/(1−keep)) ≈ 40×`（实测：一段素材渲出来峰值 2.87，
-        // 归一化后早期声被压掉 9 dB ✗）。乘上它，尾巴的幅度包络才真的是 `≈ mix · 干信号包络`
-        // （模块与 `reverb::MIX` 的头注一直是这么写的），冲激情形只差一个常数因子（形状不变）。
-        let norm = (1.0 - keep).sqrt();
-        for (j, slot) in out[start..].iter_mut().enumerate() {
-            let x = band.get(j).copied().unwrap_or(0.0);
-            // 递归的能量包络：`Σ_{i<=j} x_i² · decay^(2(j-i))` ⇒ O(N) 且数值稳定。
-            energy = x * x + energy * keep;
-            let noise = nb[b].get(j).copied().unwrap_or(0.0) / band_rms;
-            *slot += mix * noise * energy.sqrt() * norm;
+        // 核的**初段（50 ms）RMS 归一到 1**：尾巴的起始幅度 ≈ `mix × 干信号包络`
+        // （与 `reverb::MIX` 的口径一致）。
+        let head = (sample_rate as usize / 20).min(len).max(1);
+        let sum: f32 = taps
+            .iter()
+            .filter(|(k, _)| *k < head)
+            .map(|(_, v)| v * v)
+            .sum();
+        let count = (head as f32 / spacing as f32).max(1.0);
+        let rms = (sum / count).sqrt().max(1e-9);
+        // 卷积：**只走非零脉冲**（`O(干信号长度 × 脉冲数)`）；逐带：那一带的干信号 ⊛ 同一条核。
+        for (i, x) in band.iter().enumerate() {
+            if *x == 0.0 {
+                continue;
+            }
+            let gain = mix * *x / rms;
+            for (k, kv) in taps.iter() {
+                let idx = i + k;
+                if idx >= n_tail {
+                    break;
+                }
+                out[start + idx] += gain * *kv;
+            }
         }
     }
 }

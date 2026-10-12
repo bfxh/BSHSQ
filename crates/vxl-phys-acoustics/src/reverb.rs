@@ -7,7 +7,7 @@
 //!    全部来自 [`AcousticGeometry`] 自己的表（不看碰撞体、不看 `World`）；
 //! 2. **干湿比是工程常数**（[`MIX`]）：尾巴相对早期声的电平 —— **不是物理量**，宿主可自行缩放；
 //!    本层只保证单调性（越吸声越短越弱、全反射最响）；
-//! 3. **尾巴是确定性的**：合成在 [`crate::audio::mix_reverb_into`]（定种 LCG），无随机种子、不看时钟。
+//! 3. **尾巴是确定性的**：合成在 [`crate::audio::mix_reverb_tail`]（定种 LCG 的 velvet 核），无随机种子、不看时钟。
 //!
 //! - 想要尾巴但三角网不闭合（只建了"参与显式路径的那几面"）：用 [`reverb_params_from`] **声明**
 //!   包络（`V` / `S`）—— 与 [`crate::Portal`]/[`crate::Edge`] 同一条"显式拓扑"思路。
@@ -28,7 +28,7 @@ use crate::{tri_of, AcousticConfig, AcousticGeometry, BANDS};
 /// 混音比例缩放）。
 ///
 /// ⚠️ 它**不是**"多声源时的总电平"：多个事件在时间轴上会**不相干地**叠加（各自的噪声相位不同，
-/// 见 [`crate::audio::mix_reverb_into`] 的种子）⇒ 密集场景里尾巴自然更厚，这是对的。
+/// 见 [`crate::audio::mix_reverb_tail`] 的核）⇒ 密集场景里尾巴自然更厚，这是对的。
 pub const MIX: f32 = 0.2;
 
 /// Sabine 常数（米制：`RT60 = 0.161 · V / (S · α)`）。
