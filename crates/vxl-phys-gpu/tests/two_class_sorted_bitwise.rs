@@ -89,10 +89,10 @@ fn flatten_all(f: &FluidSystem) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
 
 /// 逐位相同分量数 / 总分量数。
 fn bits_same(a: &[f32], b: &[f32]) -> (usize, usize) {
-    let same = a
-        .iter()
-        .zip(b.iter())
-        .filter(|(x, y)| x.to_bits() == y.to_bits())
+    // ⚠️ 长度地板：`zip` 静默截断 ⇒ 长侧多出的分量不进计数、"前缀全同"就假绿（LSSMJ F03 同族）。
+    assert_eq!(a.len(), b.len(), "逐位对拍两侧长度不一致");
+    let same = (0..a.len())
+        .filter(|&i| a[i].to_bits() == b[i].to_bits())
         .count();
     (same, a.len())
 }

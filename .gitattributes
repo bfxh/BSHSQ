@@ -1,0 +1,14 @@
+# 门脚本钉 LF（借 LSSMJ PR #14 的口径）。
+#
+# 本机 `core.autocrlf=true` 且此前无属性文件 ⇒ Windows 检出会把 `.sh` 落成 CRLF：
+# 实测 `bash scripts/vocab_scan.sh .` 直接死在 `$'\r'`（`行 14: $'\r': 未找到命令`），
+# 于是"本机门链"与 CI 的判定口径不一致 —— 门红/绿在两种环境下不是同一把尺。
+#
+# 为什么连 `.yml` 一起钉：`scripts/ci_shape_lock.sh` 用**锚定**模式（`awk '/^  gates-summary:/'`、
+# `grep -qx`）解析 `ci.yml`，CRLF 会让行尾多一个字节 ⇒ 提取出的 job 名与 needs 名对不上，
+# 本机假红「汇总门 needs 里有不存在的 job」。CI 是 LF 检出，所以这条**只在 Windows 本机**暴露。
+#
+# 只钉门会去解析的这两类：`.rs`/`.md` 交给 autocrlf 保持不变，避免全仓行尾重排。
+.gitattributes text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
