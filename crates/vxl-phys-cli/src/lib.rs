@@ -19,6 +19,7 @@
 // 用 `use vxl_phys::prelude::*;` 才是我们要给他们的便利，见 `docs/QUICKSTART.md`）。
 use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::audio as aco_audio;
+use vxl_phys_acoustics::reverb as aco_reverb;
 use vxl_phys_acoustics::{
     jsonl as aco_jsonl, AcousticConfig, AcousticGeometry, AcousticMedium, AcousticTier,
     AcousticsExt, Edge, LayeredMedium, Listener, Medium, Portal, SoundPath, BANDS,
@@ -141,6 +142,8 @@ pub fn run(args: &[String]) -> Result<String, String> {
     let json = args.iter().any(|a| a == "--json");
     // `--realtime` 只对 `acoustic` 有意义：换成实时档（确定性的工作量上界，见 `vxl-phys-acoustics`）。
     let realtime = args.iter().any(|a| a == "--realtime");
+    // `--reverb` 只对 `audio` 有意义：叠上 A7 的统计混响尾巴（Sabine 逐带 RT60，确定性）。
+    let reverb = args.iter().any(|a| a == "--reverb");
     let pos: Vec<&str> = args
         .iter()
         .map(String::as_str)
@@ -164,7 +167,7 @@ pub fn run(args: &[String]) -> Result<String, String> {
         // **第二条输出侧域**：声学路径流（走声明的"房间"几何，与碰撞体无关）。
         "acoustic" => acoustic_cmd(name, ticks, realtime),
         // **A6**：把同一批路径渲染成能听的 WAV（第 3 个位置参数 = 输出路径，第 4 个 = 干信号）。
-        "audio" => audio_cmd(name, ticks, path, pos.get(4).copied()),
+        "audio" => audio_cmd(name, ticks, path, pos.get(4).copied(), reverb),
         "help" => Ok(USAGE.to_string()),
         other => Err(format!("未知子命令 `{other}`\n{USAGE}")),
     }
@@ -377,29 +380,12 @@ fn acoustic_cmd(name: &str, ticks: usize, realtime: bool) -> Result<String, Stri
 ///
 /// ⚠️ **只认 WAV**：mp4/m4a/mp3 这类**压缩容器本层不解码**（引解码器就要背编解码器与许可
 /// 那一摊子，且与"确定性优先"无关）—— 看见这些扩展名直接给一条能抄的 `ffmpeg` 命令。
-/// 干信号是不是**压缩容器**？是就给一条能直接抄的转码命令（本层只认 WAV，理由见 [`audio_cmd`]）。
-fn compressed_hint(path: &str) -> Option<String> {
-    let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
-    let known = [
-        "mp4", "m4a", "mov", "mkv", "webm", "avi", "mp3", "aac", "ogg", "oga", "opus", "flac",
-        "wma", "wmv",
-    ];
-    if !known.contains(&ext.as_str()) {
-        return None;
-    }
-    Some(format!(
-        "干信号只认 WAV：`{path}` 看着是 .{ext} 这种压缩容器，本层**不解码**（引解码器要背编解码器\
-         与许可，且与确定性优先的纪律无关）。先转一道再喂：\n  \
-         ffmpeg -i \"{path}\" -vn -ac 1 -ar 48000 -c:a pcm_s16le dry.wav\n  \
-         vxl-phys audio <场景> [ticks] <出.wav> dry.wav"
-    ))
-}
-
 fn audio_cmd(
     name: &str,
     ticks: usize,
     out: Option<&str>,
     dry_path: Option<&str>,
+    reverb: bool,
 ) -> Result<String, String> {
     let Some(out) = out else {
         return Err("audio 需要输出路径：`audio <场景> [ticks] <出.wav> [干信号.wav]`".to_string());
@@ -407,18 +393,14 @@ fn audio_cmd(
     let mut w = scene(name)?;
     let (dt, rate) = (w.config.dt, aco_audio::AudioConfig::default().sample_rate);
     let dry = match dry_path {
-        Some(p) => {
-            if let Some(hint) = compressed_hint(p) {
-                return Err(hint);
-            }
-            aco_audio::read_wav(p)?.samples
-        }
+        Some(p) => read_dry(p)?,
         None => aco_audio::clap(rate, 0.12),
     };
     let room = room();
     let field = medium();
     let geo = room.geom(Some(&field));
     let cfg = AcousticConfig::default();
+    let rv = audio_reverb(&geo, &cfg, reverb);
     let listener = Listener {
         pos: Vec3::new(0.0, 1.0, 3.0),
         radius: 0.5,
@@ -427,7 +409,7 @@ fn audio_cmd(
     // 干信号比尾巴长（比如喂一段 10 s 的素材）时，只按 ticks 算会把尾部**截掉**（本层没有混响
     // 尾巴，只有显式路径，所以"干信号多长"就是答案；见 A6 模块头注）。
     let dry_secs = dry.len() as f32 / rate as f32;
-    let seconds = ticks as f32 * dt + dry_secs.max(2.0) + 0.05;
+    let seconds = ticks as f32 * dt + dry_secs.max(2.0) + tail_seconds(&rv) + 0.05;
     // ⚠️ 先算成变量再转 `usize`（`usize-gate` 认「括号里先乘再转 usize」那个写法，虽然这里是浮点）。
     let frames = seconds * rate as f32;
     let mut samples = vec![0.0f32; frames.max(1.0) as usize];
@@ -442,6 +424,7 @@ fn audio_cmd(
         events += 1;
         count += tick.len();
         aco_audio::mix_into(&mut samples, &tick, &dry, t as f32 * dt, rate);
+        aco_audio::mix_reverb_into(&mut samples, &dry, &rv, t as f32 * dt, rate);
     }
     let mut clip = aco_audio::Clip {
         sample_rate: rate,
@@ -453,10 +436,61 @@ fn audio_cmd(
     aco_audio::write_wav(out, &clip)?;
     Ok(format!(
         "已写入 {out}：{:.2} s / {} 点 / {rate} Hz / {events} 声事件（{count} 条路径）/ \
-         峰值 {peak:.4}（归一 ×{gain:.4}）\n",
+         峰值 {peak:.4}（归一 ×{gain:.4}）/ 混响 {}\n",
         clip.seconds(),
         clip.samples.len(),
+        reverb_text(&rv)
     ))
+}
+
+/// 读干信号：**只认 WAV**；压缩容器（mp4/m4a/mp3…）**不解码**（引解码器要背编解码器与许可那一摊子，
+/// 且与确定性优先的纪律无关），但"读不了"不该让人去猜 ⇒ 直接把能抄的转码命令打出来。
+fn read_dry(path: &str) -> Result<Vec<f32>, String> {
+    let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    if COMPRESSED.contains(&ext.as_str()) {
+        return Err(format!(
+            "干信号只认 WAV：`{path}` 看着是 .{ext} 这种压缩容器，本层**不解码**。先转一道再喂：\n  \
+             ffmpeg -i \"{path}\" -vn -ac 1 -ar 48000 -c:a pcm_s16le dry.wav\n  \
+             vxl-phys audio <场景> [ticks] <出.wav> dry.wav"
+        ));
+    }
+    Ok(aco_audio::read_wav(path)?.samples)
+}
+
+/// `audio` 的混响参数（A7）：`--reverb` 才开。演示房间是**声明的半开放几何**（地板 + 带门洞的墙 +
+/// 天花板，四面敞开）⇒ 体积量不出来 ⇒ 用**声明的包络**：听者那间屋 `x∈[-4,4] y∈[0,6] z∈[1.5,4]`
+/// （`V = 120 m³`、`S = 118 m²`）。建出来的面（天花板 / 墙背面）按几何表算吸声，没建出来的面按
+/// **零吸声**（保守 ⇒ 尾巴偏长）；想要别的房间感就改这两个数。
+fn audio_reverb(
+    geo: &AcousticGeometry<'_>,
+    cfg: &AcousticConfig,
+    on: bool,
+) -> aco_reverb::ReverbParams {
+    if !on {
+        return aco_reverb::ReverbParams::default();
+    }
+    aco_reverb::reverb_params_from(geo, cfg, 8.0 * 6.0 * 2.5, 118.0)
+}
+
+/// 开了混响就多留 1.5×RT60（中带，`BANDS/2`）：统计尾巴得衰减到听不见。
+fn tail_seconds(rv: &aco_reverb::ReverbParams) -> f32 {
+    if rv.is_on() {
+        rv.rt60[1] * 1.5
+    } else {
+        0.0
+    }
+}
+
+/// 汇总行里的混响部分（关了写"关"）—— 挪出来是为了压 `audio_cmd` 的圈复杂度。
+fn reverb_text(rv: &aco_reverb::ReverbParams) -> String {
+    if rv.is_on() {
+        format!(
+            "RT60 {:.2}/{:.2}/{:.2} s（Sabine）",
+            rv.rt60[0], rv.rt60[1], rv.rt60[2]
+        )
+    } else {
+        "关".to_string()
+    }
 }
 
 fn json_demo(name: &str, ticks: usize, w: &World, poses: &[Vec3]) -> String {
@@ -505,6 +539,12 @@ fn replay_cmd(name: &str, ticks: usize, path: Option<&str>) -> Result<String, St
 
 /// 观测点周期（ticks/行）——`record` 与 `replay` 共用的**格式常量**（改它 = 换格式）。
 const PERIOD: u64 = 60;
+
+/// 干信号里**压缩容器**的扩展名：`audio` 见到它们会直接报转码命令（本层只认 WAV，见 `audio_cmd`）。
+const COMPRESSED: [&str; 14] = [
+    "mp4", "m4a", "mov", "mkv", "webm", "avi", "mp3", "aac", "ogg", "oga", "opus", "flac", "wma",
+    "wmv",
+];
 
 /// 逐 tick 推进，每 [`PERIOD`] tick 写一行 `{"tick":..,"state_hash":"0x.."}`（JSONL）。
 fn record_text(name: &str, ticks: usize) -> Result<String, String> {
@@ -600,4 +640,5 @@ vxl-phys —— vxl_phys 的命令行入口
 任意子命令都可加 `--json`：输出机器可读 JSON（cue 本来就是 JSONL）。
 `acoustic` 可加 `--realtime`：走实时档（候选与产出都收紧，确定性、不看时钟）。
 `audio` 的时间轴按物理步长排（每 tick 一声事件）；干信号给 WAV 就用它（PCM16/float32、多声道降混）。
+`audio` 可加 `--reverb`：叠上 A7 的统计混响尾巴（Sabine 逐带 RT60，确定性；几何不闭合就按声明的包络算）。
 ";

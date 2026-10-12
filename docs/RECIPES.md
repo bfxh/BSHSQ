@@ -805,6 +805,8 @@ cargo run --release -q -p vxl-phys-cli -- audio voxel 240 room.wav
 cargo run --release -q -p vxl-phys-cli -- audio voxel 27 ir.wav
 # 用自己的素材（单声道；多声道会降混）
 cargo run --release -q -p vxl-phys-cli -- audio voxel 27 out.wav my_material.wav
+# 叠上 A7 的统计混响尾巴（Sabine 逐带 RT60；开场景按声明的包络算）
+cargo run --release -q -p vxl-phys-cli -- audio voxel 27 out.wav my_material.wav --reverb
 ```
 
 - **压缩素材先转 WAV**（本仓**不解码** mp4/m4a/mp3：引解码器要背编解码器与许可）：

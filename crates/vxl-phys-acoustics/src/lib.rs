@@ -21,6 +21,9 @@
 //! - **A6**：**离线音频渲染**（[`audio`] 模块）—— cue 流 → **能听的波形**：逐带分频
 //!   （[`audio::SPLIT_HZ`]，完美重构）+ 按 `delay` 直叠（**幅度 = `sqrt(能量)`**）+
 //!   最小 WAV 读写；单声道、不做 HRTF（双耳渲染仍是宿主的事）。判据 `tests/a6_audio.rs`。
+//! - **A7**：**统计混响尾巴**（[`reverb`] 模块）—— 早期声仍由显式路径给，**晚段**用
+//!   Sabine 逐带 `RT60 = 0.161·V/(S·ᾱ_b)` 补（体积/表面积/吸声全部从声学几何自己的表算），
+//!   合成在 [`audio::mix_reverb_into`]（确定性的能量包络跟随）。判据 `tests/a7_reverb.rs`。
 //!
 //! ## 三条设计原则（文档 §4 的落实）
 //!
@@ -72,6 +75,7 @@
 #![forbid(unsafe_code)]
 
 pub mod audio;
+pub mod reverb;
 
 mod auto_edge;
 mod diffract;
