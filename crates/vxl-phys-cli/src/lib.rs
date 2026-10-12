@@ -144,6 +144,8 @@ pub fn run(args: &[String]) -> Result<String, String> {
     let realtime = args.iter().any(|a| a == "--realtime");
     // `--reverb` 只对 `audio` 有意义：叠上 A7 的统计混响尾巴（Sabine 逐带 RT60，确定性）。
     let reverb = args.iter().any(|a| a == "--reverb");
+    // `--order2`：`acoustic` / `audio` 都把反射阶数开到 2（A8 二阶镜像展开；候选 ≈ 面数² ⇒ 慢）。
+    let order2 = args.iter().any(|a| a == "--order2");
     let pos: Vec<&str> = args
         .iter()
         .map(String::as_str)
@@ -165,9 +167,9 @@ pub fn run(args: &[String]) -> Result<String, String> {
         "replay" => replay_cmd(name, ticks, path),
         "cue" => cue_cmd(name, ticks),
         // **第二条输出侧域**：声学路径流（走声明的"房间"几何，与碰撞体无关）。
-        "acoustic" => acoustic_cmd(name, ticks, realtime),
+        "acoustic" => acoustic_cmd(name, ticks, realtime, order2),
         // **A6**：把同一批路径渲染成能听的 WAV（第 3 个位置参数 = 输出路径，第 4 个 = 干信号）。
-        "audio" => audio_cmd(name, ticks, path, pos.get(4).copied(), reverb),
+        "audio" => audio_cmd(name, ticks, path, pos.get(4).copied(), reverb, order2),
         "help" => Ok(USAGE.to_string()),
         other => Err(format!("未知子命令 `{other}`\n{USAGE}")),
     }
@@ -342,16 +344,12 @@ fn room() -> Room {
 ///
 /// `realtime` = 用 [`AcousticTier::Realtime`] 的**确定性工作量上界**（候选与产出都收紧）；
 /// 档位不是墙钟预算，宿主想自适应请自己按帧率选档。
-fn acoustic_cmd(name: &str, ticks: usize, realtime: bool) -> Result<String, String> {
+fn acoustic_cmd(name: &str, ticks: usize, realtime: bool, order2: bool) -> Result<String, String> {
     let mut w = scene(name)?;
     let room = room();
     let field = medium();
     let geo = room.geom(Some(&field));
-    let cfg = if realtime {
-        AcousticTier::Realtime.config()
-    } else {
-        AcousticConfig::default()
-    };
+    let cfg = acoustic_cfg(realtime, order2);
     let listener = Listener {
         pos: Vec3::new(0.0, 1.0, 3.0),
         radius: 0.5,
@@ -386,6 +384,7 @@ fn audio_cmd(
     out: Option<&str>,
     dry_path: Option<&str>,
     reverb: bool,
+    order2: bool,
 ) -> Result<String, String> {
     let Some(out) = out else {
         return Err("audio 需要输出路径：`audio <场景> [ticks] <出.wav> [干信号.wav]`".to_string());
@@ -399,7 +398,7 @@ fn audio_cmd(
     let room = room();
     let field = medium();
     let geo = room.geom(Some(&field));
-    let cfg = AcousticConfig::default();
+    let cfg = acoustic_cfg(false, order2);
     let rv = audio_reverb(&geo, &cfg, reverb);
     let listener = Listener {
         pos: Vec3::new(0.0, 1.0, 3.0),
@@ -455,6 +454,21 @@ fn read_dry(path: &str) -> Result<Vec<f32>, String> {
         ));
     }
     Ok(aco_audio::read_wav(path)?.samples)
+}
+
+/// 声学配置：`--realtime` 走实时档（候选与产出都收紧）；`--order2` 把反射阶数开到 2（A8）。
+///
+/// ⚠️ `--order2` 的候选 ≈ `max_reflections²` 条链 ⇒ 明显更慢，是给**离线试听/对表**用的。
+fn acoustic_cfg(realtime: bool, order2: bool) -> AcousticConfig {
+    let mut cfg = if realtime {
+        AcousticTier::Realtime.config()
+    } else {
+        AcousticConfig::default()
+    };
+    if order2 {
+        cfg.reflection_order = 2;
+    }
+    cfg
 }
 
 /// `audio` 的混响参数（A7）：`--reverb` 才开。演示房间是**声明的半开放几何**（地板 + 带门洞的墙 +
@@ -641,4 +655,5 @@ vxl-phys —— vxl_phys 的命令行入口
 `acoustic` 可加 `--realtime`：走实时档（候选与产出都收紧，确定性、不看时钟）。
 `audio` 的时间轴按物理步长排（每 tick 一声事件）；干信号给 WAV 就用它（PCM16/float32、多声道降混）。
 `audio` 可加 `--reverb`：叠上 A7 的统计混响尾巴（Sabine 逐带 RT60，确定性；几何不闭合就按声明的包络算）。
+`acoustic` / `audio` 可加 `--order2`：开 A8 的二阶镜像展开（候选 ≈ 面数²，慢；给离线试听/对表用）。
 ";
