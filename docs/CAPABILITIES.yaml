@@ -883,6 +883,12 @@ capabilities:
           K4 的 A/B 档开关未做（当前恒为 A 档并岛）；
           K3 的定向唤醒旋钮/迟滞取值未单列（唤醒靠既有 SUBISLAND_WAKE_MULT 阈值规则达成）；
           运动学体不触发破坏（destruction 仍只认动态体）；静态体仍不可挪（C5 的边界格）。
+      - id: load_capacity
+        note: >
+          K6（大载荷）已量：crates/vxl-phys/tests/kinematic_load_contracts.rs —— 10×10 盒阵列
+          （间距 1.06、互不接触）随平台上行 1 s ⇒ 100 体全部 Δy ∈ [0.5999, 0.6000]、
+          埋入 0.1 mm、末态 |v| = 平台速度；**岛数 100 → 1**（A 档代价，静态平台对照 100 岛），
+          而 tick 成本只 +4.4%（100 体）/ +15.5%（400 体，本机 270K）⇒ 不需要另设大岛降级档。
     required_evidence:
       - implementation_path
       - tests
