@@ -5,7 +5,7 @@
 //! 2. **叠法**与手算参照逐采样一致（时延量化 + 逐带幅度 + 就地累加；参照在测试侧独立写一遍）；
 //! 3. **分带是行为判据**（判据只谈"低频走低带、高频走高带"这类**单调**性质，不绑具体 Hz 的
 //!    频响数值 —— 与 [`BANDS`] 的口径一致）；
-//! 4. **首达摆位**：干信号是一记拍手，输出的首达就该落在 `min(delay)` 上（时延真的摆在时间轴上）；
+//! 4. **首达摆位**：干信号是一记闷响，输出的首达就该落在 `min(delay)` 上（时延真的摆在时间轴上）；
 //! 5. **WAV 读写往返**（PCM16 量化误差 ≤ 2e-5）+ 多声道降混 + 非 WAV 报错（不猜）；
 //! 6. **真实场景端到端**：体素地面砸出的冲击 → 绕射/反射路径 → 渲染出**有声且有限**的波形；
 //!    同输入两跑**逐位相同**（含 WAV 字节），且渲染前后 `state_hash` 不变（渲染层只读）。
@@ -175,14 +175,14 @@ fn band_selectivity_is_monotone() {
     );
 }
 
-/// ④ **首达摆位**：干信号是一记"拍手" ⇒ 输出的首个显著样本落在 `delay` 上；更远的那条更晚更弱。
+/// ④ **首达摆位**：干信号是一记"闷响" ⇒ 输出的首个显著样本落在 `delay` 上；更远的那条更晚更弱。
 #[test]
 fn first_arrival_lands_at_the_direct_delay() {
     let cfg = AudioConfig {
         sample_rate: FS,
         seconds: 0.2,
     };
-    let dry = audio::clap(FS, 0.05);
+    let dry = audio::knock(FS, 0.18);
     let gate = 0.2 * dry.iter().fold(0.0f32, |m, &x| m.max(x.abs()));
     let onset = first_above(&dry, gate);
     let near = audio::render(&[path(0.02, [1.0; BANDS], PathKind::Direct)], &dry, &cfg);
@@ -190,7 +190,7 @@ fn first_arrival_lands_at_the_direct_delay() {
     let got = first_above(&near.samples, gate);
     assert!(
         got.abs_diff(want) <= 4,
-        "首达该在 {want}（拍手首达 {onset} + 0.02 s），实际 {got}"
+        "首达该在 {want}（闷响首达 {onset} + 0.02 s），实际 {got}"
     );
     let far = audio::render(&[path(0.05, [0.25; BANDS], PathKind::Direct)], &dry, &cfg);
     assert!(
@@ -198,6 +198,26 @@ fn first_arrival_lands_at_the_direct_delay() {
         "更远的那条必须更晚到"
     );
     assert!(far.peak() < near.peak(), "更远的那条必须更弱（球面扩散）");
+}
+
+/// ⑦ **激励本身要"暗"**（2026-10-12 加）：默认激励是**低通**的闷响 —— 高频带能量必须远小于
+/// 低频带。宽带噪声当激励、叠上混响尾巴，听着就是"电锯烤铁"（用户原话）。
+#[test]
+fn default_excitation_is_dark() {
+    let x = audio::knock(FS, 0.18);
+    let peak = x.iter().fold(0.0f32, |a, v| a.max(v.abs()));
+    assert!(
+        (peak - 1.0).abs() <= 1e-4,
+        "闷响该归一到峰值 1（实际 {peak}）"
+    );
+    let b = audio::split3(&x, FS);
+    let rms = |v: &[f32]| (v.iter().map(|s| s * s).sum::<f32>() / v.len() as f32).sqrt();
+    let (low, high) = (rms(&b[0]), rms(&b[2]));
+    assert!(
+        high <= 0.15 * low,
+        "激励的高频带该远小于低频带（实测 高/低 = {:.4}）",
+        high / low
+    );
 }
 
 /// ⑤ **WAV 往返**：写出的字节头自检 + 读回来逐采样 ≤ 2e-5（16 bit 量化）+ 多声道降混 + 报错。
@@ -366,7 +386,7 @@ fn real_scene_renders_audible_and_deterministic() {
         sample_rate: FS,
         seconds: 0.3,
     };
-    let dry = audio::clap(FS, 0.05);
+    let dry = audio::knock(FS, 0.18);
     let before = w.state_hash();
     // 两个位姿各判一遍：**墙后**（直达被挡，只剩绕射那条腿）与**墙前**（直达 + 反射）。
     // ⚠️ 墙后拿不到镜面反射是**几何正确**的结果（薄墙的镜面反射要求声源与听者在同一侧）⇒
