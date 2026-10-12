@@ -13,3 +13,13 @@ vxl-phys-acoustics = { workspace = true }
 vxl-phys-replay = { workspace = true }
 vxl-phys-soft = { workspace = true }
 vxl-phys-terrain = { workspace = true }
+
+# ⚠️ **别让 bin 与 lib 抢同一份 doc 目录**（2026-10-12 定根）：这个 bin 叫 `vxl-phys`，它的 rustdoc
+# 输出落点就是 `target/doc/vxl_phys/` —— 与 `vxl-phys` 那个 **lib** 目标的落点**同名** ⇒
+# `cargo doc --workspace` 会同时起两个 rustdoc 写同一个目录（cargo 只警告 `output filename
+# collision`），谁先删谁先写全看调度 ⇒ "静态 (文档/强化 lint)" 门**偶发**红，报错是
+# `error: ".../doc/vxl_phys/struct.X.html": No such file or directory` + `I/O error`。
+# 这个 bin 的 rustdoc 页面本来也没用（一层薄 main 调库侧 API）⇒ `doc = false` 根治掉这条竞争。
+[[bin]]
+name = "vxl-phys"
+doc = false

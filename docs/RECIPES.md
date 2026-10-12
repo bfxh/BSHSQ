@@ -77,6 +77,13 @@ gh run list --limit 5                       # 分不清"排队"还是"在跑"时
   "自旋不返回"**（实测 14 个测试二进制跑到第 14 个卡死、CPU 100%、零断言失败；`timeout` 掐掉后
   再单跑同一个仍会卡），**CI 侧无适配器本来就跳过** ⇒ 默认跳过（口径与 CI 对齐），要跑就
   `GPU_TESTS=1 bash scripts/gate_all.sh`（带 `timeout 300` + 重试 ≤3）。详见 issue #30。
+- **"静态 (文档/强化 lint)" 偶发红 = bin 与 lib 抢同一份 doc 目录**（2026-10-12 定根）：报错形如
+  `error: ".../target/doc/vxl_phys/struct.X.html": No such file or directory` +
+  `couldn't generate documentation: I/O error`，且它前面**一定有**
+  `warning: output filename collision at .../doc/vxl_phys/index.html`。根因：`vxl-phys-cli` 的
+  **bin** 名 `vxl-phys` 与 `vxl-phys` 的 **lib** 目标落点同名 ⇒ 两个 rustdoc 同时写同一个
+  `target/doc/vxl_phys/`，谁先删谁先写看调度（本机同样的 warning，只是竞争没输）。已用
+  `crates/vxl-phys-cli/Cargo.toml` 的 `[[bin]] doc = false` 根治；再看见这个报错，先查那行还在不在。
 
 ## 规模档门（2026-09-22 新增；**10 万+10 万档的唯一自动门**；2026-10-06 起**在 CI 里**）
 
