@@ -374,6 +374,27 @@ fn acoustic_cmd(name: &str, ticks: usize, realtime: bool) -> Result<String, Stri
 ///
 /// ⚠️ 写盘前按峰值**归一**（只在峰值 >1 时缩，比例打印出来）：多声撞击会在时间轴上叠起来，
 /// 不管一下就会削顶 —— 削了顶的产物对表没意义。相对电平不受影响（整体一个因子）。
+///
+/// ⚠️ **只认 WAV**：mp4/m4a/mp3 这类**压缩容器本层不解码**（引解码器就要背编解码器与许可
+/// 那一摊子，且与"确定性优先"无关）—— 看见这些扩展名直接给一条能抄的 `ffmpeg` 命令。
+/// 干信号是不是**压缩容器**？是就给一条能直接抄的转码命令（本层只认 WAV，理由见 [`audio_cmd`]）。
+fn compressed_hint(path: &str) -> Option<String> {
+    let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    let known = [
+        "mp4", "m4a", "mov", "mkv", "webm", "avi", "mp3", "aac", "ogg", "oga", "opus", "flac",
+        "wma", "wmv",
+    ];
+    if !known.contains(&ext.as_str()) {
+        return None;
+    }
+    Some(format!(
+        "干信号只认 WAV：`{path}` 看着是 .{ext} 这种压缩容器，本层**不解码**（引解码器要背编解码器\
+         与许可，且与确定性优先的纪律无关）。先转一道再喂：\n  \
+         ffmpeg -i \"{path}\" -vn -ac 1 -ar 48000 -c:a pcm_s16le dry.wav\n  \
+         vxl-phys audio <场景> [ticks] <出.wav> dry.wav"
+    ))
+}
+
 fn audio_cmd(
     name: &str,
     ticks: usize,
@@ -386,7 +407,12 @@ fn audio_cmd(
     let mut w = scene(name)?;
     let (dt, rate) = (w.config.dt, aco_audio::AudioConfig::default().sample_rate);
     let dry = match dry_path {
-        Some(p) => aco_audio::read_wav(p)?.samples,
+        Some(p) => {
+            if let Some(hint) = compressed_hint(p) {
+                return Err(hint);
+            }
+            aco_audio::read_wav(p)?.samples
+        }
         None => aco_audio::clap(rate, 0.12),
     };
     let room = room();
@@ -397,8 +423,11 @@ fn audio_cmd(
         pos: Vec3::new(0.0, 1.0, 3.0),
         radius: 0.5,
     };
-    // 尾巴留 2 s：最后一声撞击之后的直达 + 反射都装得下（本层没有混响尾巴，见 A6 模块头注）。
-    let seconds = ticks as f32 * dt + 2.0;
+    // ⚠️ 尾巴按**干信号自己的长度**留（至少 2 s）：最后一声撞击之后，那条干信号得整段装得下 ——
+    // 干信号比尾巴长（比如喂一段 10 s 的素材）时，只按 ticks 算会把尾部**截掉**（本层没有混响
+    // 尾巴，只有显式路径，所以"干信号多长"就是答案；见 A6 模块头注）。
+    let dry_secs = dry.len() as f32 / rate as f32;
+    let seconds = ticks as f32 * dt + dry_secs.max(2.0) + 0.05;
     // ⚠️ 先算成变量再转 `usize`（`usize-gate` 认「括号里先乘再转 usize」那个写法，虽然这里是浮点）。
     let frames = seconds * rate as f32;
     let mut samples = vec![0.0f32; frames.max(1.0) as usize];
