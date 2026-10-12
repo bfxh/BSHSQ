@@ -101,8 +101,8 @@
    "max_type_members": 23
   },
   "crates/vxl-phys-core/src/config.rs": {
-   "file_lines": 348,
-   "max_fn_lines": 44,
+   "file_lines": 358,
+   "max_fn_lines": 48,
    "max_type_members": 33
   },
   "crates/vxl-phys-core/src/grid.rs": {
@@ -986,7 +986,7 @@
    "max_type_members": 0
   },
   "crates/vxl-phys-solver/src/ccd.rs": {
-   "file_lines": 69,
+   "file_lines": 72,
    "max_fn_lines": 22,
    "max_type_members": 0
   },
@@ -1211,8 +1211,8 @@
    "max_type_members": 0
   },
   "crates/vxl-phys/examples/m3_impact.rs": {
-   "file_lines": 134,
-   "max_fn_lines": 119,
+   "file_lines": 135,
+   "max_fn_lines": 120,
    "max_type_members": 0
   },
   "crates/vxl-phys/examples/m3_voronoi.rs": {
@@ -1296,7 +1296,7 @@
    "max_type_members": 0
   },
   "crates/vxl-phys/src/tests/solver_misc.rs": {
-   "file_lines": 281,
+   "file_lines": 282,
    "max_fn_lines": 45,
    "max_type_members": 0
   },

@@ -126,6 +126,12 @@ pub struct PhysConfig {
     /// §4.3 GJK 收敛容差（M0 SAT 路径仅存档）。
     pub gjk_tolerance: f32,
     /// §4.12 CCD 触发速度阈值（m/s）；`INFINITY` = 关。
+    ///
+    /// **默认 = 10 m/s（选择性开启，2026-10-13）**：与 §4.3 的"碰撞精度四档"**成对** ——
+    /// skin `0.02 / 0.01 / 0.005 / 0.002` ↔ CCD 阈值 `10 / 5 / 2 / 1`（默认档 skin = 0.02 ⇒ 10）。
+    /// §4.12 一直写的是"默认选择性"，而此前实现是默认关（`INFINITY`）—— 这里把应然落成实然。
+    /// ⚠️ 与阈值**同时**要满足的还有尺寸比判据（`ccd_extent_ratio`：单帧位移 ≥ 0.5×最小半长），
+    /// 所以真正触发的是"又快又小"的体（大块低速不白付扫掠成本）。
     pub ccd_speed_threshold: f32,
     /// §4.12 CCD 尺寸比判据：单帧位移 / 最小半长 ≥ ratio 时启用（M1 与速度阈值
     /// 两判据 + 「仅动体对静态/沉睡」共同构成选择性 CCD）。
@@ -235,7 +241,7 @@ impl Default for PhysConfig {
             shock_iterations: 0,
             contact_skin: 0.02,
             gjk_tolerance: 1e-5,
-            ccd_speed_threshold: f32::INFINITY,
+            ccd_speed_threshold: 10.0,
             ccd_extent_ratio: 0.5,
             ccd_max_steps: 64,
             friction: FrictionModel::Coulomb { mu: 0.5 },
@@ -273,12 +279,14 @@ impl PhysConfig {
                 c.velocity_iterations = 4;
                 c.substeps = 1;
                 c.contact_skin = 0.02;
+                c.ccd_speed_threshold = 10.0; // §4.3 成对：skin 0.02 ↔ CCD 10 m/s
                 c.friction = FrictionModel::Coulomb { mu: 0.7 };
             }
             Preset::Balanced => {
                 c.velocity_iterations = 8;
                 c.substeps = 2;
                 c.contact_skin = 0.01;
+                c.ccd_speed_threshold = 5.0; // §4.3 成对：skin 0.01 ↔ CCD 5 m/s
                 c.friction = FrictionModel::StaticKinetic {
                     mu_s: 0.7,
                     mu_k: 0.5,
@@ -289,6 +297,7 @@ impl PhysConfig {
                 c.velocity_iterations = 16;
                 c.substeps = 4;
                 c.contact_skin = 0.005;
+                c.ccd_speed_threshold = 2.0; // §4.3 成对：skin 0.005 ↔ CCD 2 m/s
                 c.friction = FrictionModel::Anisotropic {
                     mu1: 0.7,
                     mu2: 0.5,
@@ -300,6 +309,7 @@ impl PhysConfig {
                 c.velocity_iterations = 32;
                 c.substeps = 8;
                 c.contact_skin = 0.002;
+                c.ccd_speed_threshold = 1.0; // §4.3 成对：skin 0.002 ↔ CCD 1 m/s
                 c.friction = FrictionModel::Anisotropic {
                     mu1: 0.8,
                     mu2: 0.6,
