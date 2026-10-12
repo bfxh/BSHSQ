@@ -160,8 +160,10 @@ if ! grep -q "M0 门槛 PASS" "${out}/gate_m0_gates.log"; then
     tail -n 10 "${out}/gate_m0_gates.log" >&2
     exit 5
 fi
-if ! grep -q "0xc23b81902a74b977c8e74e114cf9737a" "${out}/gate_m0_gates.log"; then
-    echo "❌ m0_gates 压力哈希与基线不符（期望 0xc23b81902a74b977c8e74e114cf9737a）——日志尾：" >&2
+# 压力哈希 2026-10-13 换代（旋转扫掠：自旋体的点速进判据 ⇒ 压力档轨迹变；健康读数一字未动）：
+# 旧 0xc23b81902a74b977c8e74e114cf9737a → 新见下方。
+if ! grep -q "0x8e53107f61c83474016cc0203dbe8014" "${out}/gate_m0_gates.log"; then
+    echo "❌ m0_gates 压力哈希与基线不符（期望 0x8e53107f61c83474016cc0203dbe8014）——日志尾：" >&2
     tail -n 10 "${out}/gate_m0_gates.log" >&2
     exit 6
 fi
