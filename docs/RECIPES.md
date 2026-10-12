@@ -791,3 +791,30 @@ cargo test --release -p vxl-phys-narrow
 # simd_matches_scalar_bitwise：4000 组正交基盒对，SIMD 与标量孪生逐位一致
 # simd_tail_lanes_are_ignored：尾 lane 无效值不泄漏
 ```
+
+
+## 听一间屋子（A6 离线音频渲染，2026-10-12 加）
+
+`vxl-phys audio <voxel> [ticks] <出.wav> [干信号.wav]` —— 把声学 cue 流渲成**能听的 WAV**
+（16 bit PCM 单声道 48 kHz）。干信号不给 = 确定性的一记拍手；给了就用它（**只认 WAV**）。
+
+```bash
+# 默认：6 s 里 214 声撞击（盒子落地）在一间带门洞的屋子里
+cargo run --release -q -p vxl-phys-cli -- audio voxel 240 room.wav
+# 单声撞击 = 房间的冲激响应（能听出 5 条腿：透射 / 门洞 / 绕射 / 反射 / 漫反射）
+cargo run --release -q -p vxl-phys-cli -- audio voxel 27 ir.wav
+# 用自己的素材（单声道；多声道会降混）
+cargo run --release -q -p vxl-phys-cli -- audio voxel 27 out.wav my_material.wav
+```
+
+- **压缩素材先转 WAV**（本仓**不解码** mp4/m4a/mp3：引解码器要背编解码器与许可）：
+  `ffmpeg -i in.mp4 -vn -ac 1 -ar 48000 -c:a pcm_s16le dry.wav` —— CLI 见到这些扩展名会直接把
+  这条命令打出来（别猜"为什么读不了"）。
+- 本机工具：`C:\vxl-wl-tools\ffmpeg.exe`（7.1 essentials build，含 AAC/HE-AAC；**CI 不需要它**，
+  只在本地转素材用）⇒ Git Bash 里是 `/c/vxl-wl-tools/ffmpeg.exe`。
+- **IR 是给宿主的**：`audio voxel 27 ir.wav` 出的就是冲激响应（尖峰位置 = 时延、尖峰高 =
+  `sqrt(能量)`），拿它做卷积就是宿主侧的用法，例如
+  `ffmpeg -i dry.wav -i ir.wav -filter_complex "[0:a][1:a]afir=gtype=none" out.wav`。
+- 边界：**单声道**、不做 HRTF/多普勒、**没有混响尾巴**（只渲显式路径）；时延量化到整数采样；
+  输出窗长按**干信号自己的长度**留（至少 2 s）—— 长素材不会被截尾。
+- 确定性：同输入两跑逐位一致（含 WAV 字节），渲染不碰 `state_hash`。
