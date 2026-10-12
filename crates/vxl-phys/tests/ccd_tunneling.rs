@@ -9,8 +9,10 @@
 //! | ③ 开 CCD、目标**在运动**（移动墙） | 必**穿**（目标集只留"静态/沉睡"） |
 //! | ④ 对照：开 CCD、静态墙 | 停在墙前 ✅ |
 //!
-//! 本文件把四条都钉住：① 是**文档化的边界**（默认关，改默认值必须同时改这里与模块头注），
-//! ②③ 是本轮修好的（限速到预算覆盖得了的速度；目标集含运动体 + 相对运动判据）。
+//! 本文件把五条都钉住：① 是**文档化的边界**（默认关；改默认值必须同时改这里与模块头注），
+//! ①′ 是**关档的语义**（无穿透保证，且**取决于采样相位** —— 给出必然穿的对齐相位，
+//! 反面的"被相位接住"写在头注里），②③ 是 F-15 修好的（限速到预算覆盖得了的速度；
+//! 目标集含运动体 + 相对运动判据），④ 静态墙对照。
 
 use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
 
@@ -59,11 +61,54 @@ fn scene(speed: f32, ccd: bool, max_vel: f32, wall_moves: bool) -> (World, usize
 /// **会**穿过薄墙；本仓同一档位下是否穿还取决于**相位**（子步落点 vs 墙带宽度）——所以这条
 /// 判据只钉"默认档没有穿透保证"这个**决策点**：谁要把 CCD 改成默认开，必须同时改这里与
 /// `world_ccd/sweep.rs`、`vxl-phys-solver/src/ccd.rs` 的头注。
+/// ⚠️ **2026-10-13 实测：默认开已被自己的门挡下**（改成 10 m/s 后 R6 关节链的分离 13× 恶化，
+/// `sep_p99` 0.00966 → 0.12382、>5cm 违规率 0 → 1.97%）⇒ 默认保持关，互锁记在
+/// `OPEN-PROBLEMS.md` P17，快照判据见 `tests/ccd_joint_interlock.rs`。
 #[test]
 fn ccd_is_off_by_default_and_that_is_documented() {
     assert!(
         PhysConfig::default().ccd_speed_threshold.is_infinite(),
-        "默认档 CCD 是关的（能力边界写在 world_ccd/sweep.rs 头注）；改默认值要一并改文档与判据"
+        "默认档 CCD 是关的（互锁未解，见 OPEN-PROBLEMS P17）；改默认值要一并改文档与判据"
+    );
+}
+
+/// **①′ 关档 = 无穿透保证（取决于相位）**：这里把起点**对齐到采样格点** —— 速度被钳到 100 m/s、
+/// 2 子步 ⇒ 每子步走 `100/120 = 0.8333 m`；起点 `z = −0.3` ⇒ 采样序列 `−0.3, +0.533, …`
+/// **跨过**墙带（墙 `±0.05` + 球 `±0.05` + skin `0.02` ⇒ `±0.12`）而没有一点落进去 ⇒ **必然穿**。
+/// ⚠️ 反面对照（起点 z = −40 的同款场景）实测**被相位接住**（`z = −5.0` 那一步恰好落进带内
+/// ⇒ 弹回 `vz = −4.58`）—— 两端都是实测，"有无保证全看相位"从此是钉住的事实。
+#[test]
+fn ccd_off_has_no_guarantee_depends_on_phase() {
+    let cfg = PhysConfig {
+        ccd_speed_threshold: f32::INFINITY, // 关档
+        max_linear_velocity: 100.0,
+        gravity: Vec3::ZERO, // 只留 z 向运动（排除重力把球带离墙的 y 范围）
+        ..PhysConfig::default()
+    };
+    let mut w = World::new(cfg);
+    w.add_static(
+        Shape::Box {
+            half: Vec3::new(2.0, 2.0, 0.05),
+        },
+        Vec3::ZERO,
+        Quat::IDENTITY,
+    );
+    let ball = w.add_dynamic(
+        Shape::Box {
+            half: Vec3::splat(0.05),
+        },
+        Vec3::new(0.0, 0.0, -0.3),
+        Quat::IDENTITY,
+        2000.0,
+    ) as usize;
+    w.bodies.linvel[ball] = Vec3::new(0.0, 0.0, 100.0);
+    for _ in 0..30 {
+        w.step();
+    }
+    let z = w.bodies.position[ball].z;
+    assert!(
+        z > 1.0,
+        "关档 + 采样点全部越过墙带 ⇒ 必然穿（z = {z}）；若红了先查采样对齐是否被改动"
     );
 }
 
