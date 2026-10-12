@@ -521,9 +521,9 @@ capabilities:
       - id: acoustic_not_done
         note: >-
           **仍未做（如实登记）**：UTD 的 **Fresnel 积分**（A4 的 `D(θ)` 与漫反射口径都是工程近似）、
-          **GPU 档落了直达 + 一次反射（M1/M2）**：绕射/散射/介质积分仍未上卡（见
-          `a5_gpu_direct_kernel` / `a5_gpu_reflect_kernel`；本层已落批处理入口与逐位等价契约，
-          见 `a5_gpu_base`）。
+          **GPU 档落了直达 + 一次反射 + 绕射（M1/M2/M3）**：散射/介质积分仍未上卡（见
+          `a5_gpu_direct_kernel` / `a5_gpu_reflect_kernel` / `a5_gpu_diffract_kernel`；本层已落
+          批处理入口与逐位等价契约，见 `a5_gpu_base`）。
           portal 与衍射棱都按文档 §8 的取舍先落"显式图元"（衍射棱另有兜底，见下条）；
           **"体素空洞自动识别"**（从占据位找连通孔）仍未做。低频不承诺 / 不做双耳渲染见文档 §7。
       - id: a4_diffraction_landed
@@ -613,7 +613,7 @@ capabilities:
           判据 = **拓扑（遮挡分类）逐位 + 浮点（时延/增益）相对 1e-4**；无适配器则打印 `[SKIP]`。
           实测（本机）：`NVIDIA GeForce RTX 4060 Ti | Vulkan | DiscreteGpu` 上 6 对全对。
           ⚠️ **CI 不覆盖**（既有口径 `cargo test --workspace --exclude vxl-phys-gpu`：headless 运行器
-          无 GPU）⇒ 这条路只能在本机或 GPU 探针 job 上验；**反射/绕射/散射/介质积分仍未上卡**。
+          无 GPU）⇒ 这条路只能在本机或 GPU 探针 job 上验；**散射/介质积分仍未上卡**。
       - id: a5_gpu_reflect_kernel
         note: >-
           **GPU 档的「一次镜面反射」（M2）已落地（2026-10-12）**：`acoustic.wgsl` 加 `reflect` 入口 ——
@@ -627,6 +627,22 @@ capabilities:
           报出反射。实测（本机 RTX 4060 Ti | Vulkan）：两段顺序跑 2.6 s 全过。
           ⚠️ **两条测试不要并行**：并行会各建一个 wgpu 设备，实测互相卡住 ⇒ 探针里合成**一条**测试
           （文件头注写明了这条坑）。CI 同样不覆盖（`--exclude vxl-phys-gpu`）。
+      - id: a5_gpu_diffract_kernel
+        note: >-
+          **GPU 档的「绕射」（M3）已落地（2026-10-12）**：`acoustic.wgsl` 加 `diffract` 入口 ——
+          逐棱取 **Fermat 点**（定次数 **48** 的二分，与 CPU 的 `FERMAT_ITERS` 同值 ⇒ 同样的定次数、
+          无早退、逐位可复现）、**只在阴影里**产出（直达通视就整对跳过，不与直达重复计能）、逐对取
+          **最强那条**（平局按棱序号取小 ⇒ 确定），输出 `(hit, delay, gain, edge)`；口径
+          `coeff·(1+cosθ)/2/(d₁·d₂)`（**单频带**：频带表与介质衰减还没上卡）。宿主侧把输入收口成
+          `acoustic::SceneIn`（`diffract` 这条本来要 7 个形参、撞 args-gate 的软阈值 ⇒ 打成结构体），
+          棱表与逐棱系数各一张缓冲（空表补**非零长**的哑缓冲）。
+          探针 `crates/vxl-phys-gpu/tests/acoustic_diffract_probe.rs`：一把刀口（屏障的顶棱）——
+          参照值是**手算的对称驻点**（`x = 0` 处两项余弦等值反向 ⇒ 驻点在棱的中点）与沿棱
+          **暴力扫 20001 点**的最小折线长，与卡上那 48 次二分**不是同一份实现**；六段顺序跑
+          （5 趟）：
+          闭式对拍 / 同输入两跑逐位一致 / 暴力扫最小值 / **两条棱取最强**（弱的那条排在前面 ⇒
+          证明扫的是全表而不是第一条）/ 第二腿被挡不产出 + 阴影外不产出。实测（本机
+          RTX 4060 Ti | Vulkan）：4.8 s 全过。⚠️ CI 同样不覆盖（`--exclude vxl-phys-gpu`）。
       - id: cli_wired
         note: >-
           **工具链已接（2026-10-11）**：`vxl-phys-cli acoustic <voxel> [ticks]` 打声学路径流（JSONL，

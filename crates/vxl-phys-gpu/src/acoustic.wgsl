@@ -1,15 +1,19 @@
-// **声学核（GPU 档 M1/M2）**：每个 `(声源, 听者)` 对是一个独立工作项。
+// **声学核（GPU 档 M1/M2/M3）**：每个 `(声源, 听者)` 对是一个独立工作项。
 //
 // - `direct`（M1）：直达 —— 遮挡 + `dist/speed` 与 `1/dist²`；
 // - `reflect`（M2）：**一次镜面反射**（镜像源法）—— 逐三角找镜像路径，取**最强那条**
-//   （平局按三角序号取小 ⇒ 确定）；增益 `(1-a)/(d₁+d₂)²`、时延 `(d₁+d₂)/speed`。
+//   （平局按三角序号取小 ⇒ 确定）；增益 `(1-a)/(d₁+d₂)²`、时延 `(d₁+d₂)/speed`；
+// - `diffract`（M3）：**绕射**（工程近似）—— 逐棱取 **Fermat 点**（定次数 48 的二分，与 CPU
+//   的 `FERMAT_ITERS` 同值 ⇒ 同样的定次数、无早退），**只在阴影里**产出（直达通视就整对跳过），
+//   取最强那条棱（平局按棱序号取小）；增益 `coeff·(1+cosθ)/2/(d₁·d₂)`、时延 `(d₁+d₂)/speed`。
 //
-// 与 CPU 端 `vxl-phys-acoustics` 的直达那条**同口径**：
+// 与 CPU 端 `vxl-phys-acoustics` 的对应那几条**同口径**：
 //   ① 遮挡：Möller–Trumbore，端点共面不计（±1e-6 的边界容差，与 CPU 同款）；
 //   ② 时延 = `dist / speed`、增益 = `1 / dist²`（球面扩散）；
 //   ③ 逐轴展开、不用内建 `dot`/`cross`（归约序未规定 —— 与 `body_integrate.wgsl` 同一纪律）。
 //
-// **量纲/边界**：只做直达。反射/绕射/散射/介质积分仍在 CPU 侧；这里要钉的是
+// **量纲/边界**：只做这三条。散射（M4）与介质积分（M5）、以及绕射里的 Fresnel 积分仍在 CPU 侧；
+// 这里要钉的是
 // "同一批输入 ⇒ 与 CPU 参考**逐对一致**（浮点容差、拓扑逐位）"。
 
 struct Params {
@@ -17,6 +21,12 @@ struct Params {
     n_lst: u32,
     n_tris: u32,
     speed: f32,
+    /// 衍射棱条数（0 ⇒ `diffract` 不产出 —— 无棱可绕）。
+    n_edges: u32,
+    // ⚠️ uniform 结构体必须是 16 字节的倍数 ⇒ 补到 32 B（少一个 pad 就是整块错位）。
+    _p0: u32,
+    _p1: u32,
+    _p2: u32,
 };
 
 @group(0) @binding(0) var<uniform> P: Params;
@@ -25,6 +35,13 @@ struct Params {
 @group(0) @binding(3) var<storage, read> tris: array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read_write> out: array<vec4<f32>>;
 @group(0) @binding(5) var<storage, read> absorb: array<f32>;
+/// 衍射棱：每条 **2 个 `vec4`**（`a.xyz|pad`、`b.xyz|pad`）。
+@group(0) @binding(6) var<storage, read> edges: array<vec4<f32>>;
+/// 逐棱绕射系数（**单频带口径**：频带表还没上卡，见 `docs/SURVEY-ACOUSTIC-RAYTRACING.md` §9）。
+@group(0) @binding(7) var<storage, read> edge_coeff: array<f32>;
+
+/// Fermat 二分次数：定次数、无早退 ⇒ 逐位可复现（与 CPU 的 `FERMAT_ITERS` 同值）。
+const FERMAT_ITERS: u32 = 48u;
 
 fn dot3(a: vec3<f32>, b: vec3<f32>) -> f32 {
     return a.x * b.x + a.y * b.y + a.z * b.z;
@@ -188,4 +205,84 @@ fn reflect(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
     out[i] = vec4<f32>(select(0.0, 1.0, best_gain > 0.0), best_delay, best_gain, best_tri);
+}
+
+/// 线段 `p→q` 是否被**任何**三角挡住（不带 `skip`：直达通视检查用）。
+fn blocked_any(p: vec3<f32>, q: vec3<f32>) -> bool {
+    // `n_tris` 远小于 u32 上限 ⇒ 这个哨兵值恒不等于任何三角序号。
+    return blocked(p, q, 0xffffffffu);
+}
+
+/// 棱上让 `|P−src| + |P−dst|` 最小的点（`P` 限定在 `a→b` 上）—— 与 CPU 的 `fermat_point` 同法：
+/// `f'(u) = cos∠(dir, P−src) + cos∠(dir, P−dst)` 单调不减 ⇒ 在两个投影夹出的区间上**定次数二分**，
+/// 再把参数夹进 `[0, len]`（夹到端点就是"从棱的端点绕"，凸函数在区间上的最小就在端点）。
+fn fermat(a: vec3<f32>, b: vec3<f32>, src: vec3<f32>, dst: vec3<f32>) -> vec3<f32> {
+    let seg = b - a;
+    let len = len3(seg);
+    if (len <= 1e-6) {
+        return a;
+    }
+    let dir = seg * (1.0 / len);
+    let ps = clamp(dot3(src - a, dir), 0.0, len);
+    let pd = clamp(dot3(dst - a, dir), 0.0, len);
+    var lo = min(ps, pd);
+    var hi = max(ps, pd);
+    if (hi - lo <= 1e-7) {
+        return a + dir * (0.5 * (lo + hi));
+    }
+    for (var k = 0u; k < FERMAT_ITERS; k = k + 1u) {
+        let mid = 0.5 * (lo + hi);
+        let p = a + dir * mid;
+        let va = p - src;
+        let vb = p - dst;
+        let slope = dot3(va, dir) / max(len3(va), 1e-6) + dot3(vb, dir) / max(len3(vb), 1e-6);
+        if (slope < 0.0) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    return a + dir * (0.5 * (lo + hi));
+}
+
+@compute @workgroup_size(64)
+fn diffract(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= P.n_src * P.n_lst) {
+        return;
+    }
+    let s = srcs[i / P.n_lst].xyz;
+    let l = dsts[i % P.n_lst].xyz;
+    var best_gain = 0.0;
+    var best_delay = 0.0;
+    var best_edge = -1.0;
+    // **只在阴影里**产出：直达通视就整对跳过（免得与直达重复计能）。
+    if (!blocked_any(s, l)) {
+        out[i] = vec4<f32>(0.0, 0.0, 0.0, -1.0);
+        return;
+    }
+    for (var e = 0u; e < P.n_edges; e = e + 1u) {
+        let a = edges[e * 2u].xyz;
+        let b = edges[e * 2u + 1u].xyz;
+        let p = fermat(a, b, s, l);
+        let v1 = p - s;
+        let v2 = l - p;
+        let d1 = len3(v1);
+        let d2 = len3(v2);
+        if (d1 <= 1e-3 || d2 <= 1e-3) {
+            continue;
+        }
+        if (blocked_any(s, p) || blocked_any(p, l)) {
+            continue;
+        }
+        let cos_t = clamp(dot3(v1, v2) / (d1 * d2), -1.0, 1.0);
+        let dir_factor = 0.5 * (1.0 + cos_t);
+        let g = edge_coeff[e] * dir_factor / (d1 * d2);
+        if (g > best_gain) {
+            best_gain = g;
+            best_delay = (d1 + d2) / P.speed;
+            best_edge = f32(e);
+        }
+    }
+    out[i] = vec4<f32>(select(0.0, 1.0, best_gain > 0.0), best_delay, best_gain, best_edge);
 }
