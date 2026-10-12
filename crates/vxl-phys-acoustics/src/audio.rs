@@ -245,6 +245,21 @@ pub fn mix_reverb_into(
         let mut seed: u32 = 0x2545_F491
             ^ ((b as u32 + 1).wrapping_mul(2_654_435_761))
             ^ (start as u32).wrapping_mul(2_246_822_519);
+        // ⚠️ **噪声也要逐带限带 + 逐带归一**：白噪一路顶到 24 kHz、三条带还共用同一段噪声的话，
+        // 尾巴的高频是**干信号的 7 倍**（实测 6/12 kHz：0.0007 vs 0.0001）⇒ 听感就是"电锯烤铁"。
+        // 这里把同一段噪声过一遍**同一套分频器**（带 b 只用带 b 的那一份），再按该带 RMS 归一到
+        // 单位幅度 ⇒ 尾巴的频谱**跟着干信号走**（闷的素材得到闷的尾巴），高频那份还按它自己的
+        // RT60 先衰减完。
+        let mut raw = vec![0.0f32; out.len() - start];
+        for v in raw.iter_mut() {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            *v = (seed >> 8) as f32 / 8_388_608.0 - 1.0; // u24 → [-1, 1)
+        }
+        let nb = split3(&raw, sample_rate);
+        let band_rms = {
+            let sum: f32 = nb[b].iter().map(|v| v * v).sum();
+            (sum / nb[b].len().max(1) as f32).sqrt().max(1e-6)
+        };
         let mut energy = 0.0f32;
         // ⚠️ **归一化因子 `sqrt(1 − keep)`**：`energy` 是"指数加权累积"的（稳态 ≈ `band_rms²/(1−keep)`），
         // 不归一化的话持续声源的尾巴会长出 `sqrt(1/(1−keep)) ≈ 40×`（实测：一段素材渲出来峰值 2.87，
@@ -255,30 +270,41 @@ pub fn mix_reverb_into(
             let x = band.get(j).copied().unwrap_or(0.0);
             // 递归的能量包络：`Σ_{i<=j} x_i² · decay^(2(j-i))` ⇒ O(N) 且数值稳定。
             energy = x * x + energy * keep;
-            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-            let noise = (seed >> 8) as f32 / 8_388_608.0 - 1.0; // u24 → [-1, 1)
-                                                                // 均匀噪声方差 1/3 ⇒ 乘 √3 让 `mix` 的口径落在"幅度量级"上。
-            *slot += 1.732_050_8 * mix * noise * energy.sqrt() * norm;
+            let noise = nb[b].get(j).copied().unwrap_or(0.0) / band_rms;
+            *slot += mix * noise * energy.sqrt() * norm;
         }
     }
 }
 
-/// 一记**确定性的"拍手"**：指数衰减的伪随机噪声（定种 LCG ⇒ 逐位可复现），峰值归一到 1。
+/// 一记**确定性的"闷响"**（敲桌子/敲门那类）：低通过噪声爆发 + 一点低频"身"，峰值归一到 1。
 ///
-/// 它就是"手边没有素材时先听一间屋子"的默认激励：宽带、短促、时间上够尖 ⇒ 时延与回响都听得出来。
-pub fn clap(sample_rate: u32, seconds: f32) -> Vec<f32> {
+/// 它是"手边没有素材时先听一间屋子"的默认激励：短促、时间上够尖（时延与回响都听得出来），
+/// 但**是暗的**。
+///
+/// ⚠️ 前一版是**宽带**噪声爆发（能量一路顶到 24 kHz）—— 叠上混响尾巴听着像"电锯烤铁"（用户原话）。
+/// 现在激励本身就按三带口径调暗（[`split3`] 的**低 + 中**带为主，高频只留一点"击打感"），
+/// 再加一个 75 Hz 的低频"身"。判据 `tests/a6_audio.rs` 里钉了"高频带能量 ≪ 低频带"这条。
+pub fn knock(sample_rate: u32, seconds: f32) -> Vec<f32> {
     let n = AudioConfig {
         sample_rate,
         seconds,
     }
     .samples();
-    let mut out = vec![0.0f32; n];
+    let mut raw = vec![0.0f32; n];
     let mut s: u32 = 0x1234_5678;
-    for (i, v) in out.iter_mut().enumerate() {
+    for (i, v) in raw.iter_mut().enumerate() {
         s = s.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         let noise = (s >> 8) as f32 / 8_388_608.0 - 1.0; // u24 → [-1, 1)
         let t = i as f32 / sample_rate as f32;
-        *v = noise * (-t * 35.0).exp();
+        // 低频"身"（75 Hz）+ 一点更高的"击打感"（快速衰减的低通噪声）。
+        let body = 0.55 * (6.283_185_5 * 75.0 * t).sin() * (-t * 26.0).exp();
+        *v = noise * (-t * 45.0).exp() * 0.45 + body;
+    }
+    // 逐带调暗：低带 1.0、中带 0.35、高带 0.08（宽带噪声直接听就是"电锯"，见函数头注）。
+    let b = split3(&raw, sample_rate);
+    let mut out = vec![0.0f32; n];
+    for (i, o) in out.iter_mut().enumerate() {
+        *o = b[0][i] + 0.35 * b[1][i] + 0.08 * b[2][i];
     }
     let peak = out.iter().fold(0.0f32, |m, &x| m.max(x.abs()));
     if peak > 0.0 {

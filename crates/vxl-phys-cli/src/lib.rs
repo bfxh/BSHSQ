@@ -9,7 +9,7 @@
 //! - `acoustic <voxel> [ticks]`：打印声学路径流（JSONL，一行一条，见 `vxl-phys-acoustics`）——
 //!   **声学几何是声明的"房间"**（地板 + 带开口的墙），与碰撞体无关。
 //! - `audio <voxel> [ticks] <出.wav> [干信号.wav]`：把同一批声学路径渲染成**能听的 WAV**
-//!   （A6 离线音频渲染：逐带分频 + 按 `delay` 直叠；给了干信号就用它，否则用确定性的一记拍手）。
+//!   （A6 离线音频渲染：逐带分频 + 按 `delay` 直叠；给了干信号就用它，否则用确定性的一记闷响）。
 //!
 //! 依赖面刻意压在"一个门面 + 两个域 crate"上：要让别人敢接，先得证明外部视角够用。
 
@@ -370,7 +370,7 @@ fn acoustic_cmd(name: &str, ticks: usize, realtime: bool, order2: bool) -> Resul
 /// `t·dt` 秒开始叠 ⇒ 听到的是"这一串撞击在房间里"的声音。听者固定站在墙外侧（与 `acoustic`
 /// 同一位姿），声源逐 tick 从 `impacts()` 来（会动）。
 ///
-/// 干信号默认是**确定性的一记拍手**（[`aco_audio::clap`]）；给了 `干信号.wav` 就用它
+/// 干信号默认是**确定性的一记闷响**（[`aco_audio::knock`]，低通过的，避免"电锯味"）；给了 `干信号.wav` 就用它
 /// （PCM16 / float32，**多声道降混**）。输出是 16 bit PCM 单声道 WAV。
 ///
 /// ⚠️ 写盘前按峰值**归一**（只在峰值 >1 时缩，比例打印出来）：多声撞击会在时间轴上叠起来，
@@ -393,7 +393,7 @@ fn audio_cmd(
     let (dt, rate) = (w.config.dt, aco_audio::AudioConfig::default().sample_rate);
     let dry = match dry_path {
         Some(p) => read_dry(p)?,
-        None => aco_audio::clap(rate, 0.12),
+        None => aco_audio::knock(rate, 0.18),
     };
     let room = room();
     let field = medium();
@@ -647,7 +647,7 @@ vxl-phys —— vxl_phys 的命令行入口
   vxl-phys check <drop|stack|cloth|voxel> [ticks]  跑两遍、逐观测点比对哈希（CI 自检；不一致退出码 2）
   vxl-phys cue   <voxel> [ticks]                   感官 cue 流（JSONL；只有 voxel 是 provider 地面）
   vxl-phys acoustic <voxel> [ticks] [--realtime]   声学路径流（JSONL；声学几何是声明的房间，与碰撞体无关）
-  vxl-phys audio    <voxel> [ticks] <出.wav> [干信号.wav]  声学路径渲染成 WAV（A6；默认激励 = 确定性拍手）
+  vxl-phys audio    <voxel> [ticks] <出.wav> [干信号.wav]  声学路径渲染成 WAV（A6；默认激励 = 确定性的闷响）
   vxl-phys record <scene> [ticks] [基线.jsonl]      录观测点序列（JSONL；省略文件则打到 stdout）
   vxl-phys replay <scene> [ticks] <基线.jsonl>      与基线逐行对拍（跨机器/跨版本复现检查）
   vxl-phys help                                    本说明
