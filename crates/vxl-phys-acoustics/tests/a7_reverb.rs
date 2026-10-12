@@ -1,4 +1,4 @@
-//! **A7 判据**：统计混响尾巴（Sabine 逐带 RT60 + 确定性能量包络跟随）。
+//! **A7 判据**：统计混响尾巴（Sabine 逐带 RT60 + 确定性的稀疏衰减核卷积）。
 //!
 //! 参照全部**手算**：一个 `4 × 3 × 2.5 m` 的鞋盒 ⇒ `V = 30 m³`、
 //! `S = 2·(4·3 + 4·2.5 + 3·2.5) = 59 m²`；均匀吸声 `ᾱ = 0.2` ⇒
@@ -161,7 +161,7 @@ fn rendered_tail_decays_by_sixty_db() {
     let mut dry = vec![0.0f32; n];
     dry[0] = 1.0;
     let mut wet = vec![0.0f32; n];
-    audio::mix_reverb_into(&mut wet, &dry, &rv, 0.0, FS);
+    audio::mix_reverb_tail(&mut wet, &dry, &rv, FS);
     let start = (rv.onset * FS as f32) as usize;
     assert!(
         wet[..start].iter().all(|v| *v == 0.0),
@@ -204,8 +204,8 @@ fn boundaries_determinism_and_monotonicity() {
     };
     let mut a = vec![0.0f32; n];
     let mut b = vec![0.0f32; n];
-    audio::mix_reverb_into(&mut a, &dry, &off, 0.0, FS);
-    audio::mix_reverb_into(&mut b, &dry, &off, 0.0, FS);
+    audio::mix_reverb_tail(&mut a, &dry, &off, FS);
+    audio::mix_reverb_tail(&mut b, &dry, &off, FS);
     assert_eq!(a, b, "同输入两跑必须逐位一致");
     assert!(a.iter().all(|v| *v == 0.0), "mix = 0 ⇒ 一个采样都不加");
     // 吸声大（RT60 短）⇒ 同一时刻的尾巴更弱
@@ -221,8 +221,8 @@ fn boundaries_determinism_and_monotonicity() {
     };
     let mut l = vec![0.0f32; n];
     let mut s = vec![0.0f32; n];
-    audio::mix_reverb_into(&mut l, &dry, &long, 0.0, FS);
-    audio::mix_reverb_into(&mut s, &dry, &short, 0.0, FS);
+    audio::mix_reverb_tail(&mut l, &dry, &long, FS);
+    audio::mix_reverb_tail(&mut s, &dry, &short, FS);
     let at = (0.15 * FS as f32) as usize;
     // 归一化（`sqrt(1−keep)`）之后，同一点的比值不再随 RT60 无限增长：0.15 s 处约 3.5×，
     // 留 2.5× 的余量（判据只谈"长的更响"这个单调性）。
@@ -256,6 +256,37 @@ fn declared_envelope_covers_open_meshes() {
     // 体积/表面积非正 ⇒ 关（不给"半间屋"这类含糊输入留口子）
     assert!(!reverb_params_from(&geo, &cfg(), 0.0, 59.0).is_on());
     assert!(!reverb_params_from(&geo, &cfg(), 30.0, -1.0).is_on());
+}
+
+/// ⑧ **尾巴是混响，不是噪声**（2026-10-12 加，用户原话"好多噪音和气的声音"）：
+/// 拿**纯正弦**当干信号，尾巴在一个周期上的自相关必须接近 1（"弦进、弦出"）；
+/// 旧版"包络 × 白噪"的尾巴在这儿 ≈ 0 —— 听感就是气声/呼吸声。
+#[test]
+fn tail_is_a_reverberant_copy_not_noise() {
+    let b = Box6::new(&|_| flat(0.2));
+    let rv = reverb_params(&b.geom(), &cfg());
+    let audio_cfg = AudioConfig {
+        sample_rate: FS,
+        seconds: 1.2,
+    };
+    let n = audio_cfg.samples();
+    let f = 440.0f32;
+    let dry: Vec<f32> = (0..n)
+        .map(|i| (6.283_185_5 * f * i as f32 / FS as f32).sin())
+        .collect();
+    let mut out = vec![0.0f32; n];
+    audio::mix_reverb_tail(&mut out, &dry, &rv, FS);
+    let lag = (FS as f32 / f).round() as usize;
+    let lo = (0.35 * FS as f32) as usize; // 尾巴里挑一段（跳过起点）
+    let hi = (1.0 * FS as f32) as usize;
+    let seg = &out[lo..hi];
+    let num: f32 = (0..seg.len() - lag).map(|i| seg[i] * seg[i + lag]).sum();
+    let den: f32 = seg[..seg.len() - lag].iter().map(|v| v * v).sum();
+    let r = num / den.max(1e-12);
+    assert!(
+        r >= 0.8,
+        "正弦的尾巴该还是那个正弦（一个周期上的自相关 ≥ 0.8，实测 {r:.3}）"
+    );
 }
 
 /// 零干扰（与 A1–A6 同款）：算混响参数不碰 `World`。

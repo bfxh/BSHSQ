@@ -23,7 +23,7 @@
 //!   最小 WAV 读写；单声道、不做 HRTF（双耳渲染仍是宿主的事）。判据 `tests/a6_audio.rs`。
 //! - **A7**：**统计混响尾巴**（[`reverb`] 模块）—— 早期声仍由显式路径给，**晚段**用
 //!   Sabine 逐带 `RT60 = 0.161·V/(S·ᾱ_b)` 补（体积/表面积/吸声全部从声学几何自己的表算），
-//!   合成在 [`audio::mix_reverb_into`]（确定性的能量包络跟随）。判据 `tests/a7_reverb.rs`。
+//!   合成在 [`audio::mix_reverb_tail`]（**尾巴 = 干信号 ⊛ 稀疏衰减核**：velvet 噪声 × 逐带指数衰减 ⇒ 有音高的混响）。判据 `tests/a7_reverb.rs`。
 //! - **A8**：**多次反射（二阶镜像展开）**（[`AcousticConfig::reflection_order`] = 2）——
 //!   `声源 →(面 f₁) →(面 f₂) → 听者` 的展开构造 + 逐点内点/逐段遮挡检查（跳过链上的面），
 //!   逐阶段预算、三角索引序 ⇒ 确定性。判据 `tests/a8_bounces.rs`。

@@ -146,6 +146,8 @@ pub fn run(args: &[String]) -> Result<String, String> {
     let reverb = args.iter().any(|a| a == "--reverb");
     // `--order2`：`acoustic` / `audio` 都把反射阶数开到 2（A8 二阶镜像展开；候选 ≈ 面数² ⇒ 慢）。
     let order2 = args.iter().any(|a| a == "--order2");
+    // `--inside` 只对 `audio` 有意义：听者挪到**声源那间屋**里（默认在墙外侧，只能听到门洞/绕射）。
+    let inside = args.iter().any(|a| a == "--inside");
     let pos: Vec<&str> = args
         .iter()
         .map(String::as_str)
@@ -169,7 +171,17 @@ pub fn run(args: &[String]) -> Result<String, String> {
         // **第二条输出侧域**：声学路径流（走声明的"房间"几何，与碰撞体无关）。
         "acoustic" => acoustic_cmd(name, ticks, realtime, order2),
         // **A6**：把同一批路径渲染成能听的 WAV（第 3 个位置参数 = 输出路径，第 4 个 = 干信号）。
-        "audio" => audio_cmd(name, ticks, path, pos.get(4).copied(), reverb, order2),
+        "audio" => audio_cmd(
+            name,
+            ticks,
+            path,
+            pos.get(4).copied(),
+            AudioFlags {
+                reverb,
+                order2,
+                inside,
+            },
+        ),
         "help" => Ok(USAGE.to_string()),
         other => Err(format!("未知子命令 `{other}`\n{USAGE}")),
     }
@@ -383,8 +395,7 @@ fn audio_cmd(
     ticks: usize,
     out: Option<&str>,
     dry_path: Option<&str>,
-    reverb: bool,
-    order2: bool,
+    f: AudioFlags,
 ) -> Result<String, String> {
     let Some(out) = out else {
         return Err("audio 需要输出路径：`audio <场景> [ticks] <出.wav> [干信号.wav]`".to_string());
@@ -398,10 +409,15 @@ fn audio_cmd(
     let room = room();
     let field = medium();
     let geo = room.geom(Some(&field));
-    let cfg = acoustic_cfg(false, order2);
-    let rv = audio_reverb(&geo, &cfg, reverb);
+    let cfg = acoustic_cfg(false, f.order2);
+    let rv = audio_reverb(&geo, &cfg, f.reverb);
+    // 默认听者在墙**外侧**（只能听到门洞/绕射/透射）；`--inside` 挪到声源那间屋里（直达 + 反射 + 尾巴）。
     let listener = Listener {
-        pos: Vec3::new(0.0, 1.0, 3.0),
+        pos: if f.inside {
+            Vec3::new(0.0, 1.0, 0.0)
+        } else {
+            Vec3::new(0.0, 1.0, 3.0)
+        },
         radius: 0.5,
     };
     // ⚠️ 尾巴按**干信号自己的长度**留（至少 2 s）：最后一声撞击之后，那条干信号得整段装得下 ——
@@ -412,6 +428,8 @@ fn audio_cmd(
     // ⚠️ 先算成变量再转 `usize`（`usize-gate` 认「括号里先乘再转 usize」那个写法，虽然这里是浮点）。
     let frames = seconds * rate as f32;
     let mut samples = vec![0.0f32; frames.max(1.0) as usize];
+    // 混响尾巴要**整条干信号轨**（卷积线性 ⇒ 摊好一次卷，比逐事件调快得多，见 `mix_reverb_tail`）。
+    let mut track = vec![0.0f32; samples.len()];
     let (mut events, mut count) = (0usize, 0usize);
     for t in 0..ticks {
         w.step();
@@ -423,8 +441,9 @@ fn audio_cmd(
         events += 1;
         count += tick.len();
         aco_audio::mix_into(&mut samples, &tick, &dry, t as f32 * dt, rate);
-        aco_audio::mix_reverb_into(&mut samples, &dry, &rv, t as f32 * dt, rate);
+        aco_audio::place_into(&mut track, &dry, t as f32 * dt, rate);
     }
+    aco_audio::mix_reverb_tail(&mut samples, &track, &rv, rate);
     let mut clip = aco_audio::Clip {
         sample_rate: rate,
         samples,
@@ -454,6 +473,15 @@ fn read_dry(path: &str) -> Result<Vec<f32>, String> {
         ));
     }
     Ok(aco_audio::read_wav(path)?.samples)
+}
+
+/// `audio` 的三个开关（`--reverb` / `--order2` / `--inside`）：收口成一个结构体 —— 形参再多一个就撞
+/// `args-gate` 的软阈值（>7 棘轮）。
+#[derive(Clone, Copy, Debug)]
+struct AudioFlags {
+    reverb: bool,
+    order2: bool,
+    inside: bool,
 }
 
 /// 声学配置：`--realtime` 走实时档（候选与产出都收紧）；`--order2` 把反射阶数开到 2（A8）。
@@ -655,5 +683,5 @@ vxl-phys —— vxl_phys 的命令行入口
 `acoustic` 可加 `--realtime`：走实时档（候选与产出都收紧，确定性、不看时钟）。
 `audio` 的时间轴按物理步长排（每 tick 一声事件）；干信号给 WAV 就用它（PCM16/float32、多声道降混）。
 `audio` 可加 `--reverb`：叠上 A7 的统计混响尾巴（Sabine 逐带 RT60，确定性；几何不闭合就按声明的包络算）。
-`acoustic` / `audio` 可加 `--order2`：开 A8 的二阶镜像展开（候选 ≈ 面数²，慢；给离线试听/对表用）。
+coustic / udio 可加 --order2：开 A8 的二阶镜像展开（候选 ≈ 面数²，慢）。udio 可加 --inside：听者挪进屋里（默认在墙外）。
 ";
