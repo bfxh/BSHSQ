@@ -24,6 +24,9 @@
 //! - **A7**：**统计混响尾巴**（[`reverb`] 模块）—— 早期声仍由显式路径给，**晚段**用
 //!   Sabine 逐带 `RT60 = 0.161·V/(S·ᾱ_b)` 补（体积/表面积/吸声全部从声学几何自己的表算），
 //!   合成在 [`audio::mix_reverb_into`]（确定性的能量包络跟随）。判据 `tests/a7_reverb.rs`。
+//! - **A8**：**多次反射（二阶镜像展开）**（[`AcousticConfig::reflection_order`] = 2）——
+//!   `声源 →(面 f₁) →(面 f₂) → 听者` 的展开构造 + 逐点内点/逐段遮挡检查（跳过链上的面），
+//!   逐阶段预算、三角索引序 ⇒ 确定性。判据 `tests/a8_bounces.rs`。
 //!
 //! ## 三条设计原则（文档 §4 的落实）
 //!
@@ -78,6 +81,7 @@ pub mod audio;
 pub mod reverb;
 
 mod auto_edge;
+mod bounce;
 mod diffract;
 mod medium;
 mod scatter;
@@ -85,6 +89,7 @@ mod scatter;
 pub use auto_edge::EdgeDetect;
 pub use medium::{AcousticMedium, LayeredMedium, Medium, Slab};
 
+use bounce::push_second_order;
 use diffract::push_diffraction;
 use medium::seg_effect;
 use scatter::push_scatter;
@@ -154,6 +159,11 @@ pub struct AcousticConfig {
     pub speed_of_sound: f32,
     /// 一次反射的最大候选面数（`0` = 只算直达；预算口径见模块头注）。
     pub max_reflections: u32,
+    /// **反射阶数**：`1` = 只做一次镜面反射（A1–A7 的行为，默认）、`2` = 再加二阶镜像展开（A8）。
+    ///
+    /// ⚠️ 成本 ≈ `max_reflections^反射阶数` 条候选链（每条 3 段遮挡检查）⇒ **只建议离线档开**；
+    /// 大于 2 的输入按 2 处理（三阶的候选是平方再乘一个因子，本层不做）。
+    pub reflection_order: u32,
     /// 每个声源最多尝试几个开口（A2；`0` = 不算穿孔传声）。
     pub max_portals: u32,
     /// 每个声源最多尝试几条衍射棱（A4；`0` = 不算绕射）。
@@ -174,6 +184,7 @@ impl Default for AcousticConfig {
         Self {
             speed_of_sound: 343.0,
             max_reflections: 24,
+            reflection_order: 1,
             max_portals: 8,
             max_edges: 8,
             max_scatters: 8,
@@ -383,6 +394,10 @@ impl AcousticsExt for World {
             push_portals(&mut found, &mut st, &cx);
             push_diffraction(&mut found, &mut st, &cx);
             push_reflections(&mut found, &mut st, &cx);
+            // A8：二阶镜像展开（`reflection_order ≥ 2` 才做；默认 1 ⇒ 与 A1–A7 逐位相同）。
+            if cfg.reflection_order >= 2 {
+                push_second_order(&mut found, &mut st, &cx);
+            }
             push_scatter(&mut found, &mut st, &cx);
         }
         // **A5：输出预算按优先级（能量）截断** —— 只留最响的 `room` 条。`sort_by` 是**稳定**排序
@@ -680,6 +695,17 @@ fn inside_tri(a: Vec3, b: Vec3, c: Vec3, p: Vec3) -> bool {
 /// "第一个" = **索引序**（不是最近的那个）：只为确定性，A2 的透射系数取的就是它；判据里墙面
 /// 不会与别的面重叠，所以"索引序"与"最近"在真实场景里一致。
 pub(crate) fn blocker(geo: &AcousticGeometry<'_>, p: Vec3, q: Vec3) -> Option<usize> {
+    blocker_skip(geo, p, q, (usize::MAX, usize::MAX))
+}
+
+/// 同 [`blocker`]，但可以**跳过至多两张面**（A8 的二阶链用：链上的面本来就在子段的端点上起落，
+/// 不去看它们；跳过 `usize::MAX` 以外的值就等于没跳）。
+pub(crate) fn blocker_skip(
+    geo: &AcousticGeometry<'_>,
+    p: Vec3,
+    q: Vec3,
+    skip: (usize, usize),
+) -> Option<usize> {
     let dir = q - p;
     let len = dir.length();
     if len <= 1e-6 {
@@ -687,6 +713,9 @@ pub(crate) fn blocker(geo: &AcousticGeometry<'_>, p: Vec3, q: Vec3) -> Option<us
     }
     let dir = dir * (1.0 / len);
     for (ti, tri) in geo.tris.iter().enumerate() {
+        if ti == skip.0 || ti == skip.1 {
+            continue;
+        }
         let n = geo.verts.len();
         if tri.iter().any(|&k| k as usize >= n) {
             continue;
