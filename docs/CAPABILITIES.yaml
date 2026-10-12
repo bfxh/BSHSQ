@@ -880,7 +880,7 @@ capabilities:
           3 个 Rapier 对照金样（col45 / pile5 / tower25）全部 PASS。
       - id: not_done
         note: >
-          K4 的 A/B 档开关未做（当前恒为 A 档并岛）；K5 传送带旋钮与各向异性方向未做；
+          K4 的 A/B 档开关未做（当前恒为 A 档并岛）；
           K3 的定向唤醒旋钮/迟滞取值未单列（唤醒靠既有 SUBISLAND_WAKE_MULT 阈值规则达成）；
           运动学体不触发破坏（destruction 仍只认动态体）；静态体仍不可挪（C5 的边界格）。
     required_evidence:
@@ -892,3 +892,47 @@ capabilities:
       三条断链（体类型 / 接触速度恒零 / 宽相代理不移动）与修复前的 ①–⑦ 实测见
       docs/SURVEY-RIGID-HARD-CASES.md §2 与 docs/SURVEY-EXTREMES-AND-BORROW.md §1；
       选型与分片见 docs/PLAN-kinematic.md（P1 已裁 = A 档并岛，代价 = C7 钉住的"岛数 7 → 1"）。
+
+  # ── 各向异性摩擦的方向应用 + 传送带（K5，SPEC §4.4 的另一半） ──
+  - id: PHY-SCOPE-ANISOTROPIC-FRICTION
+    title: 各向异性摩擦的方向应用 + 传送带切向目标速度
+    scope: included
+    implementation: implemented
+    implementation_path: crates/vxl-phys-solver/src/constraint.rs
+    evidence:
+      - id: impl_site
+        note: >
+          constraint.rs 的 friction_frame：把各向异性那一侧的 μ1 轴（体局部 XZ 面 + angle）
+          投影到接触面当切向基 t1（t2 = n × t1），逐轴按 √(μ_axis·μ_other) 组合；island.rs 的
+          切向锥改成"对齐基里两轴独立上钳"（沿 t1 的 μ1、沿 t2 的 μ2）。
+          FrictionModel::Anisotropic 增加 belt 字段（m/s，沿 μ1 轴）= 传送带切向目标速度：
+          带面在滑 ⇒ 该约束**不做锚点漂移回拉**（回拉与带速对着干，实测稳态只能到 0.37/0.6）。
+      - id: tests
+        note: >
+          crates/vxl-phys/tests/friction_anisotropy_contracts.rs 四条：A1 两轴摩擦极限
+          （μ_eff = 0.9488 / 0.3163，解析 √0.9 / √0.1）；A2 静止带面把载荷拖到带速 0.6000
+          （垂直带向 Δz < 5 mm）+ belt = 0 零拖动金丝雀；A3 各向同性等效（μ1 == μ2 且 belt == 0）
+          与 Coulomb{μ} 末态**逐位相同**；A4 地表转 90° ⇒ 主轴互换（0.3163 / 0.9488）。
+      - id: pitfall
+        note: >
+          第一版用"共享预算的椭圆锥"（(a1/μ1)² + (a2/μ2)² ≤ pn²）：四个接触角点带着**净和相消的
+          扭转分量**（为满足不注入力矩），共享预算把这些互相抵消的分量也记在账上 ⇒ 沿 μ1 的实测
+          极限从 0.95 掉到 0.49。两轴独立上钳是各向异性摩擦的通行口径，沿两主轴**精确**、对角保守。
+      - id: zero_generation
+        note: >
+          零换代：默认材质是 Coulomb / StaticKinetic，且**没有任何金样/确定性场景**用 Anisotropic
+          预设（只有 config 自己的单测与 config_entry_guard 构造它）⇒ 新代码路径不被触达：
+          determinism FINAL_HASH 0x655cdbf40ed7e800b5f46785f94fec1e 与 m0_gates 压力哈希
+          0xc23b81902a74b977c8e74e114cf9737a 与基线相同；5 个 vxl 金样 + 3 个 Rapier 对照金样全 PASS。
+      - id: not_done
+        note: >
+          履带的"方向应用在体局部"已有（A4 钉住），但**带速的体局部化**只到"轴 + 带速沿轴"这一层
+          （带速本身是标量）；各向异性 × 静+动（Stribeck）叠加未做；对角方向用的是盒近似（保守）。
+    required_evidence:
+      - implementation_path
+      - tests
+    decision_id: null
+    owner: maintainer
+    notes: >
+      SPEC §4.4 的"各向异性：两主轴 μ1/μ2 + 方向角（传送带/履带用）"到此闭环；
+      "传送带"的两条路都通了：① 运动学体移动（C1，摩擦携带）；② 静止带面 + belt（A2，切向目标速度）。

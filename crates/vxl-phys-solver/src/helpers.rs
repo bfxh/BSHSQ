@@ -65,6 +65,31 @@ pub(crate) fn tangents(n: Vec3) -> (Vec3, Vec3) {
     (t1, t2)
 }
 
+/// **切向锥投影**（顺序冲量的最后一步）：返回投影后的 `(a1, a2)`。
+///
+/// - `friction2 == friction` ⇒ 各向同性：**圆/盒锥**（原式，逐位不变）；
+/// - 不等 ⇒ **各向异性**（K5）：对齐基里**两轴独立上钳**（沿 `t1` 的 `μ1·pn`、沿 `t2` 的 `μ2·pn`）。
+///   ⚠️ 不是共享预算的椭圆：四个接触角点带着**净和相消的扭转分量**（为满足"不注入力矩"），
+///   共享预算会把它们也记在账上、挤掉主轴额度（实测沿 μ1 的极限从 0.95 掉到 0.49）。
+///   两轴独立上钳是各向异性摩擦的通行口径：沿两主轴**精确**、对角保守。
+#[inline]
+pub(crate) fn clamp_tangent(p: &PointConstraint, a1: f32, a2: f32) -> (f32, f32) {
+    if p.friction2 == p.friction {
+        let max_f = p.friction * p.pn;
+        let f2 = a1 * a1 + a2 * a2;
+        if f2 > max_f * max_f && f2 > 1e-20 {
+            let s = max_f / f2.sqrt();
+            return (a1 * s, a2 * s);
+        }
+        return (a1, a2);
+    }
+    let (m1, m2) = (p.friction * p.pn, p.friction2 * p.pn);
+    (
+        if m1 > 0.0 { a1.clamp(-m1, m1) } else { 0.0 },
+        if m2 > 0.0 { a2.clamp(-m2, m2) } else { 0.0 },
+    )
+}
+
 /// 并查集 find（路径减半）。固定规则：小索引为根（确定性）。
 pub(crate) fn find_small_root(parent: &mut [u32], x: u32) -> u32 {
     let mut x = x;

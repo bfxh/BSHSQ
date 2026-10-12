@@ -117,13 +117,8 @@ pub(crate) fn solve_constraint(
                     let dv2 = (-vt2 * k11 + vt1 * k12) * inv;
                     let (old1, old2) = (p.pt1, p.pt2);
                     let (mut a1, mut a2) = (old1 + dv1, old2 + dv2);
-                    let max_f = p.friction * p.pn;
-                    let f2 = a1 * a1 + a2 * a2;
-                    if f2 > max_f * max_f && f2 > 1e-20 {
-                        let s = max_f / f2.sqrt();
-                        a1 *= s;
-                        a2 *= s;
-                    }
+                    // 切向锥投影（各向同性 = 圆/盒；各向异性 = 对齐基两轴独立上钳，见 `clamp_tangent`）。
+                    (a1, a2) = clamp_tangent(p, a1, a2);
                     p.pt1 = a1;
                     p.pt2 = a2;
                     let d1 = a1 - old1;
