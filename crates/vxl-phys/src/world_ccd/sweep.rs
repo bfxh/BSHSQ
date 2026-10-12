@@ -30,8 +30,18 @@
 //!    ——自旋目标的姿态/角速度不进采样；② **转动响应不做** ⇒ 自旋体在障碍前"空转顶住"
 //!    （姿态被钳住、`ω` 不被吸收），离散管线随后按住它。代价实测：`m0_gates` 门槛档
 //!    末态活跃 13 → 19、深穿透 tick 80 → 97，但最大深穿透 0.659 → **0.409**（换代账见 RECIPES 换代链）。
+//! 5. **薄壳 TOI**（2026-10-13 同日第二片）：① 扫掠 AABB 从"**质心路径** ± 皮肤"改成
+//!    **体在两端各自 AABB 之并** —— 旧写法下大体积体撞薄壁时，接触发生在质心还差半个体长的地方、
+//!    不在质心路径上 ⇒ 配对进不来 ⇒ **径直穿过**（实测 60 m/s 的 1 m 盒穿过 5 mm 立板）；
+//!    ② 命中后不再一律退到"上一安全采样点"（停位精度 = 一整段采样长 ⇒ **悬停**），改为**二分
+//!    细化到"表面真的贴上"（`depth ≥ 0`）⇒ 停在**贴合面**、离散接触接手
+//!    （判据 `tests/ccd_thin_shell.rs`）。⚠️ 别停在**皮肤带边缘**：那是窄相生成接触的阈值，
+//!    体骑在阈值上 ⇒ 睡-醒抖动（实测门槛档 9 → 13 越线）；⚠️ 二分下界要取"带内接触**之前**"
+//!    那个样本（薄壁高速下采样会整段跳过皮肤带，否则收敛到深嵌侧，实测 0.1964 m）。
+//!    ⚠️ CCD 提前接管会吃掉主窄相的"解算前接近速度" ⇒ 命中那一瞬要把 CCD 自测的闭合速率按
+//!    provider 记进冲击账（`record_ccd_impact`），否则破坏管线永不触发（实测 R9 108 → 0 块）。
 
-use vxl_phys_core::{Aabb, Quat, Vec3};
+use vxl_phys_core::{Aabb, Quat, Shape, Vec3};
 use vxl_phys_narrow::NarrowPhase;
 
 use crate::ccd;
@@ -115,16 +125,39 @@ struct Scan {
 
 /// 扫掠 AABB（`p0..p1` 膨胀 `skin` **+ 转动摆幅** `|ω|·r_bound·dt`）。
 /// `ω = 0` ⇒ 加宽量 0（既有场景逐位不变）。
-fn swept_aabb(p0: Vec3, p1: Vec3, skin: f32, swing: f32) -> Aabb {
+fn swept_aabb(world: &World, i: usize, sc: &Scan, skin: f32, swing: f32) -> Aabb {
+    let shape = &world.bodies.shape[i];
     let m = skin + swing;
-    Aabb {
-        min: p0.min(p1) - Vec3::splat(m),
-        max: p0.max(p1) + Vec3::splat(m),
+    let a0 = vxl_phys_broad::shape_aabb(
+        shape,
+        sc.p0,
+        q_at(sc, 0.0),
+        m,
+        &world.hf_bounds,
+        &world.provider_bounds,
+    );
+    let a1 = vxl_phys_broad::shape_aabb(
+        shape,
+        sc.p1,
+        q_at(sc, sc.dt),
+        m,
+        &world.hf_bounds,
+        &world.provider_bounds,
+    );
+    vxl_phys_core::union_aabb(&a0, &a1)
+}
+
+/// 采样时刻 `t` 的姿态（纯函数；`ω = 0` ⇒ 原样 `q1`；`t ≥ dt` ⇒ `q1`，不经归一化）。
+fn q_at(sc: &Scan, t: f32) -> Quat {
+    if sc.omega == Vec3::ZERO || t >= sc.dt {
+        sc.q1
+    } else {
+        sc.q1.integrate_angular(-sc.omega, sc.dt - t)
     }
 }
 
 /// 转动摆幅：本子步内**尖端**最多能扫过多远（`|ω|·r_bound·dt`；不可用 ⇒ 0）。
-fn swing_of(shape: &vxl_phys_core::Shape, omega: Vec3, dt: f32) -> f32 {
+fn swing_of(shape: &Shape, omega: Vec3, dt: f32) -> f32 {
     let r = ccd::bounding_radius(shape);
     if !r.is_finite() || omega == Vec3::ZERO {
         return 0.0;
@@ -139,11 +172,7 @@ fn put_rot(world: &mut World, i: usize, sc: &Scan, t: f32) {
     if sc.omega == Vec3::ZERO {
         return;
     }
-    let q = if t >= sc.dt {
-        sc.q1
-    } else {
-        sc.q1.integrate_angular(-sc.omega, sc.dt - t)
-    };
+    let q = q_at(sc, t);
     world.bodies.set_rot(i, q);
 }
 
@@ -175,71 +204,203 @@ fn gather(world: &mut World, i: usize, swept: Aabb) -> (Vec<(u32, u32)>, Vec<Tar
     (pairs, targets)
 }
 
-/// 一次命中：采样时刻、指向动体的法线、对方体号。
+/// 一次命中：采样时刻、指向动体的法线、对方体号、接触点、**法向闭合速率**（`> 0` = 压向表面）、
+/// **最深穿透**（`≥ 0` = 表面已经**真的贴上**；`< 0` = 还在皮肤带里、是**预期接触**）。
 #[derive(Clone, Copy)]
 struct Hit {
     t: f32,
     n: Vec3,
     other: usize,
+    point: Vec3,
+    close: f32,
+    depth: f32,
 }
 
-/// 沿段推进采样，返回首个"正在接近"的命中。
+/// 一次扫掠的命中信息：`lo` = 首个带内接触**之前**那个样本的时刻（二分下界，实测无接触），
+/// `edge` = 首个"皮肤带内正在接近"的样本（**带边缘**），
+/// `touch` = 首个"表面真的贴上"（`depth ≥ 0`）的样本（可能没有 ⇒ 全程都在带里擦过）。
+///
+/// ⚠️ `lo` 必须是**带内接触之前**那个样本、不能取 `edge.t`：大体积体高速撞薄壁时，采样
+/// 可能整段**跳过皮肤带**、第一个接触样本就已经深嵌（`depth ≥ 0`）⇒ 拿它当下界的话二分
+/// 两端谓词都为真、收敛到"深嵌那一侧"（实测 16 相位里最坏一档嵌进 **0.1964 m**）。
+struct Scan2 {
+    lo: f32,
+    edge: Hit,
+    touch: Option<Hit>,
+}
+
+/// TOI 细化的二分迭代数（`sub / 2ⁿ` 的时刻分辨率；每趟一次**单对**窄相）。
+const REFINE_ITERS: u32 = 8;
+
 fn scan(
     world: &mut World,
     i: usize,
     sc: &Scan,
     pairs: &[(u32, u32)],
     targets: &[Target],
-) -> Option<Hit> {
+) -> Option<Scan2> {
+    // 单趟扫描，同时记两个事件：① 首个**带边缘**闭合接触（旧口径的"命中"）；
+    // ② 首个**真实贴合**（`depth ≥ 0`）——后者才是 TOI 要找的"表面"。
+    // ⚠️ 只停在 ① 会把体悬在**皮肤带边缘**（窄相生成接触的阈值）上 ⇒ 接触时有时无 ⇒
+    // 睡-醒抖动（实测 m0 门槛档 `max_wake_flips` 9 → **13**、速率 0.9 → 1.3 越线）。
+    // `lo` = 首个带内接触**之前**那个样本（实测无接触 ⇒ 合法的二分下界）。
+    let mut lo = 0.0f32;
+    let mut prev_t = 0.0f32;
+    let mut edge: Option<Hit> = None;
     for s in 1..=sc.steps {
         let t = sc.sub * s as f32;
-        world.bodies.position[i] = sc.p0 + sc.v * t;
-        // **姿态也按时间插值**（旋转扫掠）：旧实现只插位置 ⇒ 自旋的尖端扫过的位置没被测到。
-        put_rot(world, i, sc, t);
-        // 运动目标随采样时刻推进（静态/沉睡目标 `vel = 0` ⇒ 位置不变）。
-        for tg in targets {
-            if tg.vel != Vec3::ZERO {
-                world.bodies.position[tg.id] = tg.q1 - tg.vel * (sc.dt - t);
-            }
+        place_body(world, i, sc, t);
+        place_targets(world, sc, targets, t);
+        let Some(h) = eval_hit(world, i, pairs, t) else {
+            prev_t = t;
+            continue;
+        };
+        if edge.is_none() {
+            edge = Some(h);
+            lo = prev_t;
         }
-        // CCD 逐采样已在时间维上走路径 ⇒ 不再叠加视野预测（否则会继承主窄相设的 predict_dt）。
-        world.narrow.set_predict_dt(0.0);
-        world.narrow.collide(
-            &world.bodies,
-            pairs,
-            world.terrain.slice(),
-            &world.providers,
-            &mut world.ccd_manifolds,
-            world.jobs.as_ref(),
-        );
-        if let Some(m) = world.ccd_manifolds.first() {
-            let other = if m.a == i as u32 { m.b } else { m.a } as usize;
-            // 法线 a→b；换算成「推离表面、指向动体」的方向。
-            let n_into_body = if m.a == i as u32 { -m.normal } else { m.normal };
-            // **只有"正在接近表面"的采样才算命中**：贴地滑行/静置的体每个采样都天生有接触，
-            // 按"有接触即命中"会把它钳回起点、原地锁死（实测：弹体滑到墙前 0.1 m 停住）。
-            // 判据用**接触点速度**（旋转扫掠 2026-10-13）：`v + ω×r` —— 纯自旋体的质心速度
-            // 可以是 0，但接触点正压向表面；只看质心速度 ⇒ 自旋体永远"不闭合"、扫掠形同虚设。
-            // `ω = 0` ⇒ `velocity_at` 退化成 `sc.v`（既有场景逐位不变）。
-            // 目标侧只带**平移**速度（自旋目标的姿态/角速度不进采样，见模块头注 ④）。
-            let point = m
-                .points
-                .first()
-                .map_or(world.bodies.position[i], |p| p.point);
-            let v_pt = world
-                .bodies
-                .velocity_at(i, point - world.bodies.position[i]);
-            let v_rel = v_pt - world.bodies.linvel[other];
-            if n_into_body.dot(v_rel) < 0.0 {
-                return Some(Hit {
-                    t,
-                    n: n_into_body,
-                    other,
-                });
-            }
+        if h.depth >= 0.0 {
+            return Some(Scan2 {
+                lo,
+                edge: edge.unwrap_or(h),
+                touch: Some(h),
+            });
         }
     }
-    None
+    edge.map(|edge| Scan2 {
+        lo,
+        edge,
+        touch: None,
+    })
+}
+
+/// 把动体放到时刻 `t` 的姿态。**姿态也按时间插值**（旋转扫掠）：旧实现只插位置 ⇒
+/// 自旋尖端扫过的位置没被测到。
+fn place_body(world: &mut World, i: usize, sc: &Scan, t: f32) {
+    world.bodies.position[i] = sc.p0 + sc.v * t;
+    put_rot(world, i, sc, t);
+}
+
+/// **CCD 命中也要进破坏管线的冲击账**（`World::record_impacts` 的同款记录）。
+///
+/// 为什么必须补（2026-10-13 实测翻案）：`record_impacts` 读的是**主窄相**的流形 + **解算前**的
+/// 速度；扫掠 AABB 修成"体 AABB 之并"之后，CCD 会在**体表面刚进皮肤带**时就把体钉住并零化法向
+/// 速度 ⇒ 下一子步主窄相看到的接近速度只剩 ≈0 ⇒ **破坏永不触发**（实测 R9：12 m/s 弹体原本
+/// 挖 108 块 → **0 块**）✗。所以命中那一刻把 **CCD 自己测到的法向闭合速率**记进同一张账
+/// （`approach` 取接触点速度的口径、含 `ω×r`），破坏管线照旧消费。
+/// 只对 **provider 目标**记账 —— 与 `record_impacts` 的口径一致（地形/高度场不进破坏管线）。
+fn record_ccd_impact(world: &mut World, i: usize, h: &Hit) {
+    let Shape::Provider(prov) = world.bodies.shape[h.other] else {
+        return;
+    };
+    if !world.bodies.is_dynamic(i) {
+        return;
+    }
+    crate::world_body::merge_impact(
+        &mut world.impacts,
+        crate::ImpactRecord {
+            provider: prov,
+            body: i as u32,
+            point: h.point,
+            approach: h.close,
+            velocity: world.bodies.linvel[i],
+        },
+    );
+}
+
+/// 运动目标推进到时刻 `t`（静态/沉睡目标 `vel = 0` ⇒ 不动）。
+fn place_targets(world: &mut World, sc: &Scan, targets: &[Target], t: f32) {
+    for tg in targets {
+        if tg.vel != Vec3::ZERO {
+            world.bodies.position[tg.id] = tg.q1 - tg.vel * (sc.dt - t);
+        }
+    }
+}
+
+/// **TOI 细化**：命中样本 `h` 与其前一个样本之间二分"首个有闭合接触的时刻"。
+///
+/// 为什么需要它（2026-10-13 实测）：旧写法一律退到**上一安全采样点** ⇒ 停位精度只有一整段
+/// 采样长（`0.5×最小半长`）——1 m 盒撞 5 mm 立板时**停在墙前 0.25 m 且法向速度已清零** =
+/// 悬停；间距远大于皮肤带，离散管线接不上手（体既不落位也不入睡）。二分把停位收到皮肤带内
+/// （`|v|·sub/2⁸`），下一子步的窄相就在带内、离散求解器接管 ⇒ 落位 + 入睡。
+///
+/// 谓词与命中判据**同一把尺**（`eval_hit`）⇒ 不会细到"谓词不成立"的那一侧；`lo` 恒取
+/// `t_hit − sub`（已实测无命中）⇒ 细化**不可能**比旧写法更深入。每趟只跑**命中那一对**窄相。
+fn refine_touch(world: &mut World, i: usize, sc: &Scan, targets: &[Target], sn: &Scan2) -> Hit {
+    let h = sn.edge;
+    let pair = if h.other < i {
+        (h.other as u32, i as u32)
+    } else {
+        (i as u32, h.other as u32)
+    };
+    let one = [pair];
+    // 区间与谓词：有 `touch` 样本时二分"表面真的贴上"（`depth ≥ 0`）的那一瞬；否则退回
+    // 旧口径（"带内已经有闭合接触"）——薄目标在带里擦过时就走这条。
+    let (mut lo, mut hi, need_touch) = match sn.touch {
+        Some(t) => (sn.lo, t.t, true),
+        None => (sn.lo, h.t, false),
+    };
+    for _ in 0..REFINE_ITERS {
+        let mid = 0.5 * (lo + hi);
+        if mid <= lo || mid >= hi {
+            break;
+        }
+        place_body(world, i, sc, mid);
+        place_targets(world, sc, targets, mid);
+        let touching = eval_hit(world, i, &one, mid).is_some_and(|x| !need_touch || x.depth >= 0.0);
+        if touching {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    // 在**细化后的贴合时刻**重取一次命中：接触点/闭合速率都取贴合那一瞬的值 ⇒ 与子步数无关
+    // （判据 `destruction_substep_invariance` 会量这一条：取命中样本的点会随子步数漂）。
+    place_body(world, i, sc, hi);
+    place_targets(world, sc, targets, hi);
+    eval_hit(world, i, &one, hi).unwrap_or(h)
+}
+
+/// 当前姿态下**首个"正在接近"**的接触（窄相一趟）：返回命中的法线/对方体号/接触点/闭合速率。
+///
+/// **只有"正在接近表面"的采样才算命中**：贴地滑行/静置的体每个采样都天生有接触，按"有接触即
+/// 命中"会把它钳回起点、原地锁死（实测：弹体滑到墙前 0.1 m 停住）。判据用**接触点速度**
+/// `v + ω×r`（旋转扫掠 2026-10-13）：纯自旋体的质心速度可以是 0，但接触点正压向表面；只看
+/// 质心速度 ⇒ 自旋体永远"不闭合"、扫掠形同虚设。`ω = 0` ⇒ 退化成 `sc.v`（既有场景逐位不变）。
+/// 目标侧只带**平移**速度（自旋目标的姿态/角速度不进采样，见模块头注）。
+fn eval_hit(world: &mut World, i: usize, pairs: &[(u32, u32)], t: f32) -> Option<Hit> {
+    // CCD 逐采样已在时间维上走路径 ⇒ 不再叠加视野预测（否则会继承主窄相设的 predict_dt）。
+    world.narrow.set_predict_dt(0.0);
+    world.narrow.collide(
+        &world.bodies,
+        pairs,
+        world.terrain.slice(),
+        &world.providers,
+        &mut world.ccd_manifolds,
+        world.jobs.as_ref(),
+    );
+    let m = world.ccd_manifolds.first()?;
+    let other = if m.a == i as u32 { m.b } else { m.a } as usize;
+    // 法线 a→b；换算成「推离表面、指向动体」的方向。
+    let n_into_body = if m.a == i as u32 { -m.normal } else { m.normal };
+    let point = m
+        .points
+        .first()
+        .map_or(world.bodies.position[i], |p| p.point);
+    let depth = m.points.iter().map(|p| p.depth).fold(f32::MIN, f32::max);
+    let v_pt = world
+        .bodies
+        .velocity_at(i, point - world.bodies.position[i]);
+    let v_rel = v_pt - world.bodies.linvel[other];
+    let vn = n_into_body.dot(v_rel);
+    (vn < 0.0).then_some(Hit {
+        t,
+        n: n_into_body,
+        other,
+        point,
+        close: -vn,
+        depth,
+    })
 }
 
 /// 目标位置复原（扫掠借出去的位移必须还回来——它们不是这一 tick 的最终状态）。
@@ -249,25 +410,34 @@ fn restore_targets(world: &mut World, targets: &[Target]) {
     }
 }
 
-/// 命中后的收口：钳到上一安全采样点 + **按质量分摊的非弹性相对停**。
+/// 命中后的收口：钳到**贴合时刻（TOI）** + **按质量分摊的非弹性相对停**。
 ///
 /// 为什么不能只改动体（旧写法）：2 kg 的球撞 1600 kg 的墙时，两体各跑一遍 sweep，各自把
 /// "相对法向速度"清零 ⇒ 结果像"球把墙拖走"（实测两体都以球的速度前进）。沿法线做标准一维
 /// 非弹性冲量后：轻球被重墙挡下、墙几乎不动；静态目标 `inv_mass = 0` ⇒ 退化成原写法
 /// （与 M1 逐位一致）。双向**转动**耦合仍留给 M2，这里如实标出。
-fn resolve(world: &mut World, i: usize, sc: &Scan, hit: Option<Hit>) {
-    let Some(h) = hit else {
-        world.bodies.position[i] = sc.p1;
-        // 采样借出去的姿态要还回来（`ω = 0` ⇒ 不写）。
-        put_rot(world, i, sc, sc.dt);
+///
+/// **TOI 细化（2026-10-13，薄壳片）**：旧写法一律退到**上一安全采样点**（`t_hit − sub`）⇒
+/// 停位精度只有**一整段采样长**（0.5×最小半长；1 m 盒撞 5 mm 立板时停在墙前 0.25 m、法向
+/// 速度已清零 ⇒ **悬停**，离散管线又因为间距远大于皮肤带而接不上手、既不落位也不入睡）。
+/// 现在命中后在"**带边缘** ↔ **表面真的贴上**"之间**二分**（`refine_touch`）⇒ 停在**贴合那
+/// 一瞬**（穿透 ≤ `|v|·sub/2⁸`），接触实打实成立 ⇒ 离散求解器接手落位。
+/// ⚠️ 只停在"带边缘"（= 窄相生成接触的阈值）会让体骑在阈值上：接触时有时无 ⇒ 睡-醒抖动
+/// （实测 m0 门槛档 `max_wake_flips` 9 → 13、速率 1.3 越线）；停在贴合则无此抖动。
+fn resolve(world: &mut World, i: usize, sc: &Scan, targets: &[Target], sn: Option<Scan2>) {
+    let Some(sn) = sn else {
+        // 没命中：回到 tick 末（位置 + 姿态；`ω = 0` ⇒ 姿态一个字节都不写）。
+        place_body(world, i, sc, sc.dt);
         return;
     };
-    let (other, n_into_body) = (h.other, h.n);
-    let t_safe = (h.t - sc.sub).max(0.0);
-    world.bodies.position[i] = sc.p0 + sc.v * t_safe;
-    // **姿态也钳到安全采样点**：只钳位置、姿态留在 tick 末 ⇒ 自旋的尖端仍然插在墙里
-    // （那正是旋转扫掠要解决的事）。
-    put_rot(world, i, sc, t_safe);
+    // 贴合时刻（TOI 细化后的命中：接触点/闭合速率都取贴合那一瞬）。
+    let touch = refine_touch(world, i, sc, targets, &sn);
+    let (other, n_into_body) = (touch.other, touch.n);
+    place_body(world, i, sc, touch.t);
+    // 目标必须放回 tick 末（细化期间借用过它们的位移，它们不是这一 tick 的最终状态）。
+    place_targets(world, sc, targets, sc.dt);
+    // **冲击账**（必须在零化速度**之前**记）：见 `record_ccd_impact`。
+    record_ccd_impact(world, i, &touch);
     // 平动响应：**M1 口径未变**（质心相对速度的非弹性停，按质量分摊）。
     let v_rel = sc.v - world.bodies.linvel[other];
     let vn = v_rel.dot(n_into_body);
@@ -306,9 +476,9 @@ pub(crate) fn sweep(world: &mut World, i: usize, dt: f32) {
     };
     // 扫掠 AABB 还要含**转动摆幅**（否则自旋体的尖端扫过的空间连宽相都过不了）。
     let swing = swing_of(&world.bodies.shape[i], omega, dt);
-    let swept = swept_aabb(sc.p0, sc.p1, world.config.contact_skin, swing);
+    let swept = swept_aabb(world, i, &sc, world.config.contact_skin, swing);
     let (pairs, targets) = gather(world, i, swept);
     let hit = scan(world, i, &sc, &pairs, &targets);
     restore_targets(world, &targets);
-    resolve(world, i, &sc, hit);
+    resolve(world, i, &sc, &targets, hit);
 }
