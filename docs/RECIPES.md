@@ -176,7 +176,7 @@ bash scripts/ab_perf.sh HEAD~1 5 'ns/点' \
 
 | 场景 | 命令 | 基线（2026-09-15 立；两条哈希值 2026-10-06 随 **#6** 换代刷新 —— `#107` 的各轴独立 fat 盒是**逐位中性**，只动了 `gate_scale` 的峰值候选，见下方换代链） |
 |---|---|---|
-| 门槛 + 压力 | `cargo run --release -p vxl-phys --example m0_gates` | 门槛（只判 PASS + 双跑一致，**哈希未进门链**）现值 `0x7f97f4af780d86222180a98543eeeb93`、末态活跃 19；压力 `0x8e53107f61c83474016cc0203dbe8014`（report-only，`gate_all.sh` grep 的就是它） |
+| 门槛 + 压力 | `cargo run --release -p vxl-phys --example m0_gates` | 门槛（只判 PASS + 双跑一致，**哈希未进门链**）现值 `0x0bec25a69e614a57de9c42d7a463a604`、末态活跃 15；压力 `0x22547e5f12738f9e17414d19dcc32805`（report-only，`gate_all.sh` grep 的就是它） |
 | 确定性 | `cargo run --release -p vxl-phys --example determinism` | `FINAL_HASH=0x655cdbf40ed7e800b5f46785f94fec1e`（10 轮逐位一致） |
 | T4 碎片雨 | `cargo run --release -p vxl-phys --example m1_islands` | 解算扩展 ≥3×（实测 4.39×）+ 串行/并行末态哈希逐位一致。**别加 `--` 参数**：会被当成第一个位置参数（clusters），4000 会跑到 ticks 上 |
 | **默认档长跑稳定性**（新增 2026-09-20） | `cargo test --release -p vxl-phys --test default_tier_stability` | 两个测试：① 冻结读数 `top_y 2.7285 / Σv² 1.8124 / awake 216 / manifolds 919`（6×6×6、3000 步、默认档，两次连跑逐位一致；**2026-09-21 换代**，旧世代 `2.7223 / 2.1488 / 216 / 835`）；② **金丝雀**——降到 4 扫掠必须明显不同（实测流形 919→455、Σv²→2.2089、清醒→188、top_y→2.7347），否则场景不灵敏、门无效。**为什么要它**：金样配方自带 `16` 迭代 ⇒ 默认档（6 扫掠）的改动**金样门看不见**（`EXPERIMENTS` 记过的覆盖缺口）。改动默认档时更新那四个冻结值并按 ADR 0004 记换代理由；`--nocapture` 可读实际读数 |
@@ -311,6 +311,16 @@ provider 通道"这条形状已被 `#105` 否证 —— `World::terrain` 是**�
 金样（col45/pile5/tower25）**读数相同** · `bench/realism-probe` 只动 R6 `sep_max`
 `0.01368 → 0.01222`（`sep_p99`/`>5cm` 未变）。动因与实测全文见 `OPEN-PROBLEMS.md` P18；
 `scripts/gate_all.sh` 两处 grep 已重钉。
+
+**2026-10-13 换代（同日第二笔）：CCD 薄壳 TOI（扫掠 AABB 覆盖体体积 + 命中后二分细化贴合时刻）**：
+`determinism` `0x655cdbf4…` **未变** · 压力 `0x8e53107f…` → **`0x22547e5f…`**（健康读数一字未动）
+· 门槛档 `0x7f97f4af…` → **`0x0bec25a6…`**（末态活跃 19 → 15、深穿透 tick 97 → **74**、
+最大深穿透 0.409 → **0.308**、唤醒翻转 9 → 13）· 5 个 vxl 金样 + 3 个 Rapier 金样
+（col45/pile5/tower25）**读数相同** · `bench/realism-probe` **两处**：R6 全面变好
+（`sep_p50` 0.00331→0.00342、`sep_p99` 0.00984→**0.00973**、`sep_max` 0.01222→**0.01068**、
+`>1cm` 0.800→0.517%、`>5cm` 仍 0）与 R9（触发 tick 5→**4**，仍在探针 ±1 容差内；碎块
+108→**99**，且 **1 子步与 2 子步现在逐字相同**）。动因见 `OPEN-PROBLEMS.md` P18/P19；
+`scripts/gate_all.sh` 的 grep 已重钉。
 
 **2026-10-07 补标准出口（非换代；不动任何哈希）**：`scripts/gate_scale.sh` 的分相位块加
 **稳态尾窗**读数（口径 #1 说的"性能门窗口"此前没有出口）；新增 `scripts/gate_sparse.sh` =

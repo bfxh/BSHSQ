@@ -365,7 +365,7 @@ impl World {
 /// 落在本仓自报的噪声带（±3–5%）里；本仓四哈希/金样场景的 `k` 恒为 0（无 provider 接触）。
 /// `k ≫ 10⁴` 的场景（如 10 万盒压在体素地形上）需要改成带键索引——届时那是**已知可量**的一刀，
 /// 不是现在的猜测优化。
-fn merge_impact(impacts: &mut Vec<ImpactRecord>, rec: ImpactRecord) {
+pub(crate) fn merge_impact(impacts: &mut Vec<ImpactRecord>, rec: ImpactRecord) {
     if let Some(slot) = impacts
         .iter_mut()
         .find(|r| r.provider == rec.provider && r.body == rec.body)
