@@ -138,7 +138,7 @@ impl BvhBroadPhase {
         self.prev_awake.resize(n, true);
         let mut flip = false;
         for i in 0..n {
-            let participates = bodies.is_dynamic(i) && bodies.awake[i];
+            let participates = bodies.is_dynamic_or_kinematic(i) && bodies.awake[i];
             if self.prev_awake[i] != participates {
                 self.prev_awake[i] = participates;
                 flip = true;
@@ -170,8 +170,9 @@ impl BvhBroadPhase {
         vxl_phys_core::schedule::for_each_chunk_mut(aabbs, threads, 32768, |start, _len, slot| {
             for (k, s) in slot.iter_mut().enumerate() {
                 let i = start + k;
-                if !full && (!bodies_ref.is_dynamic(i) || !bodies_ref.awake[i]) {
-                    continue; // 睡眠/静态：位置未变，沿用上帧 AABB。
+                if !full && (!bodies_ref.is_dynamic_or_kinematic(i) || !bodies_ref.awake[i]) {
+                    // 纯静态体（或睡眠动体）：位置未变，沿用上帧 AABB —— ⚠️ 运动学体不在此列。
+                    continue;
                 }
                 *s = shape_aabb(
                     &bodies_ref.shape[i],
@@ -201,7 +202,7 @@ impl BvhBroadPhase {
                 if (i as u32) >= self.leaves.len() as u32 {
                     self.leaves.push(self.tree.insert(i as u32, self.aabbs[i]));
                     self.cache_fat.resize(n, Aabb::EMPTY);
-                } else if bodies.is_dynamic(i) && bodies.awake[i] {
+                } else if bodies.is_dynamic_or_kinematic(i) && bodies.awake[i] {
                     // M1：速度自适应边距——快速体在其 fat 盒内连续多帧零结构操作。
                     let fat = self.fat_box_for(&self.aabbs[i], bodies.linvel[i]);
                     let (nl, changed) =
@@ -361,7 +362,7 @@ impl BvhBroadPhase {
             let len = self.cand_len[iu] as usize;
             for &j in &self.cand_arena[off..off + len] {
                 let ju = j as usize;
-                if !bodies.is_dynamic(ju) {
+                if !bodies.is_dynamic_or_kinematic(ju) {
                     st += 1;
                 } else if bodies.awake[ju] {
                     aw += 1;
@@ -446,14 +447,14 @@ impl BroadPhase for BvhBroadPhase {
         let d_tree = vxl_phys_core::probe::us(t_tree);
         let t_query = vxl_phys_core::probe::start();
         // 2) 清醒动体查询（dyn-dyn 双侧发射由最终排序去重收敛；dyn-static 由
-        //    动体侧发起）。睡眠体不查询：沉睡体不产生新接触；被唤醒/被撞由
-        //    对方（清醒体）的查询反向命中（睡眠叶仍在树内），唤醒语义不变。
-        //    查询缓存（T2）：仅对逃出缓存 fat 盒的体重走树（候选安全复用，
-        //    见 `cache_fat` 注）；随后并行只读消费候选 + 精确过滤。
+        //    动体侧发起）。睡眠体不查询：沉睡体不产生新接触；被唤醒/被撞由对方（清醒体）的
+        //    查询反向命中（睡眠叶仍在树内）。**运动学体在这张表里**（它是"会动的那一半"）：
+        //    平台移动时由它发起查询，睡在它上面的载荷才会被反向命中（否则"平台穿过睡堆"）。
+        //    查询缓存（T2）仅对逃出缓存 fat 盒的体重走树（见 `cache_fat` 注）；随后并行只读消费。
         let dyns: Vec<u32> = (0..n as u32)
             .filter(|&i| {
                 let i = i as usize;
-                bodies.is_dynamic(i) && bodies.awake[i]
+                bodies.is_dynamic_or_kinematic(i) && bodies.awake[i]
             })
             .collect();
         self.cache_fat.resize(n, Aabb::EMPTY);

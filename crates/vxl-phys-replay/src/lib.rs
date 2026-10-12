@@ -109,6 +109,7 @@ pub fn hash_bodies_streaming(bodies: &BodySet, scratch: &mut [u8]) -> u128 {
         let kind = match bodies.body_type[i] {
             vxl_phys_core::BodyType::Static => 0u8,
             vxl_phys_core::BodyType::Dynamic => 1u8,
+            vxl_phys_core::BodyType::Kinematic => 2u8, // 新标签（M2）：既有场景的字节流不变
         };
         // 按 id 序读取热组（32B 记录）与类型标签；awake/计时器等非物理态不入哈希。
         sh.push_body(
@@ -238,6 +239,7 @@ mod tests {
             reference.push(match b.body_type[i] {
                 vxl_phys_core::BodyType::Static => 0,
                 vxl_phys_core::BodyType::Dynamic => 1,
+                vxl_phys_core::BodyType::Kinematic => 2,
             });
             for v in [b.position[i].x, b.position[i].y, b.position[i].z] {
                 reference.extend_from_slice(&v.to_bits().to_le_bytes());

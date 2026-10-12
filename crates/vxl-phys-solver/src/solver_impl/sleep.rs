@@ -100,8 +100,10 @@ impl ImpulseSolver {
         }
         for &bi in &island.bodies {
             let i = bi as usize;
-            if !bodies.awake[i] {
-                continue; // 睡着的：本轮不动它（上面的唤醒已判过）
+            if !bodies.awake[i] || bodies.is_kinematic(i) {
+                // 睡着的：本轮不动它（上面的唤醒已判过）；运动学体：**永不由引擎入睡**
+                // （速度是宿主输入，它没有"静止"的语义）—— 见 `PLAN-kinematic.md` §3.3。
+                continue;
             }
             let lin = bodies.linvel[i].length();
             let ang = bodies.angvel(i).length();
@@ -168,9 +170,11 @@ impl ImpulseSolver {
                 SLEEP_D_SLEPT.fetch_add(1, Relaxed);
                 for &bi in &island.bodies {
                     let i = bi as usize;
-                    bodies.awake[i] = false;
-                    bodies.linvel[i] = Vec3::ZERO;
-                    bodies.set_angvel_raw(i, Vec3::ZERO);
+                    if !bodies.is_kinematic(i) {
+                        bodies.awake[i] = false;
+                        bodies.linvel[i] = Vec3::ZERO;
+                        bodies.set_angvel_raw(i, Vec3::ZERO);
+                    }
                 }
             }
         } else {

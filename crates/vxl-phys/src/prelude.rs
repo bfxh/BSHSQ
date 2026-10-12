@@ -9,7 +9,7 @@
 //! - 关节：[`Joint`]、[`JointKind`]；
 //! - 地形/网格：[`HeightField`]、[`CompoundChild`]；
 //! - **域扩展 trait**（域 API 靠 trait 挂到 `World` 上，不往 `World` 加方法）：
-//!   [`DestructionExt`]（破坏/体素）、[`VoxelConversionExt`]（体素↔多边形）。
+//!   [`DestructionExt`]（破坏）、[`VoxelConversionExt`]（体素↔多边形）、[`KinematicExt`]（运动学体）。
 //!
 //! **不在 prelude**（有意）：内部策略类型（`ImpulseSolver`/`DefaultNarrowPhase`/`JointSet`…）、
 //! 回放与哈希（`Recorder`/`StateHash`——要显式引入，见 `QUICKSTART.md` 的确定性一节）、
@@ -19,6 +19,7 @@
 //! glob 是硬判，而具名导出对调用者一样方便（调用方那一侧的 `use vxl_phys::prelude::*;` 才是
 //! 他要的那颗星）。
 
+pub use crate::world_kinematic::KinematicExt;
 pub use crate::world_step::{conversion::VoxelConversionExt, destruction::DestructionExt};
 pub use crate::{
     Aabb, BodyId, BodySet, BodyType, CompoundChild, FrictionModel, HeightField, Joint, JointKind,

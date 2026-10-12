@@ -186,8 +186,8 @@ mod tests {
             for i in 0..n as u32 {
                 for j in (i + 1)..n as u32 {
                     let (iu, ju) = (i as usize, j as usize);
-                    let pi = b.is_dynamic(iu) && b.awake[iu];
-                    let pj = b.is_dynamic(ju) && b.awake[ju];
+                    let pi = b.is_dynamic_or_kinematic(iu) && b.awake[iu];
+                    let pj = b.is_dynamic_or_kinematic(ju) && b.awake[ju];
                     if !pi && !pj {
                         continue;
                     }

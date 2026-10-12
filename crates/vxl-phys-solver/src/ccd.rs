@@ -40,7 +40,7 @@ pub fn min_half_extent(shape: &Shape) -> f32 {
 
 /// 选择性 CCD 判据。
 pub fn needs_ccd(bodies: &BodySet, i: usize, config: &PhysConfig, dt: f32) -> bool {
-    if !bodies.is_dynamic(i) || !bodies.awake[i] {
+    if !bodies.is_dynamic_or_kinematic(i) || !bodies.awake[i] {
         return false;
     }
     if !config.ccd_speed_threshold.is_finite() {

@@ -158,6 +158,9 @@ impl ImpulseSolver {
     }
 
     /// 1) 并查集分岛（直接对流形；双静态对不入岛）。固定规则：小索引为根（确定性）。
+    ///    ⚠️ **运动学体进岛**（A 档，`PLAN-kinematic.md` §2）：判据是"**非静态 × 非静态**"。
+    ///    代价已实测并被接受：一部平台会把它托着的所有塔并成**一个**岛
+    ///    （探针⑦：静态支撑 7 个岛 → 动态/运动学支撑 1 个岛），而本仓并行是岛级。
     ///    缓冲跨帧复用（`self.parent`），避免每帧 20 万级 alloc/fill。
     fn build_union_find(&mut self, bodies: &BodySet, manifolds: &[Manifold]) -> Vec<u32> {
         let n = bodies.len();
@@ -166,7 +169,7 @@ impl ImpulseSolver {
         parent.extend(0..n as u32);
         for m in manifolds {
             let (a, b) = (m.a as usize, m.b as usize);
-            if bodies.is_dynamic(a) && bodies.is_dynamic(b) {
+            if bodies.is_dynamic_or_kinematic(a) && bodies.is_dynamic_or_kinematic(b) {
                 union_small_root(&mut parent, m.a, m.b);
             }
         }
@@ -191,7 +194,7 @@ impl ImpulseSolver {
         let mut pool = std::mem::take(&mut self.island_pool);
         let mut islands_used = 0usize;
         for i in 0..n {
-            if !(bodies.is_dynamic(i) && bodies.awake[i]) {
+            if !(bodies.is_dynamic_or_kinematic(i) && bodies.awake[i]) {
                 continue;
             }
             let r = find_small_root(parent, i as u32);

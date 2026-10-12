@@ -31,7 +31,7 @@
 #    编辑后用解析器验一遍：
 #      python -c "import yaml;yaml.safe_load(open('docs/CAPABILITIES.yaml',encoding='utf-8'))"
 version: 1
-updated: "2026-10-11"
+updated: "2026-10-12"
 
 capabilities:
   # ── 面元力矩：刚体侧与布料侧是两件事，分开登记（文档点名的例子） ──
@@ -844,3 +844,51 @@ capabilities:
       这不是"某个物理域"，而是跨域的验证能力；放在本表是为了让"真实性有没有自动门"这件事
       只有一个事实源。R1–R10 的定义与逐条读数见 bench/realism-probe（R8–R10 在
       `src/bin/probe/`）与 docs/KNOWLEDGE.md §M（R8/§R、R9/§T、R10/§U）。
+
+  # ── 运动学体（M2 · PLAN-kinematic.md）：K1/K2 落地，K4 取 A 档（并岛），K5+ 未做 ──
+  - id: PHY-SCOPE-KINEMATIC-BODY
+    title: 运动学体（电梯 / 传送带 / 移动地形：宿主驱动的位置或速度 + 进岛的接触相对速度）
+    scope: included
+    implementation: partial
+    implementation_path: crates/vxl-phys-core/src/body.rs
+    evidence:
+      - id: impl_site
+        note: >
+          BodyType::Kinematic + 谓词三分（is_dynamic / is_kinematic / is_dynamic_or_kinematic）；
+          push_kinematic 与 push_static / push_dynamic 共用一个私有 push_raw（质量与惯量恒零）；
+          门面 World::add_kinematic / set_kinematic_velocity（速度驱动）/ set_kinematic_target
+          （位移驱动：按 config.dt 反算速度，tick 末落在目标处）。两者对非运动学体显式 assert 拒绝。
+      - id: landings
+        note: >
+          宽相三处实现（bvh_phase / grid_phase / lib 的暴力参照）把运动学体归入"会动的那一半"
+          （AABB 刷新、树代理移动、参与查询）；积分器推进其位置；岛规则放宽为"非静态 × 非静态"
+          （A 档并岛，用户 2026-10-12 裁决）；sleep_pass 对运动学体直接跳过（引擎永不让它入睡）；
+          CCD 目标集带上它的速度；软体代理的角速度带上它；health 的活跃计数含它。
+      - id: tests
+        note: >
+          crates/vxl-phys/tests/kinematic_contracts.rs 八条：C1 传送带（Δx 0.5700 m、vx 0.6047）、
+          C2 慢速电梯（相对位移 −0.0000、vy 0.6000）、C3 快速电梯不吞载荷（埋入 0.0003 m）、
+          C4 载荷链随动、C5 瞬移（运动学可、静态体不可挪 = 文档化边界）、C6 睡堆被唤醒带走
+          （Δy 1.2005 m）、C7 岛划分（静态 7 / 运动学 1 = A 档代价）、C8 下行分离（慢 0.0000 /
+          快 −4.7533 vs 解析 −4.77）。另 crates/vxl-phys-core/tests/kinematic_body.rs 两条核心不变式。
+      - id: zero_generation
+        note: >
+          零换代（无运动学体的场景逐位不变）：determinism FINAL_HASH
+          0x655cdbf40ed7e800b5f46785f94fec1e 与 m0_gates 压力哈希
+          0xc23b81902a74b977c8e74e114cf9737a 均与基线相同；5 个 vxl 金样
+          （m3_collapse / m4_cantilever / m4_flag / m5_dam_break / m5_float_box）与
+          3 个 Rapier 对照金样（col45 / pile5 / tower25）全部 PASS。
+      - id: not_done
+        note: >
+          K4 的 A/B 档开关未做（当前恒为 A 档并岛）；K5 传送带旋钮与各向异性方向未做；
+          K3 的定向唤醒旋钮/迟滞取值未单列（唤醒靠既有 SUBISLAND_WAKE_MULT 阈值规则达成）；
+          运动学体不触发破坏（destruction 仍只认动态体）；静态体仍不可挪（C5 的边界格）。
+    required_evidence:
+      - implementation_path
+      - tests
+    decision_id: null
+    owner: maintainer
+    notes: >
+      三条断链（体类型 / 接触速度恒零 / 宽相代理不移动）与修复前的 ①–⑦ 实测见
+      docs/SURVEY-RIGID-HARD-CASES.md §2 与 docs/SURVEY-EXTREMES-AND-BORROW.md §1；
+      选型与分片见 docs/PLAN-kinematic.md（P1 已裁 = A 档并岛，代价 = C7 钉住的"岛数 7 → 1"）。
