@@ -986,7 +986,7 @@
    "max_type_members": 0
   },
   "crates/vxl-phys-solver/src/ccd.rs": {
-   "file_lines": 69,
+   "file_lines": 73,
    "max_fn_lines": 22,
    "max_type_members": 0
   },
@@ -1408,6 +1408,11 @@
   "crates/vxl-phys/tests/capsule_drop.rs": {
    "file_lines": 76,
    "max_fn_lines": 59,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys/tests/ccd_joint_interlock.rs": {
+   "file_lines": 89,
+   "max_fn_lines": 51,
    "max_type_members": 0
   },
   "crates/vxl-phys/tests/cloth_on_supported_dynamic_box.rs": {
