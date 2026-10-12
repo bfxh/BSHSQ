@@ -1,9 +1,11 @@
-//! **声学核（GPU 档 M1/M2/M3）**：一批 `(声源, 听者)` 对，每对一个独立工作项。
+//! **声学核（GPU 档 M1/M2/M3/M4）**：一批 `(声源, 听者)` 对，每对一个独立工作项。
 //!
 //! 与 CPU 端 `vxl-phys-acoustics` 的对应那几条**同口径**（口径逐条写在 `src/acoustic.wgsl`
 //! 的头注里）：M1 直达（遮挡走 Möller–Trumbore，端点共面不计；`dist/speed` 与 `1/dist²`）、
 //! M2 一次镜面反射（镜像源法，逐对取最强那条）、M3 绕射（棱上 Fermat 点 +
-//! `coeff·(1+cosθ)/2/(d₁·d₂)`，只在阴影里产出）。散射/介质积分仍留 CPU 侧 —— 这里要钉的是
+//! `coeff·(1+cosθ)/2/(d₁·d₂)`，只在阴影里产出）、M4 散射（面当二级声源，Lambertian：
+//! `s·cos_in·cos_out·A/(d₁²·d₂²)`，同侧 + 两腿不挡，取最强那个面）。介质积分仍留 CPU 侧 ——
+//! 这里要钉的是
 //! "同一批输入 ⇒ 与 CPU 参考**逐对一致**"（浮点容差、拓扑逐位），探针见
 //! `tests/acoustic_*_probe.rs`。
 //!
@@ -52,6 +54,19 @@ pub struct DiffractOut {
     pub edge: f32,
 }
 
+/// 一个 `(声源, 听者)` 对的**散射**读数（有/无 + 最强那个面的时延/增益/三角序号）。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScatterOut {
+    /// 是否找到散射路径（面与声源/听者**同侧**、两个余弦 > 0、两条腿都不被挡）。
+    pub hit: bool,
+    /// 时延（秒）＝ `(d₁+d₂)/speed`（到面中心的两段直线；介质积分还没上卡）。
+    pub delay: f32,
+    /// 能量增益 ＝ `s·cos_in·cos_out·A/(d₁²·d₂²)`（`A = |cross|/2`；**单频带**）。
+    pub gain: f32,
+    /// 最强那个面的三角序号（没有则为 `-1`）。
+    pub tri: f32,
+}
+
 /// 一批输入（几何/材质/棱都是**平铺切片** ⇒ 直接就是卡的布局）。
 ///
 /// 打成结构体不是为了好看：`diffract` 这条本来要 7 个形参，撞本仓 `args-gate` 的软阈值
@@ -65,6 +80,8 @@ pub struct SceneIn<'a> {
     pub tris: &'a [[Vec3; 3]],
     /// 逐三角吸收（只有反射核读它；空表 ⇒ 全 0）。
     pub absorb: &'a [f32],
+    /// 逐三角**散射系数**（只有散射核读它；**单频带**口径，空表 ⇒ 全 0 = 纯镜面）。
+    pub scatter: &'a [f32],
     /// 衍射棱（每条两个端点；空表 ⇒ 无棱可绕）。
     pub edges: &'a [[Vec3; 2]],
     /// 逐棱绕射系数（**单频带口径**：频带表还没上卡）——与 [`SceneIn::edges`] **一一对应**。
@@ -124,6 +141,7 @@ struct Buffers {
     db: wgpu::Buffer,
     tb: wgpu::Buffer,
     ab: wgpu::Buffer,
+    kb: wgpu::Buffer,
     eb: wgpu::Buffer,
     cb: wgpu::Buffer,
     ob: wgpu::Buffer,
@@ -157,7 +175,18 @@ fn upload(device: &wgpu::Device, sc: &SceneIn<'_>) -> (Buffers, u64) {
     let tb = mk_storage("acoustic.tris", &tris_bytes(sc.tris));
     // 这几张表都可能为空（直达不吃吸收、场景可能没有棱）⇒ 统一补**非零长**的哑缓冲：
     // 零长 storage 绑定不合法。哑值都是 0 ⇒ 对读数没有影响。
-    let ab = mk_storage("acoustic.absorb", &f32_bytes(if_empty(sc.absorb, &[0.0])));
+    //
+    // ⚠️ 逐三角那两张表（吸收/散射）空表时按**三角数**补零：核内是 `absorb[t]` / `scatter_coef[t]`
+    // 直接索引 ⇒ 只补 1 个元素的话，"空表 + 多个三角"就是**越界读**（不是静默出错那么轻）。
+    let zeros = |n: usize| vec![0.0f32; n.max(1)];
+    let ab = mk_storage(
+        "acoustic.absorb",
+        &f32_bytes(if_empty(sc.absorb, &zeros(sc.tris.len()))),
+    );
+    let kb = mk_storage(
+        "acoustic.scatter",
+        &f32_bytes(if_empty(sc.scatter, &zeros(sc.tris.len()))),
+    );
     let eb = mk_storage(
         "acoustic.edges",
         &edges_bytes(if_empty(sc.edges, &[ZERO_EDGE])),
@@ -186,6 +215,7 @@ fn upload(device: &wgpu::Device, sc: &SceneIn<'_>) -> (Buffers, u64) {
             db,
             tb,
             ab,
+            kb,
             eb,
             cb,
             ob,
@@ -228,6 +258,7 @@ fn run_entry(
             (5, Kind::Ro),
             (6, Kind::Ro),
             (7, Kind::Ro),
+            (8, Kind::Ro),
         ],
     );
     // ⚠️ 这个变量必须叫 `shader`（词汇门只豁免这一种写法，见 `scripts/vocab_scan.sh` 头部）。
@@ -248,6 +279,7 @@ fn run_entry(
             ent(5, &b.ab),
             ent(6, &b.eb),
             ent(7, &b.cb),
+            ent(8, &b.kb),
         ],
     });
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -306,6 +338,7 @@ pub fn direct_paths_on_adapter(
         dsts,
         tris,
         absorb: &[],
+        scatter: &[],
         edges: &[],
         edge_coeff: &[],
         speed,
@@ -333,6 +366,14 @@ pub fn reflected_on_adapter(
     absorb: &[f32],
     speed: f32,
 ) -> Result<(String, Vec<ReflectOut>), String> {
+    // 逐三角表与三角表**一一对应**（空表 = 全 0，由 `upload` 补零；给短了就是越界读）。
+    if !absorb.is_empty() && absorb.len() != tris.len() {
+        return Err(format!(
+            "吸收表与三角表必须一一对应（{} vs {}）",
+            absorb.len(),
+            tris.len()
+        ));
+    }
     let (name, device, queue) = crate::probe::device_for(adapter_index)?;
     if srcs.is_empty() || dsts.is_empty() {
         return Ok((name, Vec::new()));
@@ -342,6 +383,7 @@ pub fn reflected_on_adapter(
         dsts,
         tris,
         absorb,
+        scatter: &[],
         edges: &[],
         edge_coeff: &[],
         speed,
@@ -389,6 +431,40 @@ pub fn diffracted_on_adapter(
             delay: row[1],
             gain: row[2],
             edge: row[3],
+        });
+    }
+    Ok((name, out))
+}
+
+/// 在指定适配器上跑一趟**散射核**（M4）：逐对取**最强那个面**（平局按三角序号取小 ⇒ 确定）。
+///
+/// 口径与 CPU 的 `push_scatter` 同式（面中心当二级声源、Lambertian 工程口径、
+/// 同侧 + 两腿不挡）：`gain = s·cos_in·cos_out·A/(d₁²·d₂²)`。`scatter` 是**逐三角**系数
+/// （单频带；频带表还没上卡），空表 ⇒ 全 0 ⇒ 一对也产不出（纯镜面场景的语义）。
+pub fn scattered_on_adapter(
+    adapter_index: usize,
+    sc: &SceneIn<'_>,
+) -> Result<(String, Vec<ScatterOut>), String> {
+    // 同 `reflected_on_adapter`：逐三角表要么空（= 全 0）、要么与三角表等长。
+    if !sc.scatter.is_empty() && sc.scatter.len() != sc.tris.len() {
+        return Err(format!(
+            "散射表与三角表必须一一对应（{} vs {}）",
+            sc.scatter.len(),
+            sc.tris.len()
+        ));
+    }
+    let (name, device, queue) = crate::probe::device_for(adapter_index)?;
+    if sc.srcs.is_empty() || sc.dsts.is_empty() {
+        return Ok((name, Vec::new()));
+    }
+    let (b, _) = upload(&device, sc);
+    let mut out = Vec::with_capacity(b.n_pairs);
+    for row in run_entry(&device, &queue, &b, "scatter") {
+        out.push(ScatterOut {
+            hit: row[0] > 0.5,
+            delay: row[1],
+            gain: row[2],
+            tri: row[3],
         });
     }
     Ok((name, out))

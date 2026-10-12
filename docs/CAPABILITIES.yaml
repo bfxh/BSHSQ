@@ -521,9 +521,9 @@ capabilities:
       - id: acoustic_not_done
         note: >-
           **仍未做（如实登记）**：UTD 的 **Fresnel 积分**（A4 的 `D(θ)` 与漫反射口径都是工程近似）、
-          **GPU 档落了直达 + 一次反射 + 绕射（M1/M2/M3）**：散射/介质积分仍未上卡（见
-          `a5_gpu_direct_kernel` / `a5_gpu_reflect_kernel` / `a5_gpu_diffract_kernel`；本层已落
-          批处理入口与逐位等价契约，见 `a5_gpu_base`）。
+          **GPU 档落了直达 + 一次反射 + 绕射 + 散射（M1/M2/M3/M4）**：介质积分仍未上卡（见
+          `a5_gpu_direct_kernel` / `a5_gpu_reflect_kernel` / `a5_gpu_diffract_kernel` /
+          `a5_gpu_scatter_kernel`；本层已落批处理入口与逐位等价契约，见 `a5_gpu_base`）。
           portal 与衍射棱都按文档 §8 的取舍先落"显式图元"（衍射棱另有兜底，见下条）；
           **"体素空洞自动识别"**（从占据位找连通孔）仍未做。低频不承诺 / **不做双耳渲染**见文档 §7
           （2026-10-12 起有**单声道**离线渲染供试听与对表，见 `a6_audio_render`；HRTF/双耳仍归宿主）。
@@ -614,7 +614,7 @@ capabilities:
           判据 = **拓扑（遮挡分类）逐位 + 浮点（时延/增益）相对 1e-4**；无适配器则打印 `[SKIP]`。
           实测（本机）：`NVIDIA GeForce RTX 4060 Ti | Vulkan | DiscreteGpu` 上 6 对全对。
           ⚠️ **CI 不覆盖**（既有口径 `cargo test --workspace --exclude vxl-phys-gpu`：headless 运行器
-          无 GPU）⇒ 这条路只能在本机或 GPU 探针 job 上验；**散射/介质积分仍未上卡**。
+          无 GPU）⇒ 这条路只能在本机或 GPU 探针 job 上验；**介质积分仍未上卡**。
       - id: a5_gpu_reflect_kernel
         note: >-
           **GPU 档的「一次镜面反射」（M2）已落地（2026-10-12）**：`acoustic.wgsl` 加 `reflect` 入口 ——
@@ -664,6 +664,25 @@ capabilities:
           写盘前按峰值归一，比例打印）。实测（本机 2026-10-12）：单声撞击的 IR 里 5 条路径
           （透射 9.431 / 门洞 9.934 / 绕射 11.885 / 反射 32.576 / 漫反射 34.023 ms）与渲染出的尖峰
           逐条对上、**最大偏差 0.00 dB**；6 s 场景（214 声事件 / 1421 条路径）峰值 1.57 ⇒ 归一 ×0.637 落盘。
+      - id: a5_gpu_scatter_kernel
+        note: >-
+          **GPU 档的「散射」（M4）已落地（2026-10-12）**：`acoustic.wgsl` 加 `scatter` 入口 —— 逐三角
+          取**面中心**当二级声源（Lambertian 工程口径）：法向朝声源那侧、要求声源/听者**同侧**且两个
+          余弦 > 0、两条腿都不被挡，逐对取**最强那个面**（平局按三角序号取小 ⇒ 确定），输出
+          `(hit, delay, gain, tri)`；口径 `s·cos_in·cos_out·A/(d₁²·d₂²)`（`A = |cross|/2`，
+          **单频带**系数）。宿主侧 `SceneIn` 加 `scatter` 表（空表 = 全 0 = 纯镜面），新增
+          `ScatterOut` / `scattered_on_adapter`。
+          ⚠️ 顺手补了一个**越界读隐患**：逐三角表（吸收 / 散射）空表时按**三角数**补零、非空但给短了
+          直接报错 —— 核内是 `absorb[t]` / `scatter_coef[t]` 直接索引，只补 1 个元素的话"空表 +
+          多个三角"就是越界读（反射那条以前也踩在这个坑边上）。
+          探针 `crates/vxl-phys-gpu/tests/acoustic_scatter_probe.rs`：一块 `y = 0` 的直角三角地板
+          （面积 2、重心 `(2/3, 0, 2/3)`），声源悬在重心正上方 1 m、听者距重心 2 m 按角度摆 ⇒
+          **手算就是 `gain = 0.5·cosθ`**：判据全用手写常数（`0.5` / `0.4330127` / `0.25` /
+          `0.12940952`），其中"**绕离法向 60° 恰好弱一半**"单独钉一次；再补四条否证/边界：听者不在
+          同侧 ⇒ 不产出；到听者那条腿被挡 ⇒ 不产出；**取最强那个面**（弱的小面排前面、放大 2 倍的
+          面排第二 ⇒ 必须选第二条；再把那个强面的系数设 0 ⇒ 落回小面）；同输入两跑**逐位一致** +
+          空散射表 ⇒ 一对也不产出。实测（本机 RTX 4060 Ti | Vulkan）：五段 7.3 s 全过；与
+          直达/反射/绕射三条探针一起复跑也全过。⚠️ CI 同样不覆盖（`--exclude vxl-phys-gpu`）。
       - id: cli_wired
         note: >-
           **工具链已接（2026-10-11）**：`vxl-phys-cli acoustic <voxel> [ticks]` 打声学路径流（JSONL，
