@@ -8,6 +8,8 @@
 //! - `cue <drop> [ticks]`：打印感官 cue 流（JSONL，一行一条，见 `vxl-phys-sense`）。
 //! - `acoustic <voxel> [ticks]`：打印声学路径流（JSONL，一行一条，见 `vxl-phys-acoustics`）——
 //!   **声学几何是声明的"房间"**（地板 + 带开口的墙），与碰撞体无关。
+//! - `audio <voxel> [ticks] <出.wav> [干信号.wav]`：把同一批声学路径渲染成**能听的 WAV**
+//!   （A6 离线音频渲染：逐带分频 + 按 `delay` 直叠；给了干信号就用它，否则用确定性的一记拍手）。
 //!
 //! 依赖面刻意压在"一个门面 + 两个域 crate"上：要让别人敢接，先得证明外部视角够用。
 
@@ -16,6 +18,7 @@
 // ⚠️ 本仓 `glob-gate` 对新文件的 `use ...::*` 是硬判 ⇒ 这里**逐项具名导入**（调用方自己那边
 // 用 `use vxl_phys::prelude::*;` 才是我们要给他们的便利，见 `docs/QUICKSTART.md`）。
 use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys_acoustics::audio as aco_audio;
 use vxl_phys_acoustics::{
     jsonl as aco_jsonl, AcousticConfig, AcousticGeometry, AcousticMedium, AcousticTier,
     AcousticsExt, Edge, LayeredMedium, Listener, Medium, Portal, SoundPath, BANDS,
@@ -160,6 +163,8 @@ pub fn run(args: &[String]) -> Result<String, String> {
         "cue" => cue_cmd(name, ticks),
         // **第二条输出侧域**：声学路径流（走声明的"房间"几何，与碰撞体无关）。
         "acoustic" => acoustic_cmd(name, ticks, realtime),
+        // **A6**：把同一批路径渲染成能听的 WAV（第 3 个位置参数 = 输出路径，第 4 个 = 干信号）。
+        "audio" => audio_cmd(name, ticks, path, pos.get(4).copied()),
         "help" => Ok(USAGE.to_string()),
         other => Err(format!("未知子命令 `{other}`\n{USAGE}")),
     }
@@ -358,6 +363,73 @@ fn acoustic_cmd(name: &str, ticks: usize, realtime: bool) -> Result<String, Stri
     Ok(aco_jsonl(&all))
 }
 
+/// `audio`：把声学路径流渲染成**能听的 WAV**（A6）。
+///
+/// 时间轴按**物理步长**排（`w.config.dt`，本仓固定 60 Hz）：第 `t` 个 tick 的那批路径从
+/// `t·dt` 秒开始叠 ⇒ 听到的是"这一串撞击在房间里"的声音。听者固定站在墙外侧（与 `acoustic`
+/// 同一位姿），声源逐 tick 从 `impacts()` 来（会动）。
+///
+/// 干信号默认是**确定性的一记拍手**（[`aco_audio::clap`]）；给了 `干信号.wav` 就用它
+/// （PCM16 / float32，**多声道降混**）。输出是 16 bit PCM 单声道 WAV。
+///
+/// ⚠️ 写盘前按峰值**归一**（只在峰值 >1 时缩，比例打印出来）：多声撞击会在时间轴上叠起来，
+/// 不管一下就会削顶 —— 削了顶的产物对表没意义。相对电平不受影响（整体一个因子）。
+fn audio_cmd(
+    name: &str,
+    ticks: usize,
+    out: Option<&str>,
+    dry_path: Option<&str>,
+) -> Result<String, String> {
+    let Some(out) = out else {
+        return Err("audio 需要输出路径：`audio <场景> [ticks] <出.wav> [干信号.wav]`".to_string());
+    };
+    let mut w = scene(name)?;
+    let (dt, rate) = (w.config.dt, aco_audio::AudioConfig::default().sample_rate);
+    let dry = match dry_path {
+        Some(p) => aco_audio::read_wav(p)?.samples,
+        None => aco_audio::clap(rate, 0.12),
+    };
+    let room = room();
+    let field = medium();
+    let geo = room.geom(Some(&field));
+    let cfg = AcousticConfig::default();
+    let listener = Listener {
+        pos: Vec3::new(0.0, 1.0, 3.0),
+        radius: 0.5,
+    };
+    // 尾巴留 2 s：最后一声撞击之后的直达 + 反射都装得下（本层没有混响尾巴，见 A6 模块头注）。
+    let seconds = ticks as f32 * dt + 2.0;
+    // ⚠️ 先算成变量再转 `usize`（`usize-gate` 认「括号里先乘再转 usize」那个写法，虽然这里是浮点）。
+    let frames = seconds * rate as f32;
+    let mut samples = vec![0.0f32; frames.max(1.0) as usize];
+    let (mut events, mut count) = (0usize, 0usize);
+    for t in 0..ticks {
+        w.step();
+        let mut tick: Vec<SoundPath> = Vec::new();
+        w.acoustic_cues(&geo, &listener, &cfg, &mut tick);
+        if tick.is_empty() {
+            continue;
+        }
+        events += 1;
+        count += tick.len();
+        aco_audio::mix_into(&mut samples, &tick, &dry, t as f32 * dt, rate);
+    }
+    let mut clip = aco_audio::Clip {
+        sample_rate: rate,
+        samples,
+    };
+    let peak = clip.peak();
+    let gain = if peak > 1.0 { 1.0 / peak } else { 1.0 };
+    clip.scale(gain);
+    aco_audio::write_wav(out, &clip)?;
+    Ok(format!(
+        "已写入 {out}：{:.2} s / {} 点 / {rate} Hz / {events} 声事件（{count} 条路径）/ \
+         峰值 {peak:.4}（归一 ×{gain:.4}）\n",
+        clip.seconds(),
+        clip.samples.len(),
+    ))
+}
+
 fn json_demo(name: &str, ticks: usize, w: &World, poses: &[Vec3]) -> String {
     let mut s = format!(
         "{{\"scene\":\"{name}\",\"ticks\":{ticks},\"bodies\":{},\"poses\":[",
@@ -492,9 +564,11 @@ vxl-phys —— vxl_phys 的命令行入口
   vxl-phys check <drop|stack|cloth|voxel> [ticks]  跑两遍、逐观测点比对哈希（CI 自检；不一致退出码 2）
   vxl-phys cue   <voxel> [ticks]                   感官 cue 流（JSONL；只有 voxel 是 provider 地面）
   vxl-phys acoustic <voxel> [ticks] [--realtime]   声学路径流（JSONL；声学几何是声明的房间，与碰撞体无关）
+  vxl-phys audio    <voxel> [ticks] <出.wav> [干信号.wav]  声学路径渲染成 WAV（A6；默认激励 = 确定性拍手）
   vxl-phys record <scene> [ticks] [基线.jsonl]      录观测点序列（JSONL；省略文件则打到 stdout）
   vxl-phys replay <scene> [ticks] <基线.jsonl>      与基线逐行对拍（跨机器/跨版本复现检查）
   vxl-phys help                                    本说明
 任意子命令都可加 `--json`：输出机器可读 JSON（cue 本来就是 JSONL）。
 `acoustic` 可加 `--realtime`：走实时档（候选与产出都收紧，确定性、不看时钟）。
+`audio` 的时间轴按物理步长排（每 tick 一声事件）；干信号给 WAV 就用它（PCM16/float32、多声道降混）。
 ";
