@@ -1,4 +1,4 @@
-// **声学核（GPU 档 M1/M2/M3/M4）**：每个 `(声源, 听者)` 对是一个独立工作项。
+// **声学核（GPU 档 M1/M2/M3/M4/M5）**：每个 `(声源, 听者)` 对是一个独立工作项。
 //
 // - `direct`（M1）：直达 —— 遮挡 + `dist/speed` 与 `1/dist²`；
 // - `reflect`（M2）：**一次镜面反射**（镜像源法）—— 逐三角找镜像路径，取**最强那条**
@@ -10,13 +10,18 @@
 //   要求声源/听者在**同侧**（法向朝声源那侧、两个余弦 > 0）且两条腿都不被挡，取**最强那个面**
 //   （平局按三角序号取小）；增益 `s·cos_in·cos_out·A/(d₁²·d₂²)`（`A = |cross|/2`）、
 //   时延 `(d₁+d₂)/speed`。
+// - `medium`（M5）：**介质积分**（水平层表 + **定步数中点采样**，无早退 ⇒ 逐位可复现）——
+//   逐子段取中点、查层表拿 `(c, α_低, α_中, α_高)`，累加 `len/c` 与 `Π exp(-α_b·len)`；
+//   输出行是 `(用时, 衰减低, 衰减中, 衰减高)`（**这一条没有 hit 位**，行首就是用时）。
+//   ⚠️ **折线（折射）由宿主逐段调用后组合**：时延**可加**、衰减**可乘** ⇒ 与"一次算完折线"
+//   等价（判据里钉了这条组合性）。层表按 y 升序、不重叠；取**第一命中**，没命中就是空气。
 //
 // 与 CPU 端 `vxl-phys-acoustics` 的对应那几条**同口径**：
 //   ① 遮挡：Möller–Trumbore，端点共面不计（±1e-6 的边界容差，与 CPU 同款）；
 //   ② 时延 = `dist / speed`、增益 = `1 / dist²`（球面扩散）；
 //   ③ 逐轴展开、不用内建 `dot`/`cross`（归约序未规定 —— 与 `body_integrate.wgsl` 同一纪律）。
 //
-// **量纲/边界**：只做这四条。介质积分（M5）、以及绕射里的 Fresnel 积分仍在 CPU 侧；这里要钉的是
+// **量纲/边界**：卡上就到这五条。绕射里的 Fresnel 积分、以及多次反射仍在 CPU 侧；这里要钉的是
 // "同一批输入 ⇒ 与 CPU 参考**逐对一致**（浮点容差、拓扑逐位）"。
 //
 // ⚠️ **两条刻意的独立口径**（别当成 bug）：① `reflect` 只按 `(1-a)` 打折，**不做** CPU 侧
@@ -30,10 +35,12 @@ struct Params {
     speed: f32,
     /// 衍射棱条数（0 ⇒ `diffract` 不产出 —— 无棱可绕）。
     n_edges: u32,
-    // ⚠️ uniform 结构体必须是 16 字节的倍数 ⇒ 补到 32 B（少一个 pad 就是整块错位）。
-    _p0: u32,
-    _p1: u32,
-    _p2: u32,
+    /// 介质层表条数（0 ⇒ 纯空气：`time = len/speed`、衰减退化 1）。
+    n_slabs: u32,
+    /// 每段的**定步数**（`0` 按 1 算）—— 定步数、无早退 ⇒ 逐位可复现。
+    medium_steps: u32,
+    /// uniform 结构体必须是 16 字节的倍数 ⇒ 补到 32 B（少一个 pad 就是整块错位）。
+    _pad: u32,
 };
 
 @group(0) @binding(0) var<uniform> P: Params;
@@ -48,6 +55,8 @@ struct Params {
 @group(0) @binding(7) var<storage, read> edge_coeff: array<f32>;
 /// 逐三角**散射系数**（**单频带口径**；`0` = 纯镜面 ⇒ 不参与散射）。
 @group(0) @binding(8) var<storage, read> scatter_coef: array<f32>;
+/// 介质层表：每条 **2 个 `vec4`**（`y_lo|y_hi|c|α_低`、`α_中|α_高|0|0`）。按 `y` 升序、不重叠。
+@group(0) @binding(9) var<storage, read> slabs: array<vec4<f32>>;
 
 /// Fermat 二分次数：定次数、无早退 ⇒ 逐位可复现（与 CPU 的 `FERMAT_ITERS` 同值）。
 const FERMAT_ITERS: u32 = 48u;
@@ -214,6 +223,54 @@ fn reflect(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
     out[i] = vec4<f32>(select(0.0, 1.0, best_gain > 0.0), best_delay, best_gain, best_tri);
+}
+
+/// 查层表：`y` 落在**第一命中**的层里 ⇒ 返回 `(c, α_低, α_中, α_高)`；没命中 ⇒ 空气（α 全 0）。
+fn slab_at(y: f32) -> vec4<f32> {
+    for (var k = 0u; k < P.n_slabs; k = k + 1u) {
+        let lo = slabs[k * 2u].x;
+        let hi = slabs[k * 2u].y;
+        if (y >= lo && y <= hi) {
+            return vec4<f32>(
+                slabs[k * 2u].z,
+                slabs[k * 2u].w,
+                slabs[k * 2u + 1u].x,
+                slabs[k * 2u + 1u].y,
+            );
+        }
+    }
+    return vec4<f32>(P.speed, 0.0, 0.0, 0.0);
+}
+
+/// **介质积分**（M5）：直线段 `srcs[i] → dsts[i]` 上按**定步数**取中点采样，累加用时与逐带衰减。
+///
+/// 输出行是 `(用时, 衰减低, 衰减中, 衰减高)` —— **这一条没有 hit 位**（直线段永远算得出来）。
+/// 折线（折射）不在这里：宿主逐段调用后**时延相加、衰减相乘**（两者都可分量 ⇒ 等价）。
+@compute @workgroup_size(64)
+fn medium(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= P.n_src * P.n_lst) {
+        return;
+    }
+    let a = srcs[i / P.n_lst].xyz;
+    let b = dsts[i % P.n_lst].xyz;
+    let seg = b - a;
+    let len = len3(seg);
+    var time = 0.0;
+    var att = vec3<f32>(1.0, 1.0, 1.0);
+    if (len > 1e-6) {
+        let steps = max(P.medium_steps, 1u);
+        let inv = 1.0 / f32(steps);
+        for (var k = 0u; k < steps; k = k + 1u) {
+            // 中点采样（与 CPU 的固定步长回退同法）：定步数、无早退 ⇒ 逐位可复现。
+            let p = a + seg * ((f32(k) + 0.5) * inv);
+            let m = slab_at(p.y);
+            let dl = len * inv;
+            time += dl / max(m.x, 1e-3);
+            att = att * vec3<f32>(exp(-m.y * dl), exp(-m.z * dl), exp(-m.w * dl));
+        }
+    }
+    out[i] = vec4<f32>(time, att.x, att.y, att.z);
 }
 
 /// 线段 `p→q` 是否被**任何**三角挡住（不带 `skip`：直达通视检查用）。
