@@ -27,7 +27,6 @@ fn tangential_target(
 
 /// 材质对的有效摩擦/恢复：摩擦按材质对组合（§4.4/§4.5）；静+动档 μ 随预解
 /// 相对切向速度在 [μk, μs] 线化过渡（vt 取首个接触点，确定性）。
-
 fn material_pair(bodies: &BodySet, m: &Manifold, a: usize, b: usize) -> (f32, f32) {
     let mat_a = material_of(bodies, a);
     let mat_b = material_of(bodies, b);
