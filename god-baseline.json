@@ -101,9 +101,9 @@
    "max_type_members": 23
   },
   "crates/vxl-phys-core/src/config.rs": {
-   "file_lines": 339,
+   "file_lines": 348,
    "max_fn_lines": 44,
-   "max_type_members": 32
+   "max_type_members": 33
   },
   "crates/vxl-phys-core/src/grid.rs": {
    "file_lines": 112,
@@ -996,8 +996,8 @@
    "max_type_members": 0
   },
   "crates/vxl-phys-solver/src/constraint.rs": {
-   "file_lines": 453,
-   "max_fn_lines": 107,
+   "file_lines": 454,
+   "max_fn_lines": 109,
    "max_type_members": 6
   },
   "crates/vxl-phys-solver/src/constraint/friction.rs": {
@@ -1013,6 +1013,11 @@
   "crates/vxl-phys-solver/src/island.rs": {
    "file_lines": 454,
    "max_fn_lines": 85,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys-solver/src/island/rolling.rs": {
+   "file_lines": 70,
+   "max_fn_lines": 57,
    "max_type_members": 0
   },
   "crates/vxl-phys-solver/src/joints.rs": {
@@ -1056,8 +1061,8 @@
    "max_type_members": 0
   },
   "crates/vxl-phys-solver/src/types.rs": {
-   "file_lines": 231,
-   "max_fn_lines": 28,
+   "file_lines": 238,
+   "max_fn_lines": 29,
    "max_type_members": 21
   },
   "crates/vxl-phys-solver/src/warm.rs": {
@@ -1518,6 +1523,11 @@
   "crates/vxl-phys/tests/rolling_probe.rs": {
    "file_lines": 80,
    "max_fn_lines": 45,
+   "max_type_members": 0
+  },
+  "crates/vxl-phys/tests/rolling_resistance_contracts.rs": {
+   "file_lines": 197,
+   "max_fn_lines": 41,
    "max_type_members": 0
   },
   "crates/vxl-phys/tests/rope_scene.rs": {

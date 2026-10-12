@@ -132,6 +132,14 @@ pub struct PhysConfig {
     pub ccd_extent_ratio: f32,
     /// §4.12 CCD 单 tick 最大扫描段数（确定性上限）。
     pub ccd_max_steps: u32,
+    /// **滚动阻力系数**（单位**米** = 等效力臂，0 = 关；默认 0 ⇒ 零换代）。
+    ///
+    /// 口径：接触面上绕**滚动方向**的一维阻力矩，上限 `roll_resistance · Σpn`
+    /// （与 Rapier 的 twist 行同构，只是轴取"当前滚动方向"而不是法向）。
+    /// 量纲说明：滚动阻力矩 `τ = μ_r·N`，`μ_r` 即"等效力臂"（真实材料 0.1–10 mm 量级）；
+    /// 球在倾角 θ 的坡上停住的条件是 `μ_r > r·tanθ`（半径越小越容易停）。
+    /// 逐材质版（沙/海绵 vs 钢）登记为后续片（`PHY-SCOPE-ROLLING-RESISTANCE`）。
+    pub roll_resistance: f32,
     /// §4.4 摩擦模型（默认材质；逐材质见 BodySet::materials）。
     pub friction: FrictionModel,
     /// §4.5 恢复系数 e ∈ `[0,1]`（默认材质；材质对取 max）。
@@ -233,6 +241,7 @@ impl Default for PhysConfig {
             friction: FrictionModel::Coulomb { mu: 0.5 },
             restitution: 0.0,
             restitution_threshold: 1.0,
+            roll_resistance: 0.0,
             baumgarte: 0.2,
             linear_slop: 0.005,
             contact_freq_hz: 30.0,

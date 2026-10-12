@@ -936,3 +936,45 @@ capabilities:
     notes: >
       SPEC §4.4 的"各向异性：两主轴 μ1/μ2 + 方向角（传送带/履带用）"到此闭环；
       "传送带"的两条路都通了：① 运动学体移动（C1，摩擦携带）；② 静止带面 + belt（A2，切向目标速度）。
+
+  # ── 滚动阻力（摩擦列收口的第二刀；扭转摩擦按物理边界有意不做） ──
+  - id: PHY-SCOPE-ROLLING-RESISTANCE
+    title: 滚动阻力（球/圆柱在坡上减速与停住）+ 扭转摩擦的有意不做
+    scope: included
+    implementation: implemented
+    implementation_path: crates/vxl-phys-solver/src/island.rs
+    evidence:
+      - id: impl_site
+        note: >
+          PhysConfig::roll_resistance（单位米 = 等效力臂，0 = 关，默认 0 ⇒ 零换代）；
+          island.rs::solve_rolling 是接触面上绕"当前滚动方向"（ω_rel 的切向分量）的一维角约束，
+          上限 roll_res · Σpn（与 Rapier 的 twist 行同构，只是轴取滚动方向）；
+          不做跨帧暖启动（阻尼项，暖数据布局不划算），累加器寿命 = 一个子步；
+          调用点在 roll_res > 0 时才进（默认档零成本）。
+      - id: tests
+        note: >
+          crates/vxl-phys/tests/rolling_resistance_contracts.rs 五条：R1 关档 = 纯滚动
+          a = 1.2091（解析 5g·sinθ/7 = 1.2168，θ=10°）；R2 开档 μ_r = 0.02 m、r = 0.3
+          ⇒ a = 0.7912（解析 0.7567）；R3 1° 缓坡被按住（关档对照滚出 0.99 m）；
+          R4 开着阻力时静置/纯滑动盒的角速度保持 0（不注入寄生角冲量）；
+          R5 扭转摩擦**有意不做**的边界：多接触点自转盒 300 tick 后 |ω| = 0（关/开档都一样
+          —— 点摩擦提供力臂），单点接触绕法向无力臂（物理事实）。
+      - id: zero_generation
+        note: >
+          零换代：默认 roll_resistance = 0 ⇒ 调用点不进、行为逐位不变 ——
+          determinism FINAL_HASH 0x655cdbf40ed7e800b5f46785f94fec1e 与 m0_gates 压力哈希
+          0xc23b81902a74b977c8e74e114cf9737a 与基线相同；5 个 vxl 金样 + 3 个 Rapier 对照金样全 PASS。
+      - id: not_done
+        note: >
+          逐材质版（沙/海绵 vs 钢的差异）未做（现为场景级全局档，与 PhysConfig.friction 同族的先例）；
+          滚动阻力 × 各向异性的叠加未做；扭转摩擦按 R5 的物理边界**不做**（多接触点已由点摩擦覆盖，
+          单点接触物理上无扭转力臂）。
+    required_evidence:
+      - implementation_path
+      - tests
+    decision_id: null
+    owner: maintainer
+    notes: >
+      口径来源：Rapier 0.35.3（本机 vendored）的 ContactWithTwistFriction —— 借它的"角约束 + 上限
+      = μ·Σ(pn·力臂)"结构，轴从法向换成滚动方向；它没有通用滚动阻力（只在车辆控制器里），
+      所以滚动阻力是本仓自定口径（等效力臂 μ_r，单位米）。
