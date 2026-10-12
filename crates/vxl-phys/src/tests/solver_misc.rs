@@ -257,8 +257,9 @@ fn ccd_stops_fast_sphere_at_thin_wall() {
 }
 
 #[test]
-fn ccd_disabled_by_default_keeps_slow_scene_unchanged() {
-    // 默认阈值 INFINITY：确定性场景与 M0 行为一致（回归守门）。
+fn ccd_selective_default_keeps_slow_scene_unchanged() {
+    // 默认档 = 选择性（10 m/s）：本场景所有体都远低于阈值（2 m 高落体 ⇒ ~6 m/s）
+    // ⇒ 扫掠不跑、与 M0 行为逐位一致（回归守门）。
     let run = || {
         let mut w = ground_world();
         for k in 0..6 {

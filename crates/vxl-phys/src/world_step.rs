@@ -342,7 +342,9 @@ impl World {
         stabilization_pass(self, dt);
         // 7) 选择性 CCD（§4.12）：对高速体回扫本子步位移，命中即钳位 + 清法向速度。
         let t0 = vxl_phys_core::probe::start();
-        self.ccd_pass(dt);
+        let flagged = self.ccd_pass(dt);
+        // P17：CCD 的位置钳位不看关节约束 ⇒ 钳完把相关关节的锚点位置级拉回（`flagged` 空 ⇒ 零成本）。
+        self.joints.project_after_ccd(&mut self.bodies, &flagged);
         self.timings.ccd_us += vxl_phys_core::probe::us(t0);
     }
 }
