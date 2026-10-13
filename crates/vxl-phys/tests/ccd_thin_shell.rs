@@ -309,3 +309,48 @@ fn mesh_shell_shape_run(shape: Shape) -> f32 {
     }
     w.bodies.position[b].x
 }
+
+/// **⑦ 体侧薄壳（P19 出口①的体侧，金丝雀）**：`Shape::TriMesh` **体**（动态薄板）× 1 m 盒 60 m/s。
+///
+/// 与 ④ 同病但走的是**体-体**通道（`mesh_pair`，不经 provider）：网格侧只采**网格顶点**
+/// （`point_shape` 那一路）⇒ 4×4 m 面的顶点全在盒外、盒的 8 个角离面 0.5 m ⇒ 零接触 ⇒ 穿。
+/// **修法同 ①（provider 侧已落的那一刀）**：在 `mesh_pair` 里补"**盒的 12 条棱 × 网格三角形**"的
+/// 相交测试（`seg_tri` 已在 `vxl-phys-terrain/src/mesh_cross.rs`，`TriGrid` 在 `narrow::mesh_mesh::mesh_grid`）。
+/// 本用例**故意钉住"坏"现状**：修好那天会红 ⇒ 翻面成"必须停在壳面上"。
+#[test]
+fn mesh_body_shell_hole_is_pinned_as_known_gap() {
+    let cfg = PhysConfig {
+        gravity: Vec3::ZERO,
+        max_linear_velocity: 5000.0,
+        ..PhysConfig::default()
+    };
+    let mut w = World::new(cfg);
+    let pts = vec![
+        Vec3::new(0.0, -2.0, -2.0),
+        Vec3::new(0.0, 2.0, -2.0),
+        Vec3::new(0.0, 2.0, 2.0),
+        Vec3::new(0.0, -2.0, 2.0),
+    ];
+    let mesh = w.add_trimesh(pts, vec![[0u32, 1, 2], [0, 2, 3]]);
+    // 薄板当**重**（密度大 ⇒ 撞不动），只当障碍用。
+    w.spawn_trimesh_body(mesh, Vec3::ZERO, Quat::IDENTITY, 1.0e5, 0.02);
+    let b = w.add_dynamic(
+        Shape::Box {
+            half: Vec3::splat(HALF),
+        },
+        Vec3::new(-5.0, 0.0, 0.0),
+        Quat::IDENTITY,
+        1000.0,
+    ) as usize;
+    w.bodies.linvel[b] = Vec3::new(60.0, 0.0, 0.0);
+    for _ in 0..TICKS {
+        w.step();
+    }
+    let x = w.bodies.position[b].x;
+    println!("⑦ 体侧薄壳：盒心末态 x = {x:.3}");
+    assert!(
+        x > 300.0,
+        "体侧薄壳**当前会穿**（实测末态 x = {x}）—— 这条是**故意**钉住坏现状的金丝雀；\
+         若它红了说明体侧那一刀落了（好事）：把本用例翻面成「必须停在壳面上」"
+    );
+}
