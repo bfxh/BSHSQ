@@ -103,14 +103,23 @@ fn main() {
     println!("FINAL x = {:.4}", w.bodies.position[b].x);
 }
 
-/// 撞击体形状（`PROBE_SHAPE`：box（默认）/ sphere / capsule）——半长/半径都取 `HALF` 量级，
-/// 这样"停在壳面上"的期望位置都是 `-HALF`（球 = 半径；胶囊的轴是 +Y ⇒ 那个方向的伸距只有半径）。
+/// 撞击体形状（`PROBE_SHAPE`：box（默认）/ sphere / capsule / cylinder / cone）——**沿 +X 的伸距**
+/// 除胶囊外都取 `HALF`（球 = 半径；圆柱/锥的半径 = `HALF`、半高 `HALF/2`；胶囊的轴是 +Y ⇒
+/// 伸距只有半径 `HALF/2`）⇒ "停在壳面上"的期望位置 = `−伸距`。
 fn probe_shape() -> Shape {
     match std::env::var("PROBE_SHAPE").unwrap_or_default().as_str() {
         "sphere" => Shape::Sphere { radius: HALF },
         "capsule" => Shape::Capsule {
             half_height: HALF * 0.5,
             radius: HALF * 0.5,
+        },
+        "cylinder" => Shape::Cylinder {
+            half_height: HALF * 0.5,
+            radius: HALF,
+        },
+        "cone" => Shape::Cone {
+            half_height: HALF * 0.5,
+            radius: HALF,
         },
         _ => Shape::Box {
             half: Vec3::splat(HALF),

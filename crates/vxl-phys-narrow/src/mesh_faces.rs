@@ -177,6 +177,35 @@ fn complement_faces(
             }
             round_faces(np, q, &s, radius, out);
         }
+        // 圆柱/圆锥：**表面点采样**（与 provider 侧 `ring_provider_contacts` 同集合：3 环 × 4 方位
+        // + 圆锥顶点）—— 深度取"带符号真距离"、法线按**体心**折，见 [`surface_hits`]。
+        Shape::Cylinder {
+            half_height,
+            radius,
+        } => {
+            let mut s = [Vec3::ZERO; 12];
+            ring_samples(
+                q,
+                &[(-half_height, radius), (0.0, radius), (half_height, radius)],
+                &mut s,
+            );
+            surface_hits(np, q, &s, out);
+        }
+        Shape::Cone {
+            half_height,
+            radius,
+        } => {
+            let mut s = [Vec3::ZERO; 13];
+            let rings = [
+                (-half_height, radius),
+                (-half_height * 0.5, radius * 0.75),
+                (0.0, radius * 0.5),
+            ];
+            ring_samples(q, &rings, &mut s[..12]);
+            let axis = Mat3::from_quat(q.other_rot).mul_vec3(Vec3::Y);
+            s[12] = q.other_pos + axis * half_height; // 圆锥顶点（与 provider 侧的 `tip` 同位）
+            surface_hits(np, q, &s, out);
+        }
         _ => {}
     }
     for &(n_o, depth, _, _) in out.iter() {
@@ -239,10 +268,8 @@ fn box_faces(np: &mut DefaultNarrowPhase, q: &Sampler<'_>, out: &mut Vec<(Vec3, 
     let rot = Mat3::from_quat(q.other_rot);
     let cs = box_corners(q.other_pos, &rot, half);
     let samples = box_surface_points(q.other_pos, &rot, half, &cs);
-    let pts = &np.ws.hull_pts[q.side];
-    let tris = np.meshes.tris(mesh);
-    let skin = np.skin;
-    surface_hits(pts, tris, &samples, q.other_pos, skin, out);
+    surface_hits(np, q, &samples, out);
+    let (pts, tris, skin) = (&np.ws.hull_pts[q.side], np.meshes.tris(mesh), np.skin);
     edge_hits(pts, tris, &cs, q.other_pos, skin, out);
 }
 
@@ -280,15 +307,23 @@ fn box_surface_points(pos: Vec3, rot: &Mat3, half: Vec3, cs: &[Vec3; 8]) -> [Vec
     s
 }
 
-/// **向 2**：表面点 × 三角（接近量；窗口 = **点到三角的真距离**，深度 = 带符号真距离）。
+/// **向 2**：体表面点 × 三角（接近量；窗口 = **点到三角的真距离** ≤ skin，深度 = **带符号**真距离）。
+///
+/// 法线按 **体心在哪一侧**折（`side_sign`）—— 采样点自己的那一侧在"正好贴上"时会来回跳
+/// （体心不会）⇒ 用体心。这条口径对**盒**（14 点）与**圆柱/锥**（环采样点）共用：
+/// 两者都是"无半径的表面点"⇒ 深度取带符号真距离（正 = 已越过面）；球/胶囊有半径 ⇒ 走 [`round_faces`]。
 fn surface_hits(
-    pts: &[Vec3],
-    tris: &[[u32; 3]],
-    samples: &[Vec3; 14],
-    center: Vec3,
-    skin: f32,
+    np: &DefaultNarrowPhase,
+    q: &Sampler<'_>,
+    samples: &[Vec3],
     out: &mut Vec<(Vec3, f32, Vec3, u32)>,
 ) {
+    let Shape::TriMesh { mesh, .. } = *q.mesh_shape else {
+        return;
+    };
+    let pts = &np.ws.hull_pts[q.side];
+    let tris = np.meshes.tris(mesh);
+    let (center, skin) = (q.other_pos, np.skin);
     for (pi, p) in samples.iter().enumerate() {
         for (ti, tri) in tris.iter().enumerate() {
             let (w0, w1, w2) = world_tri(pts, tri);
@@ -302,6 +337,20 @@ fn surface_hits(
             let depth = -(*p - hit).dot(n_out); // 正 = 已越过面（穿透）
             let feature = (1u32 << 20) + (pi as u32) * (1 << 12) + ti as u32;
             out.push((-n_out, depth, hit, feature));
+        }
+    }
+}
+
+/// **三环 × 4 方位**（环平面内 `+X` 起算 90° 均布）—— 与 provider 侧 `ring_provider_contacts`
+/// 同集合（局部系轴 = +Y：`(轴向位置, 环半径)`）。方位起点用**局部 +X** 而不是"世界最低方向"：
+/// 那条起算规则是为**支撑面**（重力方向）定的，网格碰撞的方向由网面决定 ⇒ 这里只需覆盖环上的极值。
+fn ring_samples(q: &Sampler<'_>, rings: &[(f32, f32); 3], out: &mut [Vec3]) {
+    let m = Mat3::from_quat(q.other_rot);
+    for (ri, (cy, rho)) in rings.iter().enumerate() {
+        for k in 0..4 {
+            let th = std::f32::consts::FRAC_PI_2 * k as f32;
+            let h = Vec3::new(rho * th.cos(), *cy, rho * th.sin());
+            out[ri * 4 + k] = q.other_pos + m.mul_vec3(h);
         }
     }
 }
