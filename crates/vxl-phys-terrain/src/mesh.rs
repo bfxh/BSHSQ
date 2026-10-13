@@ -18,7 +18,10 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use vxl_phys_core::interop::{InteropContact, ProviderColliders};
-use vxl_phys_core::{Aabb, Mat3, Quat, Vec3};
+use vxl_phys_core::{Aabb, Quat, Vec3};
+
+#[path = "mesh_cross.rs"]
+mod mesh_cross;
 
 /// **三角网查询的内部计数**（剖析用，`docs/EXPERIMENTS.md`「第三刀」）。全局原子、**按
 /// 1/256 采样**内外层（原子自增在大网格上会自己淹没被测段——本相 ~3.4k 次 closest/步）：
@@ -508,7 +511,7 @@ impl ProviderColliders for TriMesh {
         true
     }
 
-    /// 盒查询：8 顶点 + 6 面心（14 点采样；多点面接触稳定）。
+    /// 盒查询：8 顶点 + 6 面心 + **12 棱相交**（"面穿过体"，P19）—— 口径与实现见 `mesh_cross`。
     fn contacts_box(
         &self,
         id: u32,
@@ -518,27 +521,17 @@ impl ProviderColliders for TriMesh {
         skin: f32,
         out: &mut Vec<InteropContact>,
     ) -> bool {
-        let m = Mat3::from_quat(rot);
-        let mut any = false;
-        for sx in [-1.0f32, 1.0] {
-            for sy in [-1.0f32, 1.0] {
-                for sz in [-1.0f32, 1.0] {
-                    let w = pos + m.mul_vec3(Vec3::new(sx * half.x, sy * half.y, sz * half.z));
-                    any |= self.contacts_point(id, w, skin, out);
-                }
-            }
-        }
-        for axis in 0..3 {
-            let h = match axis {
-                0 => Vec3::new(half.x, 0.0, 0.0),
-                1 => Vec3::new(0.0, half.y, 0.0),
-                _ => Vec3::new(0.0, 0.0, half.z),
-            };
-            for s in [-1.0f32, 1.0] {
-                any |= self.contacts_point(id, pos + m.mul_vec3(h * s), skin, out);
-            }
-        }
-        any
+        mesh_cross::contacts_box(
+            self,
+            &mesh_cross::BoxQuery {
+                id,
+                half,
+                pos,
+                rot,
+                skin,
+            },
+            out,
+        )
     }
 }
 
