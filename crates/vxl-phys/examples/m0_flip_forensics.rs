@@ -65,6 +65,34 @@ fn flips_of(w: &mut World, dyns: &[usize], ticks: u32) -> (Vec<u32>, Vec<Vec<u64
 }
 
 /// 与 `id` 同处一个流形的邻居：`(体号, 醒着?, |v|)` —— **唤醒源候选**。
+/// **沉降质量**（本探针的第二个产出）：醒着体里"几乎不动"（`|v| < 1e-3`）的比例、
+/// 以及醒着体 `|v|` 的分位。**为什么看它**：`max_wake_flips` 只是**场景级混沌指标**
+/// （任何人一动"谁和谁同岛/命中相位"它就跳，实测 7 ↔ 10）⇒ 真正该问的是"这堆到底静止了没有"。
+fn settle_report(w: &World, dyns: &[usize]) -> (usize, usize, f32, f32, f32) {
+    let mut vs: Vec<f32> = dyns
+        .iter()
+        .filter(|&&i| w.bodies.awake[i])
+        .map(|&i| w.bodies.linvel[i].length())
+        .collect();
+    let awake = vs.len();
+    let stopped = vs.iter().filter(|&&v| v < 1e-3).count();
+    vs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let q = |p: f32| -> f32 {
+        if vs.is_empty() {
+            0.0
+        } else {
+            vs[((vs.len() - 1) as f32 * p) as usize]
+        }
+    };
+    (
+        awake,
+        stopped,
+        q(0.5),
+        q(0.9),
+        vs.last().copied().unwrap_or(0.0),
+    )
+}
+
 fn neighbours(w: &World, id: usize) -> Vec<(u32, bool, f32)> {
     let mut out = Vec::new();
     for m in w.manifolds() {
@@ -84,6 +112,17 @@ fn neighbours(w: &World, id: usize) -> Vec<(u32, bool, f32)> {
 }
 
 fn main() {
+    let (mut w, dyns) = build_gate_scene();
+    // 沉降质量时间序列（醒着数 / 其中"几乎不动"数 / p50 / p90 / max 的 |v|）。
+    println!("== 沉降质量：tick | 醒着数 | 醒着但 |v|<1e-3 | |v| p50 | p90 | max");
+    for t in 1..=600u32 {
+        w.step();
+        if t % 150 == 0 || t == 600 {
+            let (awake, stopped, p50, p90, mx) = settle_report(&w, &dyns);
+            println!("  t={t:3} | {awake:4} | {stopped:4} | {p50:.4} | {p90:.4} | {mx:.4}");
+        }
+    }
+    let _ = &mut w;
     let (mut w, dyns) = build_gate_scene();
     let (flips, when) = flips_of(&mut w, &dyns, 600);
     let mut order: Vec<usize> = (0..dyns.len()).collect();
