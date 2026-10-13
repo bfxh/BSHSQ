@@ -23,10 +23,9 @@
 //! 大体积体高速撞**薄**壁时采样可能**整段跳过皮肤带**、第一个接触样本就已深嵌 ⇒ 二分的下界
 //! 必须取"带内接触**之前**那个样本"，否则两端谓词同真、收敛到深嵌侧（实测最坏相位嵌 **0.1964 m**）。
 //!
-//! ⚠️ **已知仍存的洞**（不在本片范围，登记在 `OPEN-PROBLEMS.md` P19）：**小盒 × 大三角网薄壳**——
-//! 网格侧只采样**网格顶点/边 vs 体**，1 m 盒骑在 4×4 m 的三角形面上时盒的 8 个角离面 0.5 m、
-//! 网格顶点全在盒外 ⇒ 零接触 ⇒ 直接穿过（本文件不钉这条，`examples/ccd_thin_shell_probe.rs`
-//! 把它作为**留档用例**打印出来）。
+//! ⚠️ **已知仍存的洞**（登记在 `OPEN-PROBLEMS.md` P19）：**小盒 × 大三角网薄壳**——网格侧只采样
+//! **网格顶点/边 vs 体**，1 m 盒骑在 4×4 m 的三角形面上时盒的 8 个角离面 0.5 m、网格顶点全在盒外
+//! ⇒ 零接触 ⇒ 直接穿过。**④ 是它的金丝雀**（本仓惯例：缺口也钉住，修好那天它会红 ⇒ 翻面）。
 
 use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
 
@@ -131,5 +130,55 @@ fn thin_wall_is_phase_insensitive() {
     assert!(
         min_gap > -0.005,
         "16 个相位里最坏那档也要贴在表面（实测最小 {min_gap}）"
+    );
+}
+
+/// **④ 已知缺口金丝雀（P19）**：小盒 × **大三角网薄壳** —— **现在会穿**。
+///
+/// 场景：4×4 m 的单页三角网（薄壳语义，`depth = skin − 距离`）竖在 `x = 0`，1 m 盒 60 m/s 沿 +x。
+/// **为什么穿**：网格侧只把**网格顶点**当采样点，而 4×4 m 面的顶点全在盒外、盒的 8 个角离面 0.5 m
+/// ⇒ 两条路都零接触 ⇒ 网格根本"不知道"盒子骑在它上面。（同格的 `Shape::Box` 版是**绿**的，
+/// 见 ①②③ ⇒ 这是**网格侧采样向**的问题，不是 CCD 的。）
+///
+/// 本用例**故意钉住"坏"现状**（本仓缺口金丝雀惯例，见 `tests/shape_support_matrix.rs`）：
+/// 修好那天它会红 ⇒ 那时**翻面**成"必须停住"并更新 `OPEN-PROBLEMS.md` P19 的状态。
+/// 出口（P19 已写）：`vxl-phys-narrow/src/mesh_pair.rs` 的 `mesh_pair` 里补一遍
+/// **"体顶点 vs 网格三角形"**（`point_triangle` 已在同文件、`mesh_grid` 有邻域查询）。
+#[test]
+fn mesh_shell_hole_is_pinned_as_known_gap() {
+    let cfg = PhysConfig {
+        gravity: Vec3::ZERO,
+        max_linear_velocity: 5000.0,
+        ..PhysConfig::default()
+    };
+    let mut w = World::new(cfg);
+    let pts = vec![
+        Vec3::new(0.0, -2.0, -2.0),
+        Vec3::new(0.0, 2.0, -2.0),
+        Vec3::new(0.0, 2.0, 2.0),
+        Vec3::new(0.0, -2.0, 2.0),
+    ];
+    w.add_mesh(vxl_phys_terrain::mesh::TriMesh::new(
+        pts,
+        vec![[0u32, 1, 2], [0, 2, 3]],
+    ));
+    let b = w.add_dynamic(
+        Shape::Box {
+            half: Vec3::splat(HALF),
+        },
+        Vec3::new(-5.0, 0.0, 0.0),
+        Quat::IDENTITY,
+        1000.0,
+    ) as usize;
+    w.bodies.linvel[b] = Vec3::new(60.0, 0.0, 0.0);
+    for _ in 0..TICKS {
+        w.step();
+    }
+    let x = w.bodies.position[b].x;
+    println!("④ 金丝雀：盒心末态 x = {x:.3}");
+    assert!(
+        x > 300.0,
+        "P19 的洞**当前会穿**（实测末态 x = {x}）—— 这条是**故意**钉住坏现状的金丝雀；\
+         若它红了说明洞被修好了（好事）：把本用例翻面成「必须停住」并更新 P19"
     );
 }
