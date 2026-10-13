@@ -224,7 +224,7 @@ fn mesh_shell_run(d0: f32) -> f32 {
 /// | `Box`（0.4 立方） | **−0.402** | ✅ 拦住（`mesh_cross.rs` 的 12 棱相交：法线按**体心在哪一侧**定） |
 /// | `Sphere`（r=0.4） | 395.0 | ❌ 穿（**语义冲突**，见下） |
 /// | `Capsule`（0.4+0.2） | 395.0 | ❌ 穿（同上） |
-/// | `Cylinder` / `Cone` | 395.0 | ❌ 穿（同上 + 采样点在**表面**、窗口只有皮肤带 ⇒ 要一条"体积向"） |
+/// | `Cylinder` / `Cone` | **−0.400** | ✅ 拦住（本轮：环采样按**体心在哪一侧**折法线 + 间隙深度） |
 ///
 /// ⚠️ **球那档的根因（2026-10-14 查清，`examples/p19_mesh_shell_shapes_probe.rs`）**：
 /// 查询**本来就是**半径感知的（`depth = r − sd(球心)`），问题在 `sd` 用三角的**环绕法线**定符号
@@ -268,7 +268,7 @@ fn mesh_shell_shape_matrix() {
                 half_height: 0.4,
                 radius: 0.4,
             },
-            None,
+            Some(-0.40),
         ),
         (
             "Cone",
@@ -276,7 +276,7 @@ fn mesh_shell_shape_matrix() {
                 half_height: 0.4,
                 radius: 0.4,
             },
-            None,
+            Some(-0.40),
         ),
     ];
     let mut report = String::new();
@@ -429,16 +429,20 @@ fn box_vs_free_mesh_body_conserves_momentum() {
     );
 }
 
-/// **⑦″ 体侧薄壳 · 自带半径的两族（球/胶囊）**：同一格几何、同一速度，换成 `Sphere` / `Capsule`。
+/// **⑦″ 体侧薄壳 · 自带半径/回转体的四族（球 / 胶囊 / 圆柱 / 圆锥）**：同一格几何、同一速度。
 ///
-/// 修前与 ⑦ 同病：体-体通道只采**网顶点**，4×4 m 面的顶点全在**球/胶囊外面** ⇒ **整场零候选**
-/// ⇒ 395 m 直穿。修法 = `mesh_faces.rs::round_faces`（沿轴采样点 × 网三角，**半径感知**：
-/// `depth = radius − 到三角的真距离` + 法线折向采样点，与 provider 侧 `contacts_sphere` 同一把尺）。
-/// 实测：球停在 **−0.5000**（`vx` 归零）、胶囊停在 **−0.2500**。
+/// 修前与 ⑦ 同病：体-体通道只采**网顶点**，4×4 m 面的顶点全在这些体**外面** ⇒ **整场零候选**
+/// ⇒ 395 m 直穿。修法分两族（`mesh_faces.rs`）：
+/// - 球/胶囊 ⇒ [`round_faces`]（沿轴采样点 × 网三角，**半径感知**：`depth = radius − 真距离`）；
+/// - 圆柱/圆锥 ⇒ [`surface_hits`]（环采样点 = **表面点** ⇒ 深度取**带符号真距离**，法线按**体心**折；
+///   与 provider 侧 `ring_provider_contacts` 同集合）。
+///
+/// 实测（板撞不动）：球 **−0.5000**、胶囊 **−0.2500**、圆柱 **−0.5000**、圆锥 **−0.5000**
+/// （`vx` 全归零；修前四族都 395 m）。
 #[test]
 fn round_shapes_stop_on_mesh_body_shell() {
-    // (名字, 形状, **沿 +X 的尺寸**)——胶囊的轴是 +Y ⇒ 那个方向上的伸距只有 `radius`。
-    let cases: [(&str, Shape, f32); 2] = [
+    // (名字, 形状, **沿 +X 的尺寸**)——四族的轴都取 +Y ⇒ `radius` 就是 +X 上的伸距。
+    let cases: [(&str, Shape, f32); 4] = [
         ("球", Shape::Sphere { radius: HALF }, HALF),
         (
             "胶囊",
@@ -447,6 +451,22 @@ fn round_shapes_stop_on_mesh_body_shell() {
                 radius: HALF * 0.5,
             },
             HALF * 0.5,
+        ),
+        (
+            "圆柱",
+            Shape::Cylinder {
+                half_height: HALF * 0.5,
+                radius: HALF,
+            },
+            HALF,
+        ),
+        (
+            "圆锥",
+            Shape::Cone {
+                half_height: HALF * 0.5,
+                radius: HALF,
+            },
+            HALF,
         ),
     ];
     for (name, shape, extent) in cases {
