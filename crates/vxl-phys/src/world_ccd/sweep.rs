@@ -247,25 +247,32 @@ fn scan(
     let mut lo = 0.0f32;
     let mut prev_t = 0.0f32;
     let mut edge: Option<Hit> = None;
+    let mut edge_step = 0u32;
     for s in 1..=sc.steps {
         let t = sc.sub * s as f32;
         place_body(world, i, sc, t);
         place_targets(world, sc, targets, t);
+        vxl_phys_solver::stats::ccd_note_sample();
         let Some(h) = eval_hit(world, i, pairs, t) else {
             prev_t = t;
             continue;
         };
         if edge.is_none() {
             edge = Some(h);
+            edge_step = s;
             lo = prev_t;
         }
         if h.depth >= 0.0 {
+            vxl_phys_solver::stats::ccd_note_hit(edge_step, h.depth);
             return Some(Scan2 {
                 lo,
                 edge: edge.unwrap_or(h),
                 touch: Some(h),
             });
         }
+    }
+    if let Some(h) = edge {
+        vxl_phys_solver::stats::ccd_note_hit(edge_step, h.depth);
     }
     edge.map(|edge| Scan2 {
         lo,
@@ -345,6 +352,7 @@ fn refine_touch(world: &mut World, i: usize, sc: &Scan, targets: &[Target], sn: 
         if mid <= lo || mid >= hi {
             break;
         }
+        vxl_phys_solver::stats::ccd_note_refine();
         place_body(world, i, sc, mid);
         place_targets(world, sc, targets, mid);
         let touching = eval_hit(world, i, &one, mid).is_some_and(|x| !need_touch || x.depth >= 0.0);

@@ -26,7 +26,7 @@ pub use vxl_phys_narrow::heightfield::HeightField;
 pub use vxl_phys_narrow::{CompoundChild, ContactPoint, DefaultNarrowPhase, Manifold, NarrowPhase};
 pub use vxl_phys_replay::{Recorder, StateHash, Xxh3Hash};
 pub use vxl_phys_solver::joints::{Joint, JointKind, JointSet};
-pub use vxl_phys_solver::{ccd, warm_match_stats_take, ImpulseSolver};
+pub use vxl_phys_solver::{ccd, ccd_sweep_stats_take, warm_match_stats_take, ImpulseSolver};
 pub use vxl_phys_terrain::TerrainSet;
 
 // ── 按域拆出的子模块（子目录 src/）

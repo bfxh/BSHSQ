@@ -129,3 +129,70 @@ pub fn solve_accounting_take() -> (u64, u64, u64, u64) {
 /// 触发画像 = 留缝角点间歇接触，见 OPEN-PROBLEMS P1）；而塔的承重腿是持续
 /// 正深度接触、不受影响。**非距离判别式**（距离类门已实测分不开有害/必需匹配）。
 pub(crate) const FB_DEPTH_MIN: f32 = 0.0;
+
+// ---------------------------------------------------------------------------
+// **CCD 扫掠的亚步内记账**（2026-10-13，`OPEN-PROBLEMS.md` P20）：
+// 动-动一类的差异**从外部看不见**——tick 末端的埋深正好被皮肤带（离散接触允许的重叠）吃满。
+// 这组计数由 `vxl-phys` 的 `world_ccd/sweep.rs` 在扫掠里写、**只计数不参与决策 ⇒ 逐位中性**。
+// 放在本文件（本仓统计出口的家）⇒ `crates/vxl-phys/src/lib.rs` 不必新增一行 re-export。
+//
+// ⚠️ **必须是线程局部**（`thread_local!`，不是全局原子）：测试二进制里各用例**并行**跑（CI 的
+// debug 档就是这么跑的），全局计数会被邻居污染 —— 实测过：关档用例读到别的用例留下的
+// `(采样 316, 命中 7, 二分 56)`，两个用例一起红。扫掠本身在**调用 `step` 的那条线程**上跑
+// （CCD 不开岛级并行）⇒ 线程局部既隔离又完整。
+// ---------------------------------------------------------------------------
+
+thread_local! {
+    // 收口：`clippy::missing_const_for_thread_local` 对本行**误报**（已经写成显式 `const { … }`
+    // 仍报"can be made const"；rust-1.99）。计数是测试器械、不进 sim 决策路径 ⇒ 直接放行。
+    #[allow(clippy::missing_const_for_thread_local)]
+    static CCD_SWEEP: std::cell::Cell<(u64, u64, u64, u32, u64)> = const {
+        std::cell::Cell::new((0, 0, 0, 0, 0))
+    };
+}
+
+/// 读取并清零扫掠记账：`(采样数, 命中数, 二分迭代数, 命中样本最深穿透 m, 命中段号之和)`。
+pub fn ccd_sweep_stats_take() -> (u64, u64, u64, f32, u64) {
+    CCD_SWEEP.with(|c| {
+        let (s, h, r, d, st) = c.replace((0, 0, 0, 0, 0));
+        (s, h, r, f32::from_bits(d), st)
+    })
+}
+
+/// 记一次采样（扫掠热路径：只累加，不参与任何决策）。
+#[inline]
+pub fn ccd_note_sample() {
+    CCD_SWEEP.with(|c| {
+        c.set({
+            let mut v = c.get();
+            v.0 += 1;
+            v
+        })
+    });
+}
+
+/// 记一次命中（段号 + 命中样本的最深穿透）。
+#[inline]
+pub fn ccd_note_hit(step: u32, depth: f32) {
+    CCD_SWEEP.with(|c| {
+        let mut v = c.get();
+        v.1 += 1;
+        v.4 += step as u64;
+        if depth >= 0.0 && depth.to_bits() > v.3 {
+            v.3 = depth.to_bits();
+        }
+        c.set(v);
+    });
+}
+
+/// 记一次二分迭代。
+#[inline]
+pub fn ccd_note_refine() {
+    CCD_SWEEP.with(|c| {
+        c.set({
+            let mut v = c.get();
+            v.2 += 1;
+            v
+        })
+    });
+}

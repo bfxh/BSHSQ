@@ -1061,8 +1061,8 @@
    "max_type_members": 3
   },
   "crates/vxl-phys-solver/src/stats.rs": {
-   "file_lines": 132,
-   "max_fn_lines": 9,
+   "file_lines": 199,
+   "max_fn_lines": 11,
    "max_type_members": 0
   },
   "crates/vxl-phys-solver/src/types.rs": {

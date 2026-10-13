@@ -15,7 +15,7 @@
 //!
 //! 跑法：`cargo run --release -q -p vxl-phys --example ccd_dyn2_probe`
 
-use vxl_phys::{KinematicExt, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{ccd_sweep_stats_take, KinematicExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 旋翼半尺寸（薄板：0.6 × 0.4 × 0.02）。
 const BLADE: Vec3 = Vec3::new(0.6, 0.4, 0.02);
@@ -92,9 +92,18 @@ fn main() {
     // 相位扫描：旋翼初始角扫一圈（每档 15°）—— 逐档量"弹体有没有嵌进旋翼材料"。
     let (mut worst_deep, mut worst_phase) = (0.0f32, 0.0f32);
     let (mut min_end_x, mut max_speed) = (f32::INFINITY, 0.0f32);
+    // **亚步内**计数（P20 要的可观测量）：从外面只能看 tick 末端埋深，那个量被皮肤带吃满。
+    let (mut c_samples, mut c_hits, mut c_refine, mut c_step) = (0u64, 0u64, 0u64, 0u64);
+    let mut c_deep = 0.0f32;
     for k in 0..24 {
         let phase = k as f32 * 15.0;
         let (deep, x, sp) = run(phase);
+        let (s, h, r, d, st) = ccd_sweep_stats_take();
+        c_samples += s;
+        c_hits += h;
+        c_refine += r;
+        c_step += st;
+        c_deep = c_deep.max(d);
         if deep > worst_deep {
             worst_deep = deep;
             worst_phase = phase;
@@ -105,5 +114,13 @@ fn main() {
     }
     println!(
         "== 24 相位汇总：最坏埋深 {worst_deep:.4}（相位 {worst_phase:.1}°）、最小末态 x {min_end_x:.3}、最大末|v| {max_speed:.3}"
+    );
+    let avg_step = if c_hits > 0 {
+        c_step as f64 / c_hits as f64
+    } else {
+        0.0
+    };
+    println!(
+        "== 亚步内计数：采样 {c_samples}、命中 {c_hits}、二分 {c_refine}、命中样本最深穿透 {c_deep:.5} m、平均命中段号 {avg_step:.2}"
     );
 }
