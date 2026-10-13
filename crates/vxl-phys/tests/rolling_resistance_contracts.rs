@@ -37,7 +37,7 @@ fn slope_scene(theta_deg: f32, r: f32, roll: f32) -> (World, usize) {
     (w, s)
 }
 
-/// 从静止开始沿坡滚 `ticks`，返回 `(沿下坡方向的加速度, 末速, 位移)`。
+/// 从静止开始沿坡滚 `ticks`，返回 `(沿 下坡方向的加速度, 末速, 位移)`。
 fn roll_down(theta_deg: f32, r: f32, roll: f32, ticks: usize) -> (f32, f32, Vec3) {
     let (mut w, s) = slope_scene(theta_deg, r, roll);
     for _ in 0..60 {
