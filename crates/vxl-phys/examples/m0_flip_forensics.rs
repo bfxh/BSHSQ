@@ -43,13 +43,12 @@ fn build_gate_scene() -> (World, Vec<usize>) {
     (w, dyns)
 }
 
-fn main() {
-    // 第一趟：数每个动态体的 sleep→wake 翻转，找出头号体。
-    let (mut w, dyns) = build_gate_scene();
+/// 数每个动态体的 sleep→wake 翻转（`ticks` 步），并各留前几次翻转的 tick。
+fn flips_of(w: &mut World, dyns: &[usize], ticks: u32) -> (Vec<u32>, Vec<Vec<u64>>) {
     let mut prev: Vec<bool> = dyns.iter().map(|&i| w.bodies.awake[i]).collect();
     let mut flips = vec![0u32; dyns.len()];
     let mut when: Vec<Vec<u64>> = vec![Vec::new(); dyns.len()];
-    for _ in 0..600 {
+    for _ in 0..ticks {
         w.step();
         for (k, &i) in dyns.iter().enumerate() {
             let a = w.bodies.awake[i];
@@ -62,6 +61,31 @@ fn main() {
             prev[k] = a;
         }
     }
+    (flips, when)
+}
+
+/// 与 `id` 同处一个流形的邻居：`(体号, 醒着?, |v|)` —— **唤醒源候选**。
+fn neighbours(w: &World, id: usize) -> Vec<(u32, bool, f32)> {
+    let mut out = Vec::new();
+    for m in w.manifolds() {
+        let o = if m.a as usize == id {
+            Some(m.b)
+        } else if m.b as usize == id {
+            Some(m.a)
+        } else {
+            None
+        };
+        if let Some(o) = o {
+            let oi = o as usize;
+            out.push((o, w.bodies.awake[oi], w.bodies.linvel[oi].length()));
+        }
+    }
+    out
+}
+
+fn main() {
+    let (mut w, dyns) = build_gate_scene();
+    let (flips, when) = flips_of(&mut w, &dyns, 600);
     let mut order: Vec<usize> = (0..dyns.len()).collect();
     order.sort_by_key(|&k| std::cmp::Reverse(flips[k]));
     println!("== 翻转榜（前 8）：体 id / 翻转数 / 前几次翻转 tick");
@@ -84,27 +108,26 @@ fn main() {
         flips.iter().copied().max().unwrap_or(0)
     );
 
-    // 第二趟：只盯头号体，逐 tick 打"翻转那一刻它长什么样"（y 决定压在哪层）。
-    let top_k = order[0];
-    let top = dyns[top_k];
-    let (mut w, dyns) = build_gate_scene();
-    let _ = dyns;
+    // 第二趟：只盯头号体，打"翻转那一刻"的快照 + **谁在吵它**。
+    let top = dyns[order[0]];
+    let (mut w, _) = build_gate_scene();
     let mut prev = w.bodies.awake[top];
-    println!(
-        "== 头号体 {top}（{} 次翻转）的翻转快照：tick / y / |v| / |ω| / 睡眠计时器",
-        flips[top_k]
-    );
+    println!("== 头号体 {top} 的翻转快照：tick / y / |v| / |ω| / 计时器 / 接触 / 醒着的邻居");
     for _ in 0..600 {
         w.step();
         let a = w.bodies.awake[top];
         if a && !prev {
+            let nb = neighbours(&w, top);
+            let awake_n = nb.iter().filter(|n| n.1).count();
             println!(
-                "  t={:3}  y={:8.3}  |v|={:6.3}  |ω|={:6.3}  计时器={:5.2}",
+                "  t={:3}  y={:8.3}  |v|={:6.3}  |ω|={:6.3}  计时器={:5.2}  接触={} 醒着={awake_n}  邻居={:?}",
                 w.tick,
                 w.bodies.position[top].y,
                 w.bodies.linvel[top].length(),
                 w.bodies.angvel(top).length(),
-                w.bodies.sleep_timer[top]
+                w.bodies.sleep_timer[top],
+                nb.len(),
+                nb.iter().take(4).collect::<Vec<_>>()
             );
         }
         prev = a;
