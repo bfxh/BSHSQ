@@ -2882,11 +2882,21 @@ island_shock_budget`：shock 附加扫掠按岛给，仅当"岛内质量比 > 8 
    **网格顶点/边 vs 体**，没有"体顶点 vs 三角形面"这一向，也没有面-面裁剪。
 
 **判据与探针**：`examples/ccd_thin_shell_probe.rs` 把两格并列打印（Box 档绿、Mesh 档红留档）；
-`tests/ccd_thin_shell.rs` 只钉 Box 档三条（Mesh 档要等网格 TOI 落地）。
+`tests/ccd_thin_shell.rs` 钉 Box 档三条 + **④ 网格档金丝雀**（`mesh_shell_hole_is_pinned_as_known_gap`
+——**故意钉住"坏"现状**：1 m 盒 60 m/s 撞 4×4 m 单页薄壳，末态盒心 **x = 395.0 m** ⇒ 穿了；
+本仓惯例"缺口也钉住"（见 `tests/shape_support_matrix.rs`）⇒ **修好那天它会红，那就是翻面信号**）。
 
-**出口（待立）**：① 网格侧补"体顶点/棱 vs 三角形面"的采样向（与现有的顶点向并列）；
-② 薄壳的 TOI 需要**面法线有向**（现在 `depth = skin − 距离`、无内外判定 ⇒ 无法直接判"哪一侧"）；
-③ 缺口与 `PLAN-triangle-first-class.md` 的 T1（三角网一等几何）同源，建议并在那条线上做。
+**出口（照此实现即可，件都是现成的）**：
+1. **主修**：`vxl-phys-narrow/src/mesh_pair.rs` 的 `mesh_pair()` 里，除现有的"**网格顶点 vs 对方形状**"
+   （`fill_mesh_world` + `point_shape`）之外，再补一遍"**对方形状的顶点 vs 网格三角形**"——
+   对方顶点用同一份 `point_shape` 生成规则取（盒=8 角、球=最近点、胶囊/圆柱/锥=两端/边缘采样），
+   网格侧用 `mesh_grid` 的邻域查询取候选三角、`point_triangle`（**同文件已有**）给最近点/深度/法线；
+   法线口径按本文件头注的 `sgn` 约定（对方在 a 侧 / b 侧各一套）反向套用。
+2. **判据**：先把 `tests/ccd_thin_shell.rs` ④ 翻面成"必须停住"（现状 x = 395.0 ⇒ 应 ≤ 壳面附近），
+   再加一条相位扫描（同 ③ 的做法）。
+3. **配套**：薄壳的 TOI 需要**面法线有向**（现在 `depth = skin − 距离`、无内外判定 ⇒ 无法直接判
+   "哪一侧"）——本仓口径是"法线取环绕法线"，对**骑在面上**的体两侧都会生成接触（求解器自己分侧）。
+4. 缺口与 `PLAN-triangle-first-class.md` 的 T1（三角网一等几何）同源 ⇒ 若 T1 先动，本项并在那条线上做。
 
 ---
 
