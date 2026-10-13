@@ -214,3 +214,98 @@ fn mesh_shell_run(d0: f32) -> f32 {
     }
     w.bodies.position[b].x
 }
+
+/// **⑥ 形状矩阵（P19 覆盖面）**：同一面 4×4 m 薄壳、同一速度 60 m/s，逐形状量"末态中心 x"。
+///
+/// **实测（2026-10-13，60 m/s × 4×4 m 单页薄壳）**：
+///
+/// | 形状 | 末态中心 x | 判定 |
+/// |---|---|---|
+/// | `Box`（0.4 立方） | **−0.403** | ✅ 拦住（本片补的 12 棱相交） |
+/// | `Sphere`（r=0.4） | 395.0 | ❌ 穿过 |
+/// | `Capsule`（0.4+0.2） | 395.0 | ❌ 穿过 |
+/// | `Cylinder` / `Cone` | 395.0 | ❌ 穿过 |
+///
+/// ⚠️ **比预期更广**：`Sphere` 的查询是 `depth = r − sd(采样点)`（**自带半径 ⇒ 体积感知**）⇒
+/// 本该在 `|x| ≤ r + skin` 那段窗口里出接触，实测却一路穿过 ⇒ 失败不在"接触窗口"这一层
+/// （盒那档的病），**在更上游**（采样/标记/配对）—— 下一个要查的就是它（同一套逐子步探针）。
+/// `Cylinder`/`Cone` 在网格提供者里则是真"不受理"（无臂）⇒ 那是"没实现"，已登记支持矩阵。
+///
+/// 本用例把**实测**钉住：穿的那几档是**已知缺口**（修好那天会红 ⇒ 翻面），盒那档是回归护栏。
+#[test]
+fn mesh_shell_shape_matrix() {
+    let cases: [(&str, Shape, bool); 5] = [
+        (
+            "Box",
+            Shape::Box {
+                half: Vec3::splat(0.4),
+            },
+            true,
+        ),
+        ("Sphere", Shape::Sphere { radius: 0.4 }, false),
+        (
+            "Capsule",
+            Shape::Capsule {
+                half_height: 0.4,
+                radius: 0.2,
+            },
+            false,
+        ),
+        (
+            "Cylinder",
+            Shape::Cylinder {
+                half_height: 0.4,
+                radius: 0.4,
+            },
+            false,
+        ),
+        (
+            "Cone",
+            Shape::Cone {
+                half_height: 0.4,
+                radius: 0.4,
+            },
+            false,
+        ),
+    ];
+    let mut report = String::new();
+    for (name, shape, expected_blocked) in cases {
+        let x = mesh_shell_shape_run(shape);
+        let blocked = x < -0.2;
+        report.push_str(&format!(
+            "{name}: 末态 x = {x:9.3} {}\n",
+            if blocked { "拦住" } else { "穿过" }
+        ));
+        assert_eq!(
+            blocked, expected_blocked,
+            "形状矩阵变了：{name} 实测 x = {x}（期望 {expected_blocked}）\n{report}"
+        );
+    }
+    println!("⑥ 形状矩阵（60 m/s × 4×4 m 薄壳）：\n{report}");
+}
+
+/// 形状档的单次跑：同 `mesh_shell_run`，但体形状可换（球/胶囊/圆柱/锥的起始位置也跟着调）。
+fn mesh_shell_shape_run(shape: Shape) -> f32 {
+    let cfg = PhysConfig {
+        gravity: Vec3::ZERO,
+        max_linear_velocity: 5000.0,
+        ..PhysConfig::default()
+    };
+    let mut w = World::new(cfg);
+    let pts = vec![
+        Vec3::new(0.0, -2.0, -2.0),
+        Vec3::new(0.0, 2.0, -2.0),
+        Vec3::new(0.0, 2.0, 2.0),
+        Vec3::new(0.0, -2.0, 2.0),
+    ];
+    w.add_mesh(vxl_phys_terrain::mesh::TriMesh::new(
+        pts,
+        vec![[0u32, 1, 2], [0, 2, 3]],
+    ));
+    let b = w.add_dynamic(shape, Vec3::new(-5.0, 0.0, 0.0), Quat::IDENTITY, 1000.0) as usize;
+    w.bodies.linvel[b] = Vec3::new(60.0, 0.0, 0.0);
+    for _ in 0..TICKS {
+        w.step();
+    }
+    w.bodies.position[b].x
+}
