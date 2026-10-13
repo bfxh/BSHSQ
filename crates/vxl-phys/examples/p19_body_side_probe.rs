@@ -7,9 +7,11 @@
 //! "流形没到求解器"。逐 tick 打印**流形表 + 配对表**一看就清楚：修前是 `pair=true` 而
 //! **流形表恒空**（该对整场零候选），修后是"贴而不穿"的两体**同漂**（自由薄板的正常物理）。
 //!
-//! 跑法（`PROBE_V` 改初速、`PROBE_NO_CCD` 关 CCD、`PROBE_FIXED_PLATE=1` 把薄板设成撞不动）：
+//! 跑法（`PROBE_SHAPE` 选盒/球/胶囊、`PROBE_V` 改初速、`PROBE_NO_CCD` 关 CCD、
+//! `PROBE_FIXED_PLATE=1` 把薄板设成撞不动）：
 //! ```text
 //! cargo run -q --release -p vxl-phys --example p19_body_side_probe
+//! PROBE_SHAPE=sphere PROBE_FIXED_PLATE=1 cargo run -q --release -p vxl-phys --example p19_body_side_probe
 //! PROBE_FIXED_PLATE=1 cargo run -q --release -p vxl-phys --example p19_body_side_probe
 //! PROBE_V=61 PROBE_NO_CCD=1 cargo run -q --release -p vxl-phys --example p19_body_side_probe
 //! ```
@@ -49,14 +51,8 @@ fn main() {
         w.bodies.inv_mass[plate] = 0.0;
         w.bodies.local_inv_inertia[plate] = Vec3::ZERO;
     }
-    let b = w.add_dynamic(
-        Shape::Box {
-            half: Vec3::splat(HALF),
-        },
-        Vec3::new(-5.0, 0.0, 0.0),
-        Quat::IDENTITY,
-        1000.0,
-    ) as usize;
+    let shape = probe_shape();
+    let b = w.add_dynamic(shape, Vec3::new(-5.0, 0.0, 0.0), Quat::IDENTITY, 1000.0) as usize;
     let v0: f32 = std::env::var("PROBE_V")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -105,4 +101,19 @@ fn main() {
         }
     }
     println!("FINAL x = {:.4}", w.bodies.position[b].x);
+}
+
+/// 撞击体形状（`PROBE_SHAPE`：box（默认）/ sphere / capsule）——半长/半径都取 `HALF` 量级，
+/// 这样"停在壳面上"的期望位置都是 `-HALF`（球 = 半径；胶囊的轴是 +Y ⇒ 那个方向的伸距只有半径）。
+fn probe_shape() -> Shape {
+    match std::env::var("PROBE_SHAPE").unwrap_or_default().as_str() {
+        "sphere" => Shape::Sphere { radius: HALF },
+        "capsule" => Shape::Capsule {
+            half_height: HALF * 0.5,
+            radius: HALF * 0.5,
+        },
+        _ => Shape::Box {
+            half: Vec3::splat(HALF),
+        },
+    }
 }

@@ -73,7 +73,7 @@ pub(crate) fn mesh_vs_shape(np: &mut DefaultNarrowPhase, q: &Sampler<'_>, out: &
     let mut dom = vertex_dominant(np, q);
     let mut extra: Vec<(Vec3, f32, Vec3, u32)> = Vec::new();
     if dom.is_none() {
-        box_faces(np, q, &mut dom, &mut extra);
+        complement_faces(np, q, &mut dom, &mut extra);
     }
     let Some((n_dom, _)) = dom else {
         return;
@@ -145,17 +145,94 @@ fn collect_extra(extra: &[(Vec3, f32, Vec3, u32)], n_dom: Vec3, cand: &mut Vec<C
     }
 }
 
-/// **盒 × 网**的"另一向"采样（仅对方是盒时）：候选压进 `out`、主导面并进 `dom`。
+/// **对方形状的"另一向"补采样**（只在顶点向一无所获时调用）—— 按形状分派 + 把候选并进 `dom`。
 ///
-/// 返回的 `n_o` 与顶点向**同约定**（"把样本推出去"）：这里的样本是**盒** ⇒ 先把方向定义成
-/// "把盒推出去"（`n_tri × sign`，`sign` 由盒心在三角哪一侧定），再取反 —— 装配处按"网在哪
-/// 一侧"折算 `a→b`，而盒总是**不在网的槽上**（推导见 [`mesh_vs_shape`]）。
-fn box_faces(
+/// 两族的分工（都是"**体自身的几何 × 网三角**"这半向，顶点向补不了）：
+/// - **盒**（无半径）⇒ 必须拿形状自身的**表面点与棱**去撞网面（14 点 + 12 棱，见 [`box_faces`]）；
+/// - **球/胶囊**（自带半径）⇒ 沿轴采样点 × 三角即可：半径感知的窗口天然覆盖"体跨过网面"那一档，
+///   与 provider 侧 `contacts_sphere`（`depth = radius − |sd|` + 法线折向球心）**同一把尺**。
+///
+/// 其余形状（圆柱/锥）**如实不受理**：它们的采样点在**表面**上、窗口只有皮肤带那么宽
+/// （实测 ⑥ 形状矩阵里那两族在 provider 路与体侧路都还是直穿）；补齐要一条"体积向"，
+/// 属下一片（登记在 `OPEN-PROBLEMS.md` P19）。
+fn complement_faces(
     np: &mut DefaultNarrowPhase,
     q: &Sampler<'_>,
     dom: &mut Option<(Vec3, f32)>,
     out: &mut Vec<(Vec3, f32, Vec3, u32)>,
 ) {
+    match *q.other_shape {
+        Shape::Box { .. } => box_faces(np, q, out),
+        Shape::Sphere { radius } => round_faces(np, q, &[q.other_pos], radius, out),
+        Shape::Capsule {
+            half_height,
+            radius,
+        } => {
+            // 5 点沿轴均布（与 provider 侧 `capsule_provider_contacts` 同数同布）
+            let axis = Mat3::from_quat(q.other_rot).mul_vec3(Vec3::Y);
+            let mut s = [Vec3::ZERO; 5];
+            for (k, p) in s.iter_mut().enumerate() {
+                let t = k as f32 * 0.25;
+                *p = q.other_pos + axis * (half_height * (2.0 * t - 1.0));
+            }
+            round_faces(np, q, &s, radius, out);
+        }
+        _ => {}
+    }
+    for &(n_o, depth, _, _) in out.iter() {
+        if dom.is_none_or(|(_, d)| depth > d) {
+            *dom = Some((n_o, depth));
+        }
+    }
+}
+
+/// **球/胶囊的"另一向"**：沿轴采样点（每个都是半径 `radius` 的球）× 网三角。
+///
+/// 口径与 provider 侧 `contacts_sphere` **同一把尺**：`d` = 采样点到三角的**真距离**、
+/// 法线 = "**从面指向采样点**"（= 采样点在面哪一侧，**不引入内外判定**）、
+/// 深度 = `radius − d`（正 = 球面已越过面；负 = 预期接触，与 `depth > -skin` 的窗口同口径）。
+/// ⚠️ 不能用 `point_triangle` 的平面带符号距离当 `d`（那是旧 `contacts_sphere` 的坑：
+/// 背面来时报 `radius + 距离`）。
+fn round_faces(
+    np: &DefaultNarrowPhase,
+    q: &Sampler<'_>,
+    samples: &[Vec3],
+    radius: f32,
+    out: &mut Vec<(Vec3, f32, Vec3, u32)>,
+) {
+    let Shape::TriMesh { mesh, .. } = *q.mesh_shape else {
+        return;
+    };
+    let pts = &np.ws.hull_pts[q.side];
+    let tris = np.meshes.tris(mesh);
+    let skin = np.skin;
+    for (si, c) in samples.iter().enumerate() {
+        for (ti, tri) in tris.iter().enumerate() {
+            let (w0, w1, w2) = world_tri(pts, tri);
+            let Some((n_tri, _, hit)) = point_triangle(*c, w0, w1, w2) else {
+                continue;
+            };
+            let d = (*c - hit).length();
+            if d > radius + skin {
+                continue;
+            }
+            let n_out = if d > 1e-6 {
+                (*c - hit) * (1.0 / d)
+            } else {
+                n_tri
+            };
+            let feature = (3u32 << 20) + (si as u32) * (1 << 12) + ti as u32;
+            out.push((-n_out, radius - d, hit, feature));
+        }
+    }
+}
+
+/// **盒 × 网**的"另一向"采样：候选压进 `out`（主导面的合并由 [`complement_faces`] 统一做）。
+///
+/// 返回的 `n_o` 与顶点向**同约定**（"把样本推出去"）：这里的样本是**盒** ⇒ 先把方向定义成
+/// "把盒推出去"（`n_tri × sign`，`sign` 由盒心在三角哪一侧定），再取反 —— 装配处按"网在哪
+/// 一侧"折算 `a→b`，而盒总是**不在网的槽上**（推导见 [`mesh_vs_shape`]）。
+fn box_faces(np: &mut DefaultNarrowPhase, q: &Sampler<'_>, out: &mut Vec<(Vec3, f32, Vec3, u32)>) {
     let (Shape::Box { half }, Shape::TriMesh { mesh, .. }) = (*q.other_shape, *q.mesh_shape) else {
         return;
     };
@@ -167,11 +244,6 @@ fn box_faces(
     let skin = np.skin;
     surface_hits(pts, tris, &samples, q.other_pos, skin, out);
     edge_hits(pts, tris, &cs, q.other_pos, skin, out);
-    for &(n_o, depth, _, _) in out.iter() {
-        if dom.is_none_or(|(_, d)| depth > d) {
-            *dom = Some((n_o, depth));
-        }
-    }
 }
 
 /// 盒的 8 个角（世界点；下标按 `sx,sy,sz` 的字典序 ⇒ 与 [`BOX_EDGES`] 同序）。

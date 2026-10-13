@@ -217,39 +217,50 @@ fn mesh_shell_run(d0: f32) -> f32 {
 
 /// **⑥ 形状矩阵（P19 覆盖面）**：同一面 4×4 m 薄壳、同一速度 60 m/s，逐形状量"末态中心 x"。
 ///
-/// **实测（2026-10-13，60 m/s × 4×4 m 单页薄壳）**：
+/// **实测（2026-10-14 复测，60 m/s × 4×4 m 单页薄壳）**：
 ///
 /// | 形状 | 末态中心 x | 判定 |
 /// |---|---|---|
-/// | `Box`（0.4 立方） | **−0.403** | ✅ 拦住（本片补的 12 棱相交） |
-/// | `Sphere`（r=0.4） | 395.0 | ❌ 穿过 |
-/// | `Capsule`（0.4+0.2） | 395.0 | ❌ 穿过 |
-/// | `Cylinder` / `Cone` | 395.0 | ❌ 穿过 |
+/// | `Box`（0.4 立方） | **−0.402** | ✅ 拦住（`mesh_cross.rs` 的 12 棱相交：法线按**体心在哪一侧**定） |
+/// | `Sphere`（r=0.4） | 395.0 | ❌ 穿（**语义冲突**，见下） |
+/// | `Capsule`（0.4+0.2） | 395.0 | ❌ 穿（同上） |
+/// | `Cylinder` / `Cone` | 395.0 | ❌ 穿（同上 + 采样点在**表面**、窗口只有皮肤带 ⇒ 要一条"体积向"） |
 ///
-/// ⚠️ **比预期更广**：`Sphere` 的查询是 `depth = r − sd(采样点)`（**自带半径 ⇒ 体积感知**）⇒
-/// 本该在 `|x| ≤ r + skin` 那段窗口里出接触，实测却一路穿过 ⇒ 失败不在"接触窗口"这一层
-/// （盒那档的病），**在更上游**（采样/标记/配对）—— 下一个要查的就是它（同一套逐子步探针）。
-/// `Cylinder`/`Cone` 在网格提供者里则是真"不受理"（无臂）⇒ 那是"没实现"，已登记支持矩阵。
+/// ⚠️ **球那档的根因（2026-10-14 查清，`examples/p19_mesh_shell_shapes_probe.rs`）**：
+/// 查询**本来就是**半径感知的（`depth = r − sd(球心)`），问题在 `sd` 用三角的**环绕法线**定符号
+/// （固定朝向）⇒ 体**从背面来**时 `sd < 0` ⇒ 深度算成 `r + 距离`（实测 **0.825 m**）且法线指向
+/// "继续穿过去"的一侧 ⇒ CCD 的闭合判据（`vn < 0`）**永不成立**（逐子步：**360 采样 0 命中**）。
 ///
-/// 本用例把**实测**钉住：穿的那几档是**已知缺口**（修好那天会红 ⇒ 翻面），盒那档是回归护栏。
+/// ⚠️⚠️ **但"折法线"这条出口被既有契约挡下**（本轮实测）：折向球心会直接把
+/// `rest_height_contract.rs::mesh_sphere_inside_is_ejected` 推翻 —— 那条要求"球心在地表下
+/// 0.20 m、半径 0.45 的球必须被**顶出**到 y ≈ r"，而它靠的正是**环绕法线**给出的
+/// `depth = r + |sd|`（= 实体里**真的**穿透量）。同一个局部几何（球心在面背后）在
+/// **薄壳**（该推回来处）与**实体**（该推出去）下的正确方向**相反** ⇒ **不是漏配，是语义**：
+/// 要么给网格加"薄壳/实体"标记，要么接受"环绕法线必须朝向会来撞的那一侧"的约定。
+/// ⇒ 登记为 `OPEN-PROBLEMS.md` P19 的**待裁决**项（体侧不需要这条裁决：那边 `point_shape`
+/// 本来就是侧无关的口径，已在 ⑦″ 里修好并钉住）。
+///
+/// 本用例把**实测**钉住：拦住的那档是回归护栏（带期望停位），仍穿的三档是**已知缺口**
+/// （哪天被修好会红 ⇒ 翻面成 `Some(停位)`）。
 #[test]
 fn mesh_shell_shape_matrix() {
-    let cases: [(&str, Shape, bool); 5] = [
+    // (名字, 形状, 期望停位 x；`None` = 已知缺口、仍会穿)
+    let cases: [(&str, Shape, Option<f32>); 5] = [
         (
             "Box",
             Shape::Box {
                 half: Vec3::splat(0.4),
             },
-            true,
+            Some(-0.40),
         ),
-        ("Sphere", Shape::Sphere { radius: 0.4 }, false),
+        ("Sphere", Shape::Sphere { radius: 0.4 }, None),
         (
             "Capsule",
             Shape::Capsule {
                 half_height: 0.4,
                 radius: 0.2,
             },
-            false,
+            None,
         ),
         (
             "Cylinder",
@@ -257,7 +268,7 @@ fn mesh_shell_shape_matrix() {
                 half_height: 0.4,
                 radius: 0.4,
             },
-            false,
+            None,
         ),
         (
             "Cone",
@@ -265,21 +276,26 @@ fn mesh_shell_shape_matrix() {
                 half_height: 0.4,
                 radius: 0.4,
             },
-            false,
+            None,
         ),
     ];
     let mut report = String::new();
-    for (name, shape, expected_blocked) in cases {
+    for (name, shape, want) in cases {
         let x = mesh_shell_shape_run(shape);
-        let blocked = x < -0.2;
         report.push_str(&format!(
             "{name}: 末态 x = {x:9.3} {}\n",
-            if blocked { "拦住" } else { "穿过" }
+            if x > 100.0 { "穿过" } else { "拦住" }
         ));
-        assert_eq!(
-            blocked, expected_blocked,
-            "形状矩阵变了：{name} 实测 x = {x}（期望 {expected_blocked}）\n{report}"
-        );
+        match want {
+            Some(e) => assert!(
+                (x - e).abs() < 0.05,
+                "形状矩阵变了：{name} 实测 x = {x}（期望停在 {e} ± 0.05）\n{report}"
+            ),
+            None => assert!(
+                x > 100.0,
+                "已知缺口被修好了（好事）：{name} 实测 x = {x} —— 把它翻面成 `Some(停位)`\n{report}"
+            ),
+        }
     }
     println!("⑥ 形状矩阵（60 m/s × 4×4 m 薄壳）：\n{report}");
 }
@@ -311,10 +327,11 @@ fn mesh_shell_shape_run(shape: Shape) -> f32 {
 }
 
 /// **⑦ 的共用场景**：4×4 m 单页薄板（`Shape::TriMesh` **体**，位于 x = 0 平面、环绕法线 +X），
-/// 以及从 −X 以 60 m/s 撞来的 1 m 盒。`fixed` = 板设成**撞不动**（`inv_mass = 0`）。
+/// 以及从 −X 以 60 m/s 撞来的 `shape`（半长/半径取 `HALF`）。`fixed` = 板设成**撞不动**
+/// （`inv_mass = 0`）。
 ///
-/// 返回 `(world, 板体号, 盒体号)`。
-fn mesh_body_scene(fixed: bool) -> (World, usize, usize) {
+/// 返回 `(world, 板体号, 撞击体号)`。
+fn mesh_body_scene(fixed: bool, shape: Shape) -> (World, usize, usize) {
     let cfg = PhysConfig {
         gravity: Vec3::ZERO,
         max_linear_velocity: 5000.0,
@@ -333,14 +350,7 @@ fn mesh_body_scene(fixed: bool) -> (World, usize, usize) {
         w.bodies.inv_mass[plate] = 0.0; // 只当障碍：金丝雀原意（密度大 ⇒ 撞不动）
         w.bodies.local_inv_inertia[plate] = Vec3::ZERO;
     }
-    let b = w.add_dynamic(
-        Shape::Box {
-            half: Vec3::splat(HALF),
-        },
-        Vec3::new(-5.0, 0.0, 0.0),
-        Quat::IDENTITY,
-        1000.0,
-    ) as usize;
+    let b = w.add_dynamic(shape, Vec3::new(-5.0, 0.0, 0.0), Quat::IDENTITY, 1000.0) as usize;
     w.bodies.linvel[b] = Vec3::new(60.0, 0.0, 0.0);
     (w, plate, b)
 }
@@ -355,7 +365,12 @@ fn mesh_body_scene(fixed: bool) -> (World, usize, usize) {
 /// 判据 = **不许穿**（全程盒心 x ≤ −HALF + 余量）+ 撞上后法向速度被吃掉（60 → <1 m/s）。
 #[test]
 fn box_stops_on_mesh_body_shell() {
-    let (mut w, _plate, b) = mesh_body_scene(true);
+    let (mut w, _plate, b) = mesh_body_scene(
+        true,
+        Shape::Box {
+            half: Vec3::splat(HALF),
+        },
+    );
     let mut worst = f32::MIN;
     for _ in 0..TICKS {
         w.step();
@@ -382,7 +397,12 @@ fn box_stops_on_mesh_body_shell() {
 /// 实测：盒 60 → **1.6911**、板 0 → **1.8222**，`Σp` 60000 → **60001**（0.002%）。
 #[test]
 fn box_vs_free_mesh_body_conserves_momentum() {
-    let (mut w, plate, b) = mesh_body_scene(false);
+    let (mut w, plate, b) = mesh_body_scene(
+        false,
+        Shape::Box {
+            half: Vec3::splat(HALF),
+        },
+    );
     let m_box = 1.0 / w.bodies.inv_mass[b];
     let m_plate = 1.0 / w.bodies.inv_mass[plate];
     let p0 = m_box * 60.0;
@@ -407,4 +427,47 @@ fn box_vs_free_mesh_body_conserves_momentum() {
         (p1 - p0).abs() < 5.0e-3 * p0,
         "完全非弹性的动量账必须守住：Σp = {p1}（初 {p0}）"
     );
+}
+
+/// **⑦″ 体侧薄壳 · 自带半径的两族（球/胶囊）**：同一格几何、同一速度，换成 `Sphere` / `Capsule`。
+///
+/// 修前与 ⑦ 同病：体-体通道只采**网顶点**，4×4 m 面的顶点全在**球/胶囊外面** ⇒ **整场零候选**
+/// ⇒ 395 m 直穿。修法 = `mesh_faces.rs::round_faces`（沿轴采样点 × 网三角，**半径感知**：
+/// `depth = radius − 到三角的真距离` + 法线折向采样点，与 provider 侧 `contacts_sphere` 同一把尺）。
+/// 实测：球停在 **−0.5000**（`vx` 归零）、胶囊停在 **−0.2500**。
+#[test]
+fn round_shapes_stop_on_mesh_body_shell() {
+    // (名字, 形状, **沿 +X 的尺寸**)——胶囊的轴是 +Y ⇒ 那个方向上的伸距只有 `radius`。
+    let cases: [(&str, Shape, f32); 2] = [
+        ("球", Shape::Sphere { radius: HALF }, HALF),
+        (
+            "胶囊",
+            Shape::Capsule {
+                half_height: HALF * 0.5,
+                radius: HALF * 0.5,
+            },
+            HALF * 0.5,
+        ),
+    ];
+    for (name, shape, extent) in cases {
+        let (mut w, _plate, b) = mesh_body_scene(true, shape);
+        let mut worst = f32::MIN;
+        for _ in 0..TICKS {
+            w.step();
+            worst = worst.max(w.bodies.position[b].x);
+        }
+        let vx = w.bodies.linvel[b].x;
+        println!(
+            "⑦″ {name}：末态 x = {:.4}（全程最大 {worst:.4}）vx = {vx:.4}",
+            w.bodies.position[b].x
+        );
+        assert!(
+            worst + extent <= 0.02,
+            "{name} 不许穿过壳面（沿 +X 的尺寸 {extent}）：全程最大体心 x = {worst}"
+        );
+        assert!(
+            vx.abs() < 1.0,
+            "{name} 撞上后法向速度必须被吃掉（末态 vx = {vx}，初速 60）"
+        );
+    }
 }
