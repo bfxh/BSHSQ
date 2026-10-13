@@ -310,15 +310,11 @@ fn mesh_shell_shape_run(shape: Shape) -> f32 {
     w.bodies.position[b].x
 }
 
-/// **⑦ 体侧薄壳（P19 出口①的体侧，金丝雀）**：`Shape::TriMesh` **体**（动态薄板）× 1 m 盒 60 m/s。
+/// **⑦ 的共用场景**：4×4 m 单页薄板（`Shape::TriMesh` **体**，位于 x = 0 平面、环绕法线 +X），
+/// 以及从 −X 以 60 m/s 撞来的 1 m 盒。`fixed` = 板设成**撞不动**（`inv_mass = 0`）。
 ///
-/// 与 ④ 同病但走的是**体-体**通道（`mesh_pair`，不经 provider）：网格侧只采**网格顶点**
-/// （`point_shape` 那一路）⇒ 4×4 m 面的顶点全在盒外、盒的 8 个角离面 0.5 m ⇒ 零接触 ⇒ 穿。
-/// **修法同 ①（provider 侧已落的那一刀）**：在 `mesh_pair` 里补"**盒的 12 条棱 × 网格三角形**"的
-/// 相交测试（`seg_tri` 已在 `vxl-phys-terrain/src/mesh_cross.rs`，`TriGrid` 在 `narrow::mesh_mesh::mesh_grid`）。
-/// 本用例**故意钉住"坏"现状**：修好那天会红 ⇒ 翻面成"必须停在壳面上"。
-#[test]
-fn mesh_body_shell_hole_is_pinned_as_known_gap() {
+/// 返回 `(world, 板体号, 盒体号)`。
+fn mesh_body_scene(fixed: bool) -> (World, usize, usize) {
     let cfg = PhysConfig {
         gravity: Vec3::ZERO,
         max_linear_velocity: 5000.0,
@@ -332,8 +328,11 @@ fn mesh_body_shell_hole_is_pinned_as_known_gap() {
         Vec3::new(0.0, -2.0, 2.0),
     ];
     let mesh = w.add_trimesh(pts, vec![[0u32, 1, 2], [0, 2, 3]]);
-    // 薄板当**重**（密度大 ⇒ 撞不动），只当障碍用。
-    w.spawn_trimesh_body(mesh, Vec3::ZERO, Quat::IDENTITY, 1.0e5, 0.02);
+    let plate = w.spawn_trimesh_body(mesh, Vec3::ZERO, Quat::IDENTITY, 1.0e5, 0.02) as usize;
+    if fixed {
+        w.bodies.inv_mass[plate] = 0.0; // 只当障碍：金丝雀原意（密度大 ⇒ 撞不动）
+        w.bodies.local_inv_inertia[plate] = Vec3::ZERO;
+    }
     let b = w.add_dynamic(
         Shape::Box {
             half: Vec3::splat(HALF),
@@ -343,14 +342,69 @@ fn mesh_body_shell_hole_is_pinned_as_known_gap() {
         1000.0,
     ) as usize;
     w.bodies.linvel[b] = Vec3::new(60.0, 0.0, 0.0);
+    (w, plate, b)
+}
+
+/// **⑦ 体侧薄壳 · 撞不动的板（P19 出口①的体侧）**：`Shape::TriMesh` 体 × 1 m 盒 60 m/s。
+///
+/// **修前（曾是金丝雀）**：末态 x = **395 m**（直穿、`|v|` 一路 60）—— 体-体通道（`mesh_pair`）
+/// 只采**网顶点**（`point_shape` 那一路）⇒ 4×4 m 面的顶点全在盒外、盒的角点离面 0.5 m
+/// ⇒ 该对**整场零候选**（不是"接触没进解算集"，是**从来没生成过接触**）。
+/// **修法**（`mesh_pair → mesh_faces::box_faces`）：补"盒 14 个表面点 × 网三角"（接近量，
+/// 窗口 = 点到三角的**真空距** ≤ skin）与"盒 12 棱 × 网三角"（穿越量）两向，与提供者侧同口径。
+/// 判据 = **不许穿**（全程盒心 x ≤ −HALF + 余量）+ 撞上后法向速度被吃掉（60 → <1 m/s）。
+#[test]
+fn box_stops_on_mesh_body_shell() {
+    let (mut w, _plate, b) = mesh_body_scene(true);
+    let mut worst = f32::MIN;
     for _ in 0..TICKS {
         w.step();
+        worst = worst.max(w.bodies.position[b].x);
     }
     let x = w.bodies.position[b].x;
-    println!("⑦ 体侧薄壳：盒心末态 x = {x:.3}");
+    let vx = w.bodies.linvel[b].x;
+    println!("⑦ 体侧薄壳（板撞不动）：盒心末态 x = {x:.4}（全程最大 {worst:.4}）vx = {vx:.4}");
     assert!(
-        x > 300.0,
-        "体侧薄壳**当前会穿**（实测末态 x = {x}）—— 这条是**故意**钉住坏现状的金丝雀；\
-         若它红了说明体侧那一刀落了（好事）：把本用例翻面成「必须停在壳面上」"
+        worst < -HALF + 0.01,
+        "盒不许穿过壳面（壳面 x = 0、盒半长 {HALF}）：全程最大盒心 x = {worst}"
+    );
+    assert!(
+        vx.abs() < 1.0,
+        "撞上后法向速度必须被吃掉（末态 vx = {vx}，初速 60）"
+    );
+}
+
+/// **⑦′ 体侧薄壳 · 自由薄板（动量账）**：同一格几何，板是**自由动态体**（32000 kg 对 1000 kg）。
+///
+/// 这一档钉的是"**穿过去了没有**"与"**动量守恒不守恒**"这两件事 —— 自由板上盒**本来就该**
+/// 被板带走（完全非弹性：`v = m₁v₁/(m₁+m₂)`），所以判据**不能**是"盒停在原地"
+/// （上一轮把"盒没停住"当成"流形没到求解器"，是这条口径没分清 ⇒ 见 `OPEN-PROBLEMS.md` P19）。
+/// 实测：盒 60 → **1.6911**、板 0 → **1.8222**，`Σp` 60000 → **60001**（0.002%）。
+#[test]
+fn box_vs_free_mesh_body_conserves_momentum() {
+    let (mut w, plate, b) = mesh_body_scene(false);
+    let m_box = 1.0 / w.bodies.inv_mass[b];
+    let m_plate = 1.0 / w.bodies.inv_mass[plate];
+    let p0 = m_box * 60.0;
+    // 不许穿：盒的**前缘**（+HALF）任何一 tick 都不许跑到板的前方（余量 4·skin）。
+    let mut worst_gap = f32::MIN;
+    for _ in 0..TICKS {
+        w.step();
+        let gap = w.bodies.position[b].x + HALF - w.bodies.position[plate].x;
+        worst_gap = worst_gap.max(gap);
+    }
+    let p1 = m_box * w.bodies.linvel[b].x + m_plate * w.bodies.linvel[plate].x;
+    println!(
+        "⑦′ 自由薄板：盒 vx = {:.4}、板 vx = {:.4}；Σp = {p1:.1}（初 {p0:.1}）；最大前缘越界 = {worst_gap:.4}",
+        w.bodies.linvel[b].x,
+        w.bodies.linvel[plate].x
+    );
+    assert!(
+        worst_gap < 4.0 * PhysConfig::default().contact_skin,
+        "盒前缘不许越过板面（最大越界 {worst_gap}）"
+    );
+    assert!(
+        (p1 - p0).abs() < 5.0e-3 * p0,
+        "完全非弹性的动量账必须守住：Σp = {p1}（初 {p0}）"
     );
 }

@@ -4,7 +4,8 @@
 //! （只准减）⇒ "还会继续长的采样代码"按 `provider.rs` 的先例另起一个域文件，那边只留分发。
 //!
 //! 口径（**先写清再实现**）：
-//! - **非凸 ⇒ 不进 GJK/EPA**（`support_of` 如实返回 `None`）⇒ 一律走**逐顶点采样**；
+//! - **非凸 ⇒ 不进 GJK/EPA**（`support_of` 如实返回 `None`）⇒ 一律走**逐顶点采样**
+//!   （`mesh_faces.rs`；**盒**另补"表面 14 点 / 12 棱 × 网三角"两向 —— P19 体侧，2026-10-14）；
 //! - **顶点即样本**：一个顶点 = 一个候选接触点（与外壳的点云采样同构）；法线取**对方几何**在该点
 //!   的外法线（提供者点查询/解析最近点给），深度取**沿该法线的穿透**（正 = 穿透，负 = 预期接触）；
 //! - **流形法线 = a→b**：对方给的是"从它表面朝外"的法线 ⇒ 只当**对方是 a 侧**时才需要翻转
@@ -15,6 +16,10 @@
 //! 在后续片，逐条登记在 `docs/SURVEY-SHAPE-SUPPORT-MATRIX.md` 的矩阵表里（**不是静默**：
 //! `crates/vxl-phys/tests/shape_support_matrix.rs` 的缺口金丝雀钉住现状）。
 use super::*;
+
+// mesh 域的采样本体（顶点向的两遍 + 盒的"另一向"）—— 理由见该文件头注。
+#[path = "mesh_faces.rs"]
+mod mesh_faces;
 
 /// 填充**三角网的世界点缓存**（side：0 = 对侧 a、1 = 侧 b）。返回 `true` = 该形状是三角网
 /// 且缓存已就绪（顶点列在 `ws.hull_pts[side]`）。
@@ -126,44 +131,18 @@ pub(crate) fn mesh_pair(
     if !fill_mesh_world(np, side, body, mesh_shape, mpos, mrot) {
         return;
     }
-    let n_pts = np.ws.hull_pts[side].len();
-    // ① 主导面 = 最深候选的法线
-    let mut dom: Option<(Vec3, f32)> = None;
-    for k in 0..n_pts {
-        let Some((n_o, depth, _)) = point_shape(np.ws.hull_pts[side][k], oshape, opos, orot) else {
-            continue;
-        };
-        if depth > -np.skin && dom.is_none_or(|(_, d)| depth > d) {
-            dom = Some((n_o, depth));
-        }
-    }
-    let Some((n_dom, _)) = dom else {
-        return;
-    };
-    // ② 同面候选（点-盒角点可能同时落在两张面上 ⇒ 只留主导面，免得多法线混进同一流形）
-    np.ws.cand.clear();
-    for k in 0..n_pts {
-        let Some((n_o, depth, hit)) = point_shape(np.ws.hull_pts[side][k], oshape, opos, orot)
-        else {
-            continue;
-        };
-        if depth > -np.skin && n_o.dot(n_dom) > 0.9 {
-            np.ws.cand.push(ContactPoint {
-                point: hit,
-                depth,
-                feature: k as u32 + 1, // 顶点序稳定 ⇒ 跨帧可续接 warm
-            });
-        }
-    }
-    if np.ws.cand.is_empty() || !crate::prims::select_contacts(np) {
-        return;
-    }
-    out.push(Manifold {
+    // 采样本体（两向补采样在内）在 `mesh_faces.rs`：本文件受 god 门行数棘轮 ⇒ 只留薄入口。
+    let q = mesh_faces::Sampler {
+        side,
+        mesh_shape,
+        other_shape: oshape,
+        other_pos: opos,
+        other_rot: orot,
+        mesh_is_a,
         a,
         b,
-        normal: if mesh_is_a { -n_dom } else { n_dom },
-        points: ContactPoints::from_slice(&np.ws.cand),
-    });
+    };
+    mesh_faces::mesh_vs_shape(np, &q, out);
 }
 
 /// **三角网 × 高度场**：逐顶点采样（与外壳的地形腿 `hull_pair` 的 L1 分支**同构**）。
