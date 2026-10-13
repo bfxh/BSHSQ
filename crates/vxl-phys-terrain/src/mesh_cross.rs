@@ -125,18 +125,18 @@ fn surface_crossing(
     if r > 8.0 * g.bin {
         return false;
     }
-    let cell = |p: f32, o: f32| -> i64 { ((p - o) / g.bin).floor() as i64 };
+    let bin_of = |p: f32, o: f32| -> i64 { ((p - o) / g.bin).floor() as i64 };
     let (x0, x1) = (
-        cell(center.x - r, g.origin.x),
-        cell(center.x + r, g.origin.x),
+        bin_of(center.x - r, g.origin.x),
+        bin_of(center.x + r, g.origin.x),
     );
     let (y0, y1) = (
-        cell(center.y - r, g.origin.y),
-        cell(center.y + r, g.origin.y),
+        bin_of(center.y - r, g.origin.y),
+        bin_of(center.y + r, g.origin.y),
     );
     let (z0, z1) = (
-        cell(center.z - r, g.origin.z),
-        cell(center.z + r, g.origin.z),
+        bin_of(center.z - r, g.origin.z),
+        bin_of(center.z + r, g.origin.z),
     );
     let mut any = false;
     for x in x0.max(0)..=x1.min(g.dims.0 as i64 - 1) {
