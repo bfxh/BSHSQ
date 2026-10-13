@@ -133,25 +133,57 @@ fn thin_wall_is_phase_insensitive() {
     );
 }
 
-/// **④ 已知缺口金丝雀（P19）**：小盒 × **大三角网薄壳** —— **现在会穿**。
+/// **④ 薄壳：面穿过体（P19，已修 2026-10-13）**：小盒 × **大三角网薄壳** —— 必须**停在壳面上**。
 ///
-/// 场景：4×4 m 的单页三角网（薄壳语义，`depth = skin − 距离`）竖在 `x = 0`，1 m 盒 60 m/s 沿 +x。
-/// **为什么穿**：网格侧只把**网格顶点**当采样点，而 4×4 m 面的顶点全在盒外、盒的 8 个角离面 0.5 m
-/// ⇒ 两条路都零接触 ⇒ 网格根本"不知道"盒子骑在它上面。（同格的 `Shape::Box` 版是**绿**的，
-/// 见 ①②③ ⇒ 这是**网格侧采样向**的问题，不是 CCD 的。）
+/// 场景：4×4 m 的单页三角网竖在 `x = 0`，1 m 盒 60 m/s 沿 +x。
 ///
-/// **根因（2026-10-13 复诊）**：不是"采样点不够"—— provider 的 `contacts_box` **本来就采 8 角 + 6 面心**
-/// （`vxl-phys-terrain/src/mesh.rs`）。真因是**"面穿过体"的接触窗口只有皮肤带那么宽**：面心到面的
-/// 距离 = `|盒心 x|`，要 `|x| ≤ skin(0.02)` 才出接触 ⇒ **窗口 0.04 m**，而盒每 tick 走 1 m、
-/// CCD 采样步长 0.25 m ⇒ 两边都**跳过**它。（对比：实心目标那一档的窗口 = 体沿法向尺寸 +
-/// 目标厚度 + 2·skin ≥ 4 个采样步 ⇒ 必被采到，见本文件 ①②③。）
+/// **修前**：盒**直穿**（末态盒心 **x = 395.0 m**，金丝雀曾把它钉住）。
+/// **根因**：`contacts_box` 的 14 点采样（8 角 + 6 面心）量的都是"**点到面**的距离" —— 体骑在面两侧时，
+/// 面心到面的距离 = `|盒心 x|` ⇒ 只有 `|x| ≤ skin(0.02)` 才出接触 ⇒ **接触窗口 = 皮肤带宽**（0.04 m），
+/// 而盒每 tick 走 1 m、CCD 采样步长 0.25 m ⇒ **离散管线与 CCD 都整段跳过**。
+/// **修法**（`vxl-phys-terrain/src/mesh.rs` 的 `contacts_surface_crossing`）：补一遍"**盒的 12 条棱 ×
+/// 网格三角形**"的相交测试（Möller–Trumbore，`seg_tri`），命中即产出一条接触 ⇒ 窗口回到
+/// "**体沿法向尺寸**"（1 m ⇒ ≥4 个采样步）⇒ 离散与 CCD 都能接住。
+/// 接触口径：法线 = 三角环绕法线 × `sign`（`sign` 由"体心在三角哪一侧"定 ⇒ 推回**来的一侧**，
+/// 不引入内外判定）、`depth = skin`、`feature = (1<<20) + ti`（与点采样的 `ti+1` 错开）。
 ///
-/// 本用例**故意钉住"坏"现状**（本仓缺口金丝雀惯例，见 `tests/shape_support_matrix.rs`）：
-/// 修好那天它会红 ⇒ 那时**翻面**成"必须停住"并更新 `OPEN-PROBLEMS.md` P19 的状态。
-/// 出口（P19 已写）：给网格接触补"**面穿过体**"的判据（体棱/体面 vs 网格三角形的**相交**测试，
-/// 法线取该三角的环绕法线、符号用 `n·(体心 − 面)` 定），窗口就回到"体沿法向尺寸" ⇒ 两边都能接住。
+/// ⚠️ 本档只覆盖**盒**；球/胶囊/圆柱/锥的"面穿过体"仍缺（登记在 `SURVEY-SHAPE-SUPPORT-MATRIX.md`
+/// 与 `tests/shape_support_matrix.rs` 的矩阵/金丝雀里，**不是静默**）。
 #[test]
-fn mesh_shell_hole_is_pinned_as_known_gap() {
+fn mesh_shell_stops_the_box() {
+    let x = mesh_shell_run(-5.0);
+    println!("④ 薄壳：盒心末态 x = {x:.4}");
+    assert!(
+        (-0.7..=-0.3).contains(&x),
+        "必须停在壳面上（盒心 ≈ −0.5）：实测 x = {x}（修前是 +395 直穿）"
+    );
+    assert!(
+        x + HALF <= 0.02,
+        "盒的前缘不许越过壳面（前缘 {}）：实测 x = {x}",
+        x + HALF
+    );
+}
+
+/// **⑤ 薄壳 × 相位扫描**：起始 x 偏移扫过**一整段采样长**（0.25 m，16 档）—— 修好后每一档都要停住。
+/// （修前这一档会给出 16 个"直穿到 300 m 开外"的读数 ⇒ 这是这条修复的**覆盖面判据**。）
+#[test]
+fn mesh_shell_stops_the_box_across_phases() {
+    let (mut worst, mut worst_k) = (f32::NEG_INFINITY, 0usize);
+    for k in 0..16 {
+        let x = mesh_shell_run(-5.0 + k as f32 * 0.25 / 16.0);
+        if x > worst {
+            worst = x;
+            worst_k = k;
+        }
+    }
+    assert!(
+        worst <= -0.3,
+        "16 个相位里最坏那档也必须停住（相位 {worst_k} 实测盒心 x = {worst}）"
+    );
+}
+
+/// 薄壳档的单次跑：`d0` = 盒心起始 x，返回末态盒心 x。
+fn mesh_shell_run(d0: f32) -> f32 {
     let cfg = PhysConfig {
         gravity: Vec3::ZERO,
         max_linear_velocity: 5000.0,
@@ -172,7 +204,7 @@ fn mesh_shell_hole_is_pinned_as_known_gap() {
         Shape::Box {
             half: Vec3::splat(HALF),
         },
-        Vec3::new(-5.0, 0.0, 0.0),
+        Vec3::new(d0, 0.0, 0.0),
         Quat::IDENTITY,
         1000.0,
     ) as usize;
@@ -180,11 +212,5 @@ fn mesh_shell_hole_is_pinned_as_known_gap() {
     for _ in 0..TICKS {
         w.step();
     }
-    let x = w.bodies.position[b].x;
-    println!("④ 金丝雀：盒心末态 x = {x:.3}");
-    assert!(
-        x > 300.0,
-        "P19 的洞**当前会穿**（实测末态 x = {x}）—— 这条是**故意**钉住坏现状的金丝雀；\
-         若它红了说明洞被修好了（好事）：把本用例翻面成「必须停住」并更新 P19"
-    );
+    w.bodies.position[b].x
 }
