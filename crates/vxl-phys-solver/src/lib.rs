@@ -29,7 +29,7 @@ mod helpers;
 mod island;
 mod shock_budget;
 mod solver_impl;
-mod stats;
+pub mod stats;
 mod types;
 mod warm;
 mod warm_data;

@@ -129,3 +129,56 @@ pub fn solve_accounting_take() -> (u64, u64, u64, u64) {
 /// 触发画像 = 留缝角点间歇接触，见 OPEN-PROBLEMS P1）；而塔的承重腿是持续
 /// 正深度接触、不受影响。**非距离判别式**（距离类门已实测分不开有害/必需匹配）。
 pub(crate) const FB_DEPTH_MIN: f32 = 0.0;
+
+// ---------------------------------------------------------------------------
+// **CCD 扫掠的亚步内记账**（2026-10-13，`OPEN-PROBLEMS.md` P20）：
+// 动-动一类的差异**从外部看不见**——tick 末端的埋深正好被皮肤带（离散接触允许的重叠）吃满。
+// 这三个计数器由 `vxl-phys` 的 `world_ccd/sweep.rs` 在扫掠里写、**只计数不参与决策 ⇒ 逐位中性**。
+// 放在本文件（本仓统计出口的家）⇒ `crates/vxl-phys/src/lib.rs` 不必新增一行 re-export。
+// ---------------------------------------------------------------------------
+
+/// 扫掠**采样**总数（一个采样 = 一趟窄相）。
+pub static CCD_SWEEP_SAMPLES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// 命中（首个"正在接近"的接触）次数。
+pub static CCD_SWEEP_HITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// TOI 细化的**二分迭代**总数。
+pub static CCD_SWEEP_REFINE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// 命中样本上的**最深穿透**（`f32` 位模式；只对非负值 `fetch_max` ⇒ IEEE 序与整数序一致）。
+pub static CCD_SWEEP_HIT_DEPTH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// 命中的**段号**之和（判"命中得早/晚"；除以命中数即平均命中段号）。
+pub static CCD_SWEEP_HIT_STEP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// 读取并清零扫掠记账：`(采样数, 命中数, 二分迭代数, 命中样本最深穿透 m, 命中段号之和)`。
+pub fn ccd_sweep_stats_take() -> (u64, u64, u64, f32, u64) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let depth = f32::from_bits(CCD_SWEEP_HIT_DEPTH.swap(0, Relaxed) as u32);
+    (
+        CCD_SWEEP_SAMPLES.swap(0, Relaxed),
+        CCD_SWEEP_HITS.swap(0, Relaxed),
+        CCD_SWEEP_REFINE.swap(0, Relaxed),
+        depth,
+        CCD_SWEEP_HIT_STEP.swap(0, Relaxed),
+    )
+}
+
+/// 记一次采样（扫掠热路径：`Relaxed` 足够，计数不参与任何决策）。
+#[inline]
+pub fn ccd_note_sample() {
+    CCD_SWEEP_SAMPLES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// 记一次命中（段号 + 命中样本的最深穿透）。
+#[inline]
+pub fn ccd_note_hit(step: u32, depth: f32) {
+    CCD_SWEEP_HITS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    CCD_SWEEP_HIT_STEP.fetch_add(step as u64, std::sync::atomic::Ordering::Relaxed);
+    if depth >= 0.0 {
+        CCD_SWEEP_HIT_DEPTH.fetch_max(depth.to_bits() as u64, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// 记一次二分迭代。
+#[inline]
+pub fn ccd_note_refine() {
+    CCD_SWEEP_REFINE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
