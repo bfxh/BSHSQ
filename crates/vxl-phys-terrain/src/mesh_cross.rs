@@ -102,7 +102,12 @@ pub(super) fn contacts_box(mesh: &TriMesh, q: &BoxQuery, out: &mut Vec<InteropCo
             any |= mesh.contacts_point(id, pos + m.mul_vec3(h * s), skin, out);
         }
     }
-    any |= surface_crossing(mesh, &cs, pos, half.length() + skin, skin, out);
+    // ⚠️ 候选半径只取**几何覆盖**（外接球半径 + 一个**有界**余量）：`skin` 形参在高速下是**速度
+    // 自适应接触带**（`velocity_band`，实测 1920 m/s 时 48 m）——那是接触余量、不是覆盖需求。
+    // 用满 band 会让 `r` 越界成百上千格，反过来把这条判据自己关掉（实测 ≥1920 m/s 档
+    // `[cross]` 零调用 ⇒ 又穿）。覆盖论证只需要：**穿过体的三角形必在体外接球内**。
+    let r = half.length() + skin.min(0.5);
+    any |= surface_crossing(mesh, &cs, pos, r, skin, out);
     any
 }
 
