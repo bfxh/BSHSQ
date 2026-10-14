@@ -656,7 +656,7 @@
       "max_type_members": 3
     },
     "crates/vxl-phys-narrow/src/lib.rs": {
-      "file_lines": 50,
+      "file_lines": 51,
       "max_fn_lines": 0,
       "max_type_members": 0
     },

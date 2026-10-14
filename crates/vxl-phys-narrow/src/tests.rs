@@ -6,7 +6,7 @@
 use super::*;
 use vxl_phys_core::{BodySet, SerialJobSystem};
 
-fn manifolds_for(b: &BodySet, hf: &[HeightField]) -> Vec<Manifold> {
+pub(crate) fn manifolds_for(b: &BodySet, hf: &[HeightField]) -> Vec<Manifold> {
     let mut np = DefaultNarrowPhase::new(0.01);
     // 全对暴力（测试用）。
     let mut pairs = Vec::new();
