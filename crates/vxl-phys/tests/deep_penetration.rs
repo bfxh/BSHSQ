@@ -109,32 +109,40 @@ fn box_deep_buried_sphere_is_ejected() {
     assert!(ke < 1.0, "顶出后应当静止（能量不增）：KE = {ke:.3e}");
 }
 
-/// **③ 外壳（浅埋档的护栏）**：埋 0.2 m ⇒ 顶出并贴住外壳顶面。
-/// ⚠️ 深埋档（≥0.5 m）**仍不达标**（GJK/EPA 那条路给错法线）—— 见文件头注的"仍未做 2"，别把这条当全覆盖。
+/// **③ 外壳（三档全判）**：0.2 / 0.5 / 1.0 m 都必须**顶出并贴住外壳顶面**。
+/// 修前只有 0.2 m 过：`(球, 凸壳)` 一律走 GJK/EPA，而 EPA 对**光滑支撑**在深嵌时给**最远面**的
+/// 法线（埋 0.5 m 报 `n = (−1,0,0)`、深度 2.85 —— 正确的最小平移是 1.45）⇒ 球被横向推走。
+/// 修法 = `hull_sphere.rs`：球心在壳内时改用**最近面**的解析口径（与 `prims::sphere_convex_ab`
+/// 同把尺；凸壳只存点云 ⇒ 暴力枚举面 + 按 (法线, 偏移) 去重）。
 #[test]
 fn hull_buried_sphere_is_ejected() {
-    let (y, ke, _v) = bury(0.0, 0.2, |w| {
-        let mut pts = Vec::new();
-        for sx in [-1.0f32, 1.0] {
-            for sy in [-1.0f32, 1.0] {
-                for sz in [-1.0f32, 1.0] {
-                    pts.push(Vec3::new(sx * 2.0, sy * 2.0, sz * 2.0));
+    for depth in [0.2f32, 0.5, 1.0] {
+        let (y, ke, _v) = bury(0.0, depth, |w| {
+            let mut pts = Vec::new();
+            for sx in [-1.0f32, 1.0] {
+                for sy in [-1.0f32, 1.0] {
+                    for sz in [-1.0f32, 1.0] {
+                        pts.push(Vec3::new(sx * 2.0, sy * 2.0, sz * 2.0));
+                    }
                 }
             }
-        }
-        let hull = w.add_hull(pts);
-        w.add_static(
-            Shape::ConvexHull {
-                hull,
-                half: Vec3::new(2.0, 2.0, 2.0),
-            },
-            Vec3::new(0.0, -2.0, 0.0),
-            Quat::IDENTITY,
+            let hull = w.add_hull(pts);
+            w.add_static(
+                Shape::ConvexHull {
+                    hull,
+                    half: Vec3::new(2.0, 2.0, 2.0),
+                },
+                Vec3::new(0.0, -2.0, 0.0),
+                Quat::IDENTITY,
+            );
+        });
+        println!("③ 外壳埋球 {depth} m：末态 y = {y:+.4}（期望 ≈ {R:.2}）、KE = {ke:.3e}");
+        assert!(
+            y > 0.4,
+            "埋 {depth} m 必须被顶出到壳顶（修前深埋档报远面法线 ⇒ 横向推走）：实测 {y:+.4}"
         );
-    });
-    println!("③ 外壳埋球 0.2 m：末态 y = {y:+.4}（期望 ≈ {R:.2}）、KE = {ke:.3e}");
-    assert!(y > 0.4, "浅埋必须被顶出：实测 {y:+.4}");
-    assert!(ke < 1.0, "顶出后应当静止：KE = {ke:.3e}");
+        assert!(ke < 1.0, "顶出后应当静止：KE = {ke:.3e}");
+    }
 }
 
 /// **④ 对照：正常静置**（球心 = 顶面 + r，不埋）⇒ 400 tick 内不许漂（`|Δy| < 1 mm`、末窗 |v| ≈ 0）。

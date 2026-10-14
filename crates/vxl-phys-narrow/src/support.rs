@@ -232,10 +232,8 @@ pub(crate) fn hull_pair(
         return;
     }
 
-    // —— 对方是三角网（T2）：外壳顶点 × 网面三角形（解析点-三角；非凸 ⇒ 不进 GJK/EPA，
-    //    `support_of` 对三角网本就返回 None）——实现在 `mesh_pair.rs::hull_vs_mesh`。
-    //    **接触带按相对速度自适应**（与 `provider_pair` 同款口径——实测不加带会让高速
-    //    外壳首次检测就深穿 ⇒ 巨大冲量把薄壳轰出对方的接触带 ⇒ 双双掉穿）。
+    // —— 对方是三角网（T2）：外壳顶点 × 网面三角形（`mesh_pair.rs::hull_vs_mesh`；
+    //    接触带按相对速度自适应，与 `provider_pair` 同款——不加带时高速外壳首次检测就深穿）。
     if let Shape::TriMesh { mesh, .. } = *other_shape {
         let vrel = if a_is_hull {
             bodies.linvel[a as usize] - bodies.linvel[b as usize]
@@ -258,6 +256,12 @@ pub(crate) fn hull_pair(
             band,
             out,
         );
+        return;
+    }
+
+    // P22 ①：球心在壳内 ⇒ 最近面解析路（见 hull_sphere.rs）
+    let cb = if a_is_hull { pb } else { pa };
+    if crate::hull_sphere::pair(np, (a, b), a_is_hull, cb, other_shape, out) {
         return;
     }
 
