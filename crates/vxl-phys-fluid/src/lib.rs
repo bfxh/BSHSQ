@@ -39,6 +39,7 @@ mod fluid_force;
 mod fluid_medium;
 mod fluid_step;
 mod grid;
+mod laminar;
 mod system;
 mod types;
 pub use self::{carve::*, config::*, grid::*, system::*, types::*};
