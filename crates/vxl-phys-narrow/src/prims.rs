@@ -16,9 +16,9 @@ pub(crate) fn sphere_convex_ab(
     np.ws.poly_b.fill(&np.ws.polys[idx], cpos, crot);
     let (closest, d2, inside, in_n) = closest_point_on_poly(&np.ws.poly_b, center);
     if inside {
-        // 球心在凸体内部：max_plane_d < 0，表面距 = -max_plane_d。
+        // ⚠️ 穿透 = `radius − max_d`；旧写 `+ max_d` 越深报得越浅 ⇒ 球穿过实心盒（见 tests/deep_penetration.rs）
         let max_d = max_plane_d_of(&np.ws.poly_b, center);
-        let depth = radius + max_d;
+        let depth = radius - max_d;
         if depth <= 0.0 {
             return None;
         }
