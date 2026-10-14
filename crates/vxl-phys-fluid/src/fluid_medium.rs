@@ -17,8 +17,8 @@ mod scan;
 ///   `Σ m_j·Δv_j = momentum`。**刚体**仍走 2b（Akinci 边界粒子逐对反对称，不需要点式沉积）；
 ///   本通道是给**软体/布**这类"真点式"受体的（`world_step` 的布×液反作用段）。
 ///   `mass`/`pressure_work` 沿用 trait 的审计参数（本实现不消费）。
-/// - `viscosity`/`temperature` 报 0：XSPh 的 `ε` 是**无量纲**系数、不是 Pa·s，
-///   本实现**不编造换算常数**（耦合侧用"密度 + 流速"算阻力即可，别依赖这个字段）。
+/// - `viscosity` 报 **`FluidConfig::dynamic_viscosity`**（Pa·s）——**物理材料参数**、不是上面那个
+///   无量纲的 `ε`（不编造 ε → Pa·s 换算；默认 0 ⇒ 旧口径）。`temperature` 报 0（仅热耦合域用）。
 impl MediumField for FluidSystem {
     fn sample(&self, x: Vec3) -> MediumSample {
         if self.pos.is_empty() || self.grid.items.is_empty() || self.grid.nz == 0 {
@@ -31,7 +31,7 @@ impl MediumField for FluidSystem {
         MediumSample {
             density: rho,
             velocity: vsum * (1.0 / wsum),
-            viscosity: 0.0,
+            viscosity: self.cfg.dynamic_viscosity,
             temperature: 0.0,
             occupied: (rho / self.cfg.rest_density).clamp(0.0, 1.0),
         }

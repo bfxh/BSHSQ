@@ -211,9 +211,9 @@
       "max_type_members": 0
     },
     "crates/vxl-phys-fluid/src/config.rs": {
-      "file_lines": 74,
+      "file_lines": 90,
       "max_fn_lines": 20,
-      "max_type_members": 14
+      "max_type_members": 15
     },
     "crates/vxl-phys-fluid/src/fluid_access.rs": {
       "file_lines": 204,

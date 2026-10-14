@@ -7,9 +7,11 @@ pub(crate) mod coupling;
 pub(crate) mod destruction;
 pub(crate) mod fluid_stepper;
 mod medium;
+mod medium_sample;
 pub(crate) mod nan_guard;
 pub(crate) mod narrow_tier;
 mod splat_dynamics;
+mod viscous;
 
 impl World {
     /// 推进一个固定 60Hz tick（内部按 config.substeps 细分，§4.2）。
@@ -144,9 +146,14 @@ impl World {
     ///    即"浸没体积分数"的代理），阻力同 ①。采样点 = **体心 + 4 个水平表面点**
     ///    （单点采样在水线处是阶跃 ⇒ 盒子会抖；四点平均把水线过渡抹平）。
     ///    ⇒ 比水轻的盒浮起、比水重的盒下沉（物理量纲齐备，不看质量以外的旋钮）。
+    ///    ③ **物理黏度档**（2026-10-14 加）：流体给了 `FluidConfig::dynamic_viscosity`（Pa·s，默认 0）
+    ///    时，阻力改由**介质（远场）** 的 Stokes 线性项接管（`world_step/viscous.rs`：
+    ///    `F = −6πμ·r_eq·v_rel/(1 + dt/τ)` + 转动阻力矩），**且不被 2b 覆盖挡掉**
+    ///    （2b 是近场边界反作用，与介质阻力不是同一项）；μ = 0 ⇒ 逐位回到上面那套旧的二次阻力。
     ///
     /// 确定性：场/流体按注册序、体按索引序、采样点固定序 ⇒ 全索引序可复现；
-    /// `v_rel` 取体心速度减介质流速（力矩本切片不施加，与 ① 一致）。
+    /// `v_rel` 取体心速度减介质流速。**力矩**：旧的二次阻力档不施加（与 ① 一致），
+    /// **物理黏度档施加** Stokes 转动阻力矩（见 ③）。
     /// **零成本短路**：无流体 / 无介质密度 / 体不在介质包围盒内 ⇒ 不采样。
     pub(crate) fn medium_pass(&mut self, dt: f32) {
         const DRAG_CD: f32 = 1.0;
@@ -154,7 +161,6 @@ impl World {
 
         // ── ② 流体作介质（2a，见上方文档）：浮力（阿基米德）+ 阻力 ──
         // （2b 覆盖的体在此**让位**：其浮力/阻力由 Akinci 反作用接管，见段③）
-        use vxl_phys_core::interop::MediumField as _;
         if self.fluids.is_empty() {
             return;
         }
@@ -176,19 +182,23 @@ impl World {
                 None => continue,
             };
             let pad = sys.config().smoothing_radius; // 核半径余量：表面外仍有介质影响
+            let mu_cfg = sys.config().dynamic_viscosity; // Pa·s（0 = 无数理黏度 ⇒ 旧口径）
             for i in 0..self.bodies.len() {
                 if !coupling::is_receptor(&self.bodies, i) {
                     continue; // 受体门（统一后与 2b/喷溅同一条判据；语义 = 睡眠/静态体不生效）
                 }
                 // 让位集**按流体**查（§2 C4）：本流体的覆盖集，不是"最后一个 2b 流体"的。
-                if two_b
+                let covered_2b = two_b
                     && self
                         .fluid_boundary
                         .covered
                         .get(fi)
-                        .is_some_and(|c| c.get(i).copied().unwrap_or(false))
-                {
-                    continue; // 2b 已覆盖 ⇒ 二选一，不叠加
+                        .is_some_and(|c| c.get(i).copied().unwrap_or(false));
+                // ⚠️ 让位只挡**浮力与二次阻力**；μ > 0 时仍要取样（物理黏性阻力是**介质/远场**效应，
+                // 与 2b 的**近场边界反作用**不是同一项，见 `world_step/viscous.rs` 头注）。
+                // μ = 0（默认）⇒ 与旧行为逐位一致，且覆盖体**不进采样**（零额外成本）。
+                if covered_2b && mu_cfg <= 0.0 {
+                    continue;
                 }
                 let c = self.bodies.position[i];
                 if c.x < lo.x - pad
@@ -205,34 +215,33 @@ impl World {
                     continue;
                 }
                 let r = body_half_extent(&self.bodies.shape[i]);
-                // 浸没体积分数：体心 + 4 个水平表面点的占用率均值（单点在水线处是阶跃）。
-                let pts = [
-                    c,
-                    Vec3::new(c.x + r, c.y, c.z),
-                    Vec3::new(c.x - r, c.y, c.z),
-                    Vec3::new(c.x, c.y, c.z + r),
-                    Vec3::new(c.x, c.y, c.z - r),
-                ];
-                let (mut occ, mut dens) = (0.0f32, 0.0f32);
-                let mut vmed = Vec3::ZERO;
-                for p in pts {
-                    let s = sys.sample(p);
-                    occ += s.occupied;
-                    dens += s.density;
-                    vmed += s.velocity;
-                }
-                let inv = 1.0 / pts.len() as f32;
-                let frac_sub = (occ * inv).clamp(0.0, 1.0);
+                // 浸没体积分数 / 密度 / 介质流速 / 动力黏度：同一把采样尺（`medium_sample.rs`）。
+                let (frac_sub, rho, vmed, mu) = medium_sample::sample_around(sys, c, r);
+                let frac_sub = frac_sub.clamp(0.0, 1.0);
                 if frac_sub <= 0.0 {
                     continue;
                 }
-                let rho = dens * inv;
-                let v_rel = self.bodies.linvel[i] - vmed * inv;
+                let v_rel = self.bodies.linvel[i] - vmed;
                 let sp = v_rel.length();
                 let mut f = -g * (rho * vol * frac_sub);
-                let a = cross_section_area(&self.bodies.shape[i]);
-                if a > 0.0 && sp > 1e-6 {
-                    f += v_rel * (-0.5 * rho * DRAG_CD * a * sp);
+                if mu > 0.0 {
+                    // **物理黏度档**（Pa·s）：Stokes 阻力+阻力矩（口径/有效窗口见 `viscous.rs` 头注）
+                    let geom = viscous::ViscGeom {
+                        vol,
+                        frac_sub,
+                        mu,
+                        dt,
+                    };
+                    viscous::apply_body(&mut self.bodies, i, &geom, v_rel);
+                } else if !covered_2b {
+                    // 无数理黏度 ⇒ 旧口径（`Cd = 1` 的二次阻力）：**冻结行为**，逐位不变。
+                    let a = cross_section_area(&self.bodies.shape[i]);
+                    if a > 0.0 && sp > 1e-6 {
+                        f += v_rel * (-0.5 * rho * DRAG_CD * a * sp);
+                    }
+                }
+                if covered_2b {
+                    continue; // 2b 已覆盖 ⇒ 浮力/二次阻力二选一，不叠加
                 }
                 // 经统一施加器的力通道（C3 片 2：原先就地写累加器，违反"唯一落点"）。
                 coupling::add_force(&mut self.bodies, i, f, Vec3::ZERO);
