@@ -2903,6 +2903,27 @@ island_shock_budget`：shock 附加扫掠按岛给，仅当"岛内质量比 > 8 
 
 ## P19 — 三角网薄壳 × 小盒：**面穿过体**漏配 ✅ **盒档已修（provider 2026-10-13 / 体侧 2026-10-14）**，⚠️ 剩 v ≥ v_max 档与其余形状
 
+**2026-10-15 复诊（薄壳/实体裁决的第一刀，未落）**：按上表"逐网标记 shell/solid"的出口实现过一版
+—— `TriMesh` 加 `MeshSemantics{Solid(默认),Shell}`、在 `contacts_point`/`contacts_sphere` 里把
+口径折成"法线折向体那一侧 + 距离取**无符号**"（`depth = r − |sd|`），并把 `ccd_thin_shell.rs` ⑥
+的薄板标成 `Shell` 重跑。**实测：⑥ 的球/胶囊两格仍直穿（x = 395，与未标记时逐字相同）**，
+⇒ 该版**已撤回**（不落"设了没用"的旋钮）。同时把 CCD 侧的调用链钉清楚了（供下一轮省事）：
+
+```
+world_ccd/sweep.rs::eval_hit  →  world.narrow.collide(.., &world.providers, ..)
+                              →  vxl-phys-narrow/src/provider.rs::provider_shape_contacts
+                              →  Shape::Sphere ⇒ providers.contacts_sphere(id, bpos, radius, band, buf)
+```
+
+⇒ 即**窄相确实会走到 `TriMesh::contacts_sphere`**（`provider.rs:33-36`），所以"折法线仍穿过"
+不是路径问题、也不是"查询没被调用"（我一度以为是，用了 env 门控计数器，结论**不可靠**：
+`Set-Content` 重写文件后那次计数可能跑在旧二进制上）。**下一步（先量后改）**：
+在 `contacts_sphere` 里直接打印 `(sd, |sd|, depth, n, n_into_body, vn)`（`eval_hit` 的命中判据是
+`vn < 0`，见 `sweep.rs:404`），把"折了法线但仍然不闭合"的那一步读数钉住再决定是折法线、
+还是改成"两侧都投**预期接触**（负 depth + 指向体侧的法线）"。判据仍是：
+⑥ 球/胶囊两格翻成 `Some(−0.40)` **且** `rest_height_contract::mesh_sphere_inside_is_ejected`
+保持绿（后者靠默认 `Solid` 口径）**且** 默认档四道哈希逐位不变。
+
 **是什么**：CCD 的宽相/窄相在**薄壳（三角网/Provider）**上有一族漏配：
 
 1. **大体积体 × 薄壁（已修，2026-10-13 薄壳 TOI 片）**：扫掠 AABB 只覆盖质心路径 ± 皮肤 ⇒
