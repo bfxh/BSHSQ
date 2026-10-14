@@ -874,7 +874,8 @@ capabilities:
       - id: zero_generation
         note: >
           零换代（无运动学体的场景逐位不变）：determinism FINAL_HASH
-          0x655cdbf40ed7e800b5f46785f94fec1e 与 m0_gates 压力哈希
+          0x655cdbf40ed7e800b5f46785f94fec1e（**本片落地当时**的值；此后已多次换代，
+          现行基线见 RECIPES.md 的「行为门」表） 与 m0_gates 压力哈希
           0xc23b81902a74b977c8e74e114cf9737a 均与基线相同；5 个 vxl 金样
           （m3_collapse / m4_cantilever / m4_flag / m5_dam_break / m5_float_box）与
           3 个 Rapier 对照金样（col45 / pile5 / tower25）全部 PASS。
@@ -928,7 +929,7 @@ capabilities:
         note: >
           零换代：默认材质是 Coulomb / StaticKinetic，且**没有任何金样/确定性场景**用 Anisotropic
           预设（只有 config 自己的单测与 config_entry_guard 构造它）⇒ 新代码路径不被触达：
-          determinism FINAL_HASH 0x655cdbf40ed7e800b5f46785f94fec1e 与 m0_gates 压力哈希
+          determinism FINAL_HASH 0x655cdbf40ed7e800b5f46785f94fec1e（**本片落地当时**的值；此后已多次换代，现行基线见 RECIPES.md 的「行为门」表） 与 m0_gates 压力哈希
           0xc23b81902a74b977c8e74e114cf9737a 与基线相同；5 个 vxl 金样 + 3 个 Rapier 对照金样全 PASS。
       - id: not_done
         note: >
@@ -968,7 +969,7 @@ capabilities:
       - id: zero_generation
         note: >
           零换代：默认 roll_resistance = 0 ⇒ 调用点不进、行为逐位不变 ——
-          determinism FINAL_HASH 0x655cdbf40ed7e800b5f46785f94fec1e 与 m0_gates 压力哈希
+          determinism FINAL_HASH 0x655cdbf40ed7e800b5f46785f94fec1e（**本片落地当时**的值；此后已多次换代，现行基线见 RECIPES.md 的「行为门」表） 与 m0_gates 压力哈希
           0xc23b81902a74b977c8e74e114cf9737a 与基线相同；5 个 vxl 金样 + 3 个 Rapier 对照金样全 PASS。
       - id: not_done
         note: >

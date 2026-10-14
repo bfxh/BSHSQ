@@ -147,9 +147,13 @@ acquire_timed() {
 acquire_timed
 
 # `determinism` / `m0_gates` 自报 PASS 且哈希与档内基线一致；`m1_islands` 只报比值（见下）。
+# determinism 换代账（ADR-0004，只列换代笔）：… → 0x655cdbf40ed7e800b5f46785f94fec1e
+#   → **0x8c5c8fc941281fd6563ad7fdc7cf8b6c**（2026-10-14：陀螺项 `ω × (Iω)` 进速度积分；
+#   场景里有可分辨的不对称旋转体 ⇒ 换代。`m0_gates` 两档与 `m3_collapse` **逐位未变**——那些
+#   场景的体是立方体/各向同性 ⇒ 走"各向同性早退"）
 step determinism 0 cargo run --release -q -p vxl-phys --example determinism
-if ! grep -q "FINAL_HASH=0x655cdbf40ed7e800b5f46785f94fec1e" "${out}/gate_determinism.log"; then
-    echo "❌ determinism 哈希与基线不符（期望 0x655cdbf40ed7e800b5f46785f94fec1e）——日志尾：" >&2
+if ! grep -q "FINAL_HASH=0x8c5c8fc941281fd6563ad7fdc7cf8b6c" "${out}/gate_determinism.log"; then
+    echo "❌ determinism 哈希与基线不符（期望 0x8c5c8fc941281fd6563ad7fdc7cf8b6c）——日志尾：" >&2
     tail -n 10 "${out}/gate_determinism.log" >&2
     exit 4
 fi

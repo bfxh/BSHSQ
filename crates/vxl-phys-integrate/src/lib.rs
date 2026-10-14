@@ -1,13 +1,13 @@
 //! # vxl-phys-integrate
 //!
-//! 半隐式欧拉（§2.2）：v ← v + a·dt；x ← x + v·dt；q ← q ⊕ ω·dt。
-//! 固定 60 Hz 基础步，子步由调用方（World）按 `config.substeps` 循环。
-//! 批量 SoA 遍历按体索引有序（§5 确定性）；SIMD 批量积分（§7）在 M1 引入，
-//! 语义等价（逐元素，无跨元素归约）。
+//! 半隐式欧拉（§2.2）：v ← v + a·dt；x ← x + v·dt；q ← q ⊕ ω·dt。固定 60 Hz 基础步，
+//! 子步由调用方（World）按 `config.substeps` 循环。批量 SoA 遍历按体索引有序（§5 确定性）。
 
 #![forbid(unsafe_code)]
 
 use vxl_phys_core::{BodySet, Vec3};
+
+mod gyro; // 陀螺项（欧拉方程）——见该文件头注：为什么必须有、以及哪两档逐位不变
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Integrator;
@@ -31,8 +31,8 @@ impl Integrator {
             let accel = gravity + bodies.force[i] * bodies.inv_mass[i];
             bodies.linvel[i] += accel * dt;
 
-            let ang_accel = bodies.apply_world_inv_inertia(i, bodies.torque[i]);
-            bodies.set_angvel_raw(i, bodies.angvel(i) + ang_accel * dt);
+            // ω += I⁻¹(τ − ω×Iω)·dt（含陀螺项；球/ω=0 两档该式为 0 ⇒ 逐位不变）
+            gyro::integrate_angular(bodies, i, dt);
 
             // 限速（确定性钳制：**整体长度等比缩放** `v *= max/|v|`，无逐轴比较；⚠️ 2026-09-27 更正原注）。
             let lv = bodies.linvel[i];
