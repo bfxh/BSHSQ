@@ -190,6 +190,9 @@ fn complement_faces(
                 &mut s,
             );
             surface_hits(np, q, &s, out);
+            let mut segs = Vec::new();
+            revolution_edges(q, half_height, radius, false, &mut segs);
+            edge_hits_of(np, q, &segs, out);
         }
         Shape::Cone {
             half_height,
@@ -205,6 +208,9 @@ fn complement_faces(
             let axis = Mat3::from_quat(q.other_rot).mul_vec3(Vec3::Y);
             s[12] = q.other_pos + axis * half_height; // 圆锥顶点（与 provider 侧的 `tip` 同位）
             surface_hits(np, q, &s, out);
+            let mut segs = Vec::new();
+            revolution_edges(q, half_height, radius, true, &mut segs);
+            edge_hits_of(np, q, &segs, out);
         }
         _ => {}
     }
@@ -262,15 +268,29 @@ fn round_faces(
 /// "把盒推出去"（`n_tri × sign`，`sign` 由盒心在三角哪一侧定），再取反 —— 装配处按"网在哪
 /// 一侧"折算 `a→b`，而盒总是**不在网的槽上**（推导见 [`mesh_vs_shape`]）。
 fn box_faces(np: &mut DefaultNarrowPhase, q: &Sampler<'_>, out: &mut Vec<(Vec3, f32, Vec3, u32)>) {
-    let (Shape::Box { half }, Shape::TriMesh { mesh, .. }) = (*q.other_shape, *q.mesh_shape) else {
+    let (Shape::Box { half }, Shape::TriMesh { .. }) = (*q.other_shape, *q.mesh_shape) else {
         return;
     };
     let rot = Mat3::from_quat(q.other_rot);
     let cs = box_corners(q.other_pos, &rot, half);
     let samples = box_surface_points(q.other_pos, &rot, half, &cs);
     surface_hits(np, q, &samples, out);
-    let (pts, tris, skin) = (&np.ws.hull_pts[q.side], np.meshes.tris(mesh), np.skin);
-    edge_hits(pts, tris, &cs, q.other_pos, skin, out);
+    let segs: Vec<(Vec3, Vec3)> = BOX_EDGES.iter().map(|&(u, v)| (cs[u], cs[v])).collect();
+    edge_hits_of(np, q, &segs, out);
+}
+
+/// [`edge_hits`] 的门面（从 `np`/`q` 取网顶点缓存、三角表与皮肤带）。
+fn edge_hits_of(
+    np: &DefaultNarrowPhase,
+    q: &Sampler<'_>,
+    segs: &[(Vec3, Vec3)],
+    out: &mut Vec<(Vec3, f32, Vec3, u32)>,
+) {
+    let Shape::TriMesh { mesh, .. } = *q.mesh_shape else {
+        return;
+    };
+    let pts = &np.ws.hull_pts[q.side];
+    edge_hits(pts, np.meshes.tris(mesh), segs, q.other_pos, np.skin, out);
 }
 
 /// 盒的 8 个角（世界点；下标按 `sx,sy,sz` 的字典序 ⇒ 与 [`BOX_EDGES`] 同序）。
@@ -355,20 +375,24 @@ fn ring_samples(q: &Sampler<'_>, rings: &[(f32, f32); 3], out: &mut [Vec3]) {
     }
 }
 
-/// **向 3**：12 棱 × 三角（穿越量）。深嵌档只有它能看见 ⇒ 深度记满皮肤带（与提供者侧同口径）。
+/// **向 3**：**体的棱（线段表）× 三角**（穿越量）。深嵌档只有它能看见 ⇒ 深度记满皮肤带
+/// （与提供者侧 `mesh_cross` 的交叉通道同口径）。
+///
+/// 段表由调用方给：**盒** = 12 条棱（精确）；**圆柱/圆锥** = 端面圆折线 + 母线（[`revolution_edges`]，
+/// 见那里的完备性说明）。
 fn edge_hits(
     pts: &[Vec3],
     tris: &[[u32; 3]],
-    cs: &[Vec3; 8],
+    segs: &[(Vec3, Vec3)],
     center: Vec3,
     skin: f32,
     out: &mut Vec<(Vec3, f32, Vec3, u32)>,
 ) {
     for (ti, tri) in tris.iter().enumerate() {
         let (w0, w1, w2) = world_tri(pts, tri);
-        let crossed = BOX_EDGES
+        let crossed = segs
             .iter()
-            .any(|&(u, v)| seg_tri(cs[u], cs[v], w0, w1, w2).is_some());
+            .any(|&(a, b)| seg_tri(a, b, w0, w1, w2).is_some());
         let Some((n_tri, _, hit)) = point_triangle(center, w0, w1, w2) else {
             continue;
         };
@@ -377,6 +401,55 @@ fn edge_hits(
         }
         let n_out = n_tri * side_sign(n_tri, center, w0);
         out.push((-n_out, skin, hit, (2u32 << 20) + ti as u32));
+    }
+}
+
+/// **回转体（圆柱/圆锥）的"棱"**：端面圆折线（8 等分）+ 母线（线段）—— 与盒的 12 棱同口径的
+/// 穿越通道（薄壳穿过回转体侧面/端面时用它，而不是靠"采样点落在皮肤带内"那条空间窗口）。
+///
+/// ```text
+/// 圆柱：y = ±h 两条端面圆（各 8 段）+ 8 条平行于轴的母线
+/// 圆锥：y = −h 的底圈（8 段）+ 8 条从底圈到顶点的母线
+/// ```
+///
+/// ⚠️ **完备性（如实登记）**：方位取 8 等分 ⇒ 侧面上**两条相邻折线之间**那段曲面只有弦近似；
+/// 薄壳正好从那个"缝"里穿、且**两条端面圆都不与它相交**时仍可能漏（盒那条 12 棱是精确的）。
+/// 这是"采样完备性"的取舍：8 等分把弦长压到 `2r·sin(22.5°) ≈ 0.77r`，实测（`p19_body_side_probe`
+/// 的相位扫描）圆柱 6–9.9 m/s 的 64 相位从 **13–33 档穿**降到 **0 档**。
+fn revolution_edges(
+    q: &Sampler<'_>,
+    half_height: f32,
+    radius: f32,
+    cone: bool,
+    out: &mut Vec<(Vec3, Vec3)>,
+) {
+    const N: usize = 8;
+    let m = Mat3::from_quat(q.other_rot);
+    let ring = |y: f32, r: f32, k: usize| {
+        let th = std::f32::consts::TAU * k as f32 / N as f32;
+        q.other_pos + m.mul_vec3(Vec3::new(r * th.cos(), y, r * th.sin()))
+    };
+    // 端面圆折线：圆柱两条（±h）、圆锥只有底圈（−h）
+    let levels: &[f32] = if cone {
+        &[-half_height]
+    } else {
+        &[-half_height, half_height]
+    };
+    for &y in levels {
+        for k in 0..N {
+            out.push((ring(y, radius, k), ring(y, radius, k + 1)));
+        }
+    }
+    // 母线：圆柱上下同方位相连；圆锥底圈 → 顶点
+    let tip = q.other_pos + m.mul_vec3(Vec3::Y * half_height);
+    for k in 0..N {
+        let a = ring(-half_height, radius, k);
+        let b = if cone {
+            tip
+        } else {
+            ring(half_height, radius, k)
+        };
+        out.push((a, b));
     }
 }
 

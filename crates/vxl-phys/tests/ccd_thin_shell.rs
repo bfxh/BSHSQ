@@ -327,11 +327,10 @@ fn mesh_shell_shape_run(shape: Shape) -> f32 {
 }
 
 /// **⑦ 的共用场景**：4×4 m 单页薄板（`Shape::TriMesh` **体**，位于 x = 0 平面、环绕法线 +X），
-/// 以及从 −X 以 60 m/s 撞来的 `shape`（半长/半径取 `HALF`）。`fixed` = 板设成**撞不动**
-/// （`inv_mass = 0`）。
+/// 以及从 `x0` 以 `v0` 沿 +X 撞来的 `shape`。`fixed` = 板设成**撞不动**（`inv_mass = 0`）。
 ///
 /// 返回 `(world, 板体号, 撞击体号)`。
-fn mesh_body_scene(fixed: bool, shape: Shape) -> (World, usize, usize) {
+fn mesh_body_scene(fixed: bool, shape: Shape, x0: f32, v0: f32) -> (World, usize, usize) {
     let cfg = PhysConfig {
         gravity: Vec3::ZERO,
         max_linear_velocity: 5000.0,
@@ -350,8 +349,8 @@ fn mesh_body_scene(fixed: bool, shape: Shape) -> (World, usize, usize) {
         w.bodies.inv_mass[plate] = 0.0; // 只当障碍：金丝雀原意（密度大 ⇒ 撞不动）
         w.bodies.local_inv_inertia[plate] = Vec3::ZERO;
     }
-    let b = w.add_dynamic(shape, Vec3::new(-5.0, 0.0, 0.0), Quat::IDENTITY, 1000.0) as usize;
-    w.bodies.linvel[b] = Vec3::new(60.0, 0.0, 0.0);
+    let b = w.add_dynamic(shape, Vec3::new(x0, 0.0, 0.0), Quat::IDENTITY, 1000.0) as usize;
+    w.bodies.linvel[b] = Vec3::new(v0, 0.0, 0.0);
     (w, plate, b)
 }
 
@@ -370,6 +369,8 @@ fn box_stops_on_mesh_body_shell() {
         Shape::Box {
             half: Vec3::splat(HALF),
         },
+        -5.0,
+        60.0,
     );
     let mut worst = f32::MIN;
     for _ in 0..TICKS {
@@ -402,6 +403,8 @@ fn box_vs_free_mesh_body_conserves_momentum() {
         Shape::Box {
             half: Vec3::splat(HALF),
         },
+        -5.0,
+        60.0,
     );
     let m_box = 1.0 / w.bodies.inv_mass[b];
     let m_plate = 1.0 / w.bodies.inv_mass[plate];
@@ -470,7 +473,7 @@ fn round_shapes_stop_on_mesh_body_shell() {
         ),
     ];
     for (name, shape, extent) in cases {
-        let (mut w, _plate, b) = mesh_body_scene(true, shape);
+        let (mut w, _plate, b) = mesh_body_scene(true, shape, -5.0, 60.0);
         let mut worst = f32::MIN;
         for _ in 0..TICKS {
             w.step();
@@ -489,5 +492,66 @@ fn round_shapes_stop_on_mesh_body_shell() {
             vx.abs() < 1.0,
             "{name} 撞上后法向速度必须被吃掉（末态 vx = {vx}，初速 60）"
         );
+    }
+}
+
+/// **⑦‴ 体侧 · 回转体的"低速度 × 相位"覆盖面判据**：`Shape::TriMesh` 体 × 圆柱/圆锥，
+/// 速度取 **CCD 双判据都不满足**的那一段（`6–9.9 m/s`：速度 < 门槛 10、且单帧位移/最小半长
+/// = `0.1/0.5 = 0.2 < 0.5`）⇒ **扫掠整趟不跑**，此时唯一的通道是"采样点落在皮肤带内"
+/// （体侧窗口恒 = `2·skin` = 0.04 m，**不是** provider 侧那条速度自适应的 `velocity_band`）。
+///
+/// 子步位移 `v/120` 在 `v > 4.8 m/s` 时就超过那个窗口 ⇒ **相位敏感**：实测相位扫描
+/// （64 档扫过一个子步位移，`examples/p19_body_side_probe.rs` 的 `PROBE_SCAN`）——
+///
+/// | 形状 | 修前（穿过档数，v = 6 / 7.5 / 9 / 9.9） | 修后 |
+/// |---|---|---|
+/// | 盒 | **0 / 0 / 0 / 0**（有 12 棱穿越通道） | 0 / 0 / 0 / 0 |
+/// | 圆柱 | **13 / 23 / 29 / 33**（最坏跑到 55–61 m） | **0 / 0 / 0 / 0** |
+/// | 圆锥 | 0 / 23 / 0 / 0（相位相关） | **0 / 0 / 0 / 0** |
+///
+/// 修法 = `mesh_faces.rs::revolution_edges`（**端面圆折线 + 母线 × 网三角**，用 `seg_tri` 判交、
+/// 法线按体心定侧、深度记满皮肤带）—— 与盒的 12 棱**同一条穿越通道**（实测修后圆柱的读数与盒
+/// 逐字相同）。
+#[test]
+fn body_revolution_stops_across_speeds_and_phases() {
+    const PHASES: usize = 64;
+    let cases: [(&str, Shape); 2] = [
+        (
+            "圆柱",
+            Shape::Cylinder {
+                half_height: HALF * 0.5,
+                radius: HALF,
+            },
+        ),
+        (
+            "圆锥",
+            Shape::Cone {
+                half_height: HALF * 0.5,
+                radius: HALF,
+            },
+        ),
+    ];
+    for (name, shape) in cases {
+        for v in [6.0f32, 9.9] {
+            let sub = v / 120.0; // 子步位移 = 离散窄相的采样周期
+            let mut worst = f32::MIN;
+            for k in 0..PHASES {
+                let x0 = -5.0 + sub * k as f32 / PHASES as f32;
+                let (mut w, _plate, b) = mesh_body_scene(true, shape, x0, v);
+                for _ in 0..TICKS {
+                    w.step();
+                }
+                worst = worst.max(w.bodies.position[b].x);
+            }
+            println!(
+                "⑦‴ {name} v={v}：{PHASES} 相位里最坏末态体心 x = {worst:.4}（前缘 {:.4}）",
+                worst + HALF
+            );
+            assert!(
+                worst + HALF <= 0.02,
+                "{name} v={v}：有相位穿过壳面（最坏体心 x = {worst}、前缘 {:.4}）",
+                worst + HALF
+            );
+        }
     }
 }
