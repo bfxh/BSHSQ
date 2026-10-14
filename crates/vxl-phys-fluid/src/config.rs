@@ -47,6 +47,17 @@ pub struct FluidConfig {
     /// 耗散法向压缩波——没有它，钉在边界上的底层是个无阻尼硬弹簧，
     /// 柱体落位时反弹成尘（互穿死区 + 飞散），静水态永远建不起来。
     pub artificial_viscosity: f32,
+    /// **动力黏度 μ（Pa·s）** —— 这是**物理材料参数**（水 ≈ 1.0e-3、机油 ≈ 0.1、甘油 ≈ 1.4、
+    /// 蜂蜜 ≈ 10），不是上面那个无量纲的数值黏度。
+    ///
+    /// 消费方是**介质通道**（`world_step/viscous.rs`）：体在介质里的 Stokes 线性阻力
+    /// `F = −6πμ·r_eq·v_rel` + 转动阻力矩 `T = −8πμ·r_eq³·ω`（`r_eq` = 体积等效球半径）。
+    /// **默认 0 = 关** ⇒ 阻力退回旧的数值口径（`Cd = 1` 的二次阻力，冻结行为）⇒ 既有场景逐位不变。
+    ///
+    /// ⚠️ **本档的有效窗口是 `τ ≳ dt`**（`τ = m/(6πμ·r_eq·frac_sub)`）：更黏的介质（沥青/焦油）
+    /// 会让 τ ≪ 子步长，半隐式写法在那一档**饱和**（终端速度偏高 `1 + dt/τ` 倍）
+    /// ⇒ 那一档需要半解析积分（`v ← v_med + aτ + (v − v_med − aτ)e^{−dt/τ}`），登记为下一刀。
+    pub dynamic_viscosity: f32,
 }
 
 impl Default for FluidConfig {
@@ -67,6 +78,7 @@ impl Default for FluidConfig {
             gravity: Vec3::new(0.0, -9.81, 0.0),
             max_speed_frac: 0.4,
             artificial_viscosity: 1.0,
+            dynamic_viscosity: 0.0,
         }
     }
 }
