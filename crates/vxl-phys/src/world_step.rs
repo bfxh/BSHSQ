@@ -1,6 +1,7 @@
 //! world_step：从 lib.rs 按域拆出（纯搬移，语义未改）。
 use super::*;
 
+mod added_mass;
 mod aero;
 pub(crate) mod conversion;
 pub(crate) mod coupling;
@@ -157,7 +158,6 @@ impl World {
     /// **物理黏度档施加** Stokes 转动阻力矩（见 ③）。
     /// **零成本短路**：无流体 / 无介质密度 / 体不在介质包围盒内 ⇒ 不采样。
     pub(crate) fn medium_pass(&mut self, dt: f32) {
-        const DRAG_CD: f32 = 1.0;
         self.splat_medium_pass(dt);
 
         // ── ② 流体作介质（2a，见上方文档）：浮力（阿基米德）+ 阻力 ──
@@ -184,6 +184,7 @@ impl World {
             };
             let pad = sys.config().smoothing_radius; // 核半径余量：表面外仍有介质影响
             let mu_cfg = sys.config().dynamic_viscosity; // Pa·s（0 = 无数理黏度 ⇒ 旧口径）
+            let am_c = self.config.added_mass_coeff; // 附加质量系数 C_m（0 = 关）
             for i in 0..self.bodies.len() {
                 if !coupling::is_receptor(&self.bodies, i) {
                     continue; // 受体门（统一后与 2b/喷溅同一条判据；语义 = 睡眠/静态体不生效）
@@ -223,29 +224,24 @@ impl World {
                     continue;
                 }
                 let v_rel = self.bodies.linvel[i] - vmed;
-                let sp = v_rel.length();
-                let mut f = -g * (rho * vol * frac_sub);
-                if mu > 0.0 {
-                    // **物理黏度档**（Pa·s）：Stokes 阻力+阻力矩（口径/有效窗口见 `viscous.rs` 头注）
-                    let geom = viscous::ViscGeom {
+                // 浮力 + 阻力（μ 档 = Stokes / 旧口径二次）+ 附加质量 ⇒ 统一施加器（`viscous.rs`）
+                let area = cross_section_area(&self.bodies.shape[i]);
+                viscous::apply_medium(
+                    &mut self.bodies,
+                    i,
+                    &viscous::MediumArgs {
+                        g,
+                        rho,
                         vol,
                         frac_sub,
                         mu,
+                        v_rel,
                         dt,
-                    };
-                    viscous::apply_body(&mut self.bodies, i, &geom, v_rel);
-                } else if !covered_2b {
-                    // 无数理黏度 ⇒ 旧口径（`Cd = 1` 的二次阻力）：**冻结行为**，逐位不变。
-                    let a = cross_section_area(&self.bodies.shape[i]);
-                    if a > 0.0 && sp > 1e-6 {
-                        f += v_rel * (-0.5 * rho * DRAG_CD * a * sp);
-                    }
-                }
-                if covered_2b {
-                    continue; // 2b 已覆盖 ⇒ 浮力/二次阻力二选一，不叠加
-                }
-                // 经统一施加器的力通道（C3 片 2：原先就地写累加器，违反"唯一落点"）。
-                coupling::add_force(&mut self.bodies, i, f, Vec3::ZERO);
+                        c_m: am_c,
+                        area,
+                        add_buoy_drag: !covered_2b,
+                    },
+                );
             }
         }
     }

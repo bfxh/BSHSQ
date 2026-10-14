@@ -157,6 +157,11 @@ pub struct PhysConfig {
     /// 等效关系：真实薄膜 `k = μ_film·A_contact/h`（Pa·s / m / m ⇒ N·s/m），本字段是它的集总值。
     /// **逐接触点**施加（4 点接触 ⇒ 总阻力 4×k）。
     pub film_drag: f32,
+    /// **附加质量系数 `C_m`**（无量纲，0 = 关、默认 0）：浸没体在介质里加速时等效惯性
+    /// `m + m_a`、`m_a = C_m·ρ_med·V·frac_sub`（球 0.5 / 平板 ≈ 1 / 长柱 ≈ 0.2）。
+    /// 实现 = 把**已累加的力**乘 `m/(m+m_a)`（等价于换有效质量，见 `world_step/added_mass.rs`；
+    /// 只作用于重力/浮力/介质阻力这一批，**接触与关节冲量不含**）。
+    pub added_mass_coeff: f32,
     /// §4.4 摩擦模型（默认材质；逐材质见 BodySet::materials）。
     pub friction: FrictionModel,
     /// §4.5 恢复系数 e ∈ `[0,1]`（默认材质；材质对取 max）。
@@ -260,6 +265,7 @@ impl Default for PhysConfig {
             restitution_threshold: 1.0,
             roll_resistance: 0.0,
             film_drag: 0.0,
+            added_mass_coeff: 0.0,
             baumgarte: 0.2,
             linear_slop: 0.005,
             contact_freq_hz: 30.0,
