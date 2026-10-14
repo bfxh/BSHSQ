@@ -42,9 +42,11 @@ impl FluidSystem {
         // 并行档（`cfg.threads > 1`）：逐粒独立 ⇒ 分块并行（逐位一致，见 config 注）。
         if self.cfg.threads > 1 {
             self.force_pass_parallel();
-            return;
+        } else {
+            self.force_pass_serial();
         }
-        self.force_pass_serial();
+        // 物理层流黏度（μ = 0 自短路）——必须在上面**赋值** `acc` 之后累加（见 `laminar.rs`）。
+        crate::laminar::pass(self);
     }
 
     /// **力相位·并行**（`threads > 1`）：`acc`/`xsph` 逐粒独立 ⇒ 分块并行；

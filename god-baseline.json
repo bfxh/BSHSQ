@@ -241,7 +241,7 @@
       "max_type_members": 3
     },
     "crates/vxl-phys-fluid/src/fluid_force.rs": {
-      "file_lines": 219,
+      "file_lines": 221,
       "max_fn_lines": 111,
       "max_type_members": 4
     },
@@ -266,7 +266,7 @@
       "max_type_members": 5
     },
     "crates/vxl-phys-fluid/src/lib.rs": {
-      "file_lines": 129,
+      "file_lines": 130,
       "max_fn_lines": 69,
       "max_type_members": 0
     },
