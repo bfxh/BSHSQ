@@ -124,6 +124,7 @@ pub(crate) fn sanitize(cfg: &mut PhysConfig) -> u32 {
     n += nonneg(&mut cfg.ccd_speed_threshold, d.ccd_speed_threshold);
     // 滚动阻力：0 合法（关档）、有限非负；NaN/负数 ⇒ 回默认（0）。
     n += nonneg(&mut cfg.roll_resistance, d.roll_resistance);
+    n += nonneg(&mut cfg.film_drag, d.film_drag);
     // F-17：线程数。`ScopedPool` 每个并行区域开 `threads − 1` 个 OS 线程、与工作量无关
     // ⇒ 超过本机并行度只多占线程（实测 2600 体 28 → 48 ms）而不增吞吐。0/1 是合法档（串行）。
     let par = parallelism();
