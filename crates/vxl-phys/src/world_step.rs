@@ -5,6 +5,7 @@ mod aero;
 pub(crate) mod conversion;
 pub(crate) mod coupling;
 pub(crate) mod destruction;
+mod film;
 pub(crate) mod fluid_stepper;
 mod medium;
 mod medium_sample;
@@ -342,6 +343,8 @@ impl World {
         );
         self.joints.solve(&mut self.bodies, &self.config, dt);
         self.timings.solve_us += vxl_phys_core::probe::us(t0);
+        // 5.5) **油膜（切向黏性）**：解算之后按黏性收切向残余速度（`film_drag > 0` 才进）。
+        film::pass(self, dt);
         // 6) 位置积分。
         let t0 = vxl_phys_core::probe::start();
         // 6.0) CCD 预算收口：**位置积分之前**限速（否则回扫窗口不等于真实位移，见 sweep.rs）。

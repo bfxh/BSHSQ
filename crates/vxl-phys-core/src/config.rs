@@ -149,6 +149,14 @@ pub struct PhysConfig {
     /// 球在倾角 θ 的坡上停住的条件是 `μ_r > r·tanθ`（半径越小越容易停）。
     /// 逐材质版（沙/海绵 vs 钢）登记为后续片（`PHY-SCOPE-ROLLING-RESISTANCE`）。
     pub roll_resistance: f32,
+    /// **油膜/润滑的切向黏性系数**（单位 **N·s/m** = 每接触点的切向黏性导纳，0 = 关；默认 0）。
+    ///
+    /// 口径（`SURVEY-RIGID-HARD-CASES §4.2③`）：把**切向黏性**从**库仑摩擦**里分出来 ——
+    /// 库仑是"上限 `μ·pn`"（与法向压力相关、与速度无关），油膜是"与切向相对速度成正比"
+    /// （`F_t = −k·v_t`，**与压力无关**）⇒ 能表达"黏着油膜"（`μ_coulomb = 0` + 油膜仍能停住）。
+    /// 等效关系：真实薄膜 `k = μ_film·A_contact/h`（Pa·s / m / m ⇒ N·s/m），本字段是它的集总值。
+    /// **逐接触点**施加（4 点接触 ⇒ 总阻力 4×k）。
+    pub film_drag: f32,
     /// §4.4 摩擦模型（默认材质；逐材质见 BodySet::materials）。
     pub friction: FrictionModel,
     /// §4.5 恢复系数 e ∈ `[0,1]`（默认材质；材质对取 max）。
@@ -251,6 +259,7 @@ impl Default for PhysConfig {
             restitution: 0.0,
             restitution_threshold: 1.0,
             roll_resistance: 0.0,
+            film_drag: 0.0,
             baumgarte: 0.2,
             linear_slop: 0.005,
             contact_freq_hz: 30.0,
