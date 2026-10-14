@@ -108,6 +108,10 @@ step god_selftest 0 python scripts/god_gate.py --selftest
 step god 0 python scripts/god_gate.py --root .
 # 依赖红线（外部依赖/构建依赖只准减；构建脚本与补丁单独对账；理由登记在 spec 同目录的基线里）
 step deps_lock 0 python scripts/deps_lock.py
+# 本地 Python 面评审（只读判据：密钥字面量/shell 执行/动态代码/不安全反序列化/静默吞异常…）；
+# 默认根 `.codex-local-python/` 不存在时判「无可评审对象」通过，故干净检出与 CI 不会被它咬。
+step security_review 0 python scripts/security_review.py
+step security_selftest 0 python scripts/security_review.py --selftest
 # CI 形状锁：硬门、汇总门 needs、安全/成本基线、action 钉 SHA 不被悄悄退役
 step ci_shape 0 bash scripts/ci_shape_lock.sh .
 step typos 0 /c/vxl-wl-tools/typos.exe .

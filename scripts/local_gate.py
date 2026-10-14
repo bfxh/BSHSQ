@@ -58,6 +58,9 @@ STEPS = [
     ("cyc-gate",     ["scripts/cyc_gate.py", "--git-tracked"]),
     ("nest-gate",    ["scripts/nest_gate.py", "--git-tracked"]),
     ("args-gate",    ["scripts/args_gate.py", "--git-tracked"]),
+    # 本地 Python 面：评审 .codex-local-python/ 下的脚本；门自身可用性单列一步（照 god-gate 先例）。
+    ("security-gate",["scripts/security_review.py"]),
+    ("security-gate-selftest",["scripts/security_review.py", "--selftest"]),
     ("gate-selftest",["scripts/gate_selftest.py"]),
     ("gate-probe",   ["scripts/gate_probe.py"]),
 ]

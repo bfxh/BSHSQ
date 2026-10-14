@@ -1681,7 +1681,7 @@
       "max_type_members": 0
     },
     "scripts/local_gate.py": {
-      "file_lines": 87,
+      "file_lines": 90,
       "max_fn_lines": 17,
       "max_type_members": 0
     },
