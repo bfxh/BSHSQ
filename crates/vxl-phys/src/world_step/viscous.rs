@@ -100,6 +100,62 @@ pub(crate) struct ViscGeom {
     pub dt: f32,
 }
 
+/// 段②（2a 流体作介质）**一个体的收尾输入**（打包 ⇒ 免 7 参门）。
+/// `add_buoy_drag = false` 表示被 2b 覆盖 ⇒ **不叠**浮力/二次阻力（让位语义不变）；
+/// 但附加质量缩放照做（它缩放的是"已累加的力"，至少含重力）。
+pub(crate) struct MediumArgs {
+    /// 世界重力（浮力 `−g·ρV·frac_sub` 用）。
+    pub g: Vec3,
+    /// 介质密度（kg/m³）。
+    pub rho: f32,
+    /// 形状体积。
+    pub vol: f32,
+    /// 浸没分数。
+    pub frac_sub: f32,
+    /// 介质动力黏度（Pa·s；> 0 ⇒ 阻力走 Stokes 档）。
+    pub mu: f32,
+    /// 相对介质速度（体心 − 介质流速）。
+    pub v_rel: Vec3,
+    /// 本子步 dt。
+    pub dt: f32,
+    /// 附加质量系数 `C_m`（0 = 关）。
+    pub c_m: f32,
+    /// 迎风面积（旧的二次阻力口径用）。
+    pub area: f32,
+    /// 是否施加浮力 + 二次阻力（`false` = 2b 覆盖 ⇒ 让位）。
+    pub add_buoy_drag: bool,
+}
+
+/// 段②收尾：浮力（阿基米德）+ 阻力（μ > 0 ⇒ Stokes；否则旧的 `Cd = 1` 二次阻力，
+/// **冻结行为**）+ 附加质量缩放 ⇒ 全部经统一施加器落力。**μ = 0 且 `C_m` = 0 时与历史逐位一致**
+/// （同一条算式、同一个调用序；附加质量缩放被 `C_m ≤ 0` 短路）。
+pub(crate) fn apply_medium(bodies: &mut vxl_phys_core::BodySet, i: usize, a: &MediumArgs) {
+    if a.add_buoy_drag {
+        if a.mu > 0.0 {
+            let geom = ViscGeom {
+                vol: a.vol,
+                frac_sub: a.frac_sub,
+                mu: a.mu,
+                dt: a.dt,
+            };
+            apply_body(bodies, i, &geom, a.v_rel);
+        } else {
+            // 无数理黏度 ⇒ 旧口径（`Cd = 1` 的二次阻力）：**冻结行为**，逐位不变。
+            let mut f = -a.g * (a.rho * a.vol * a.frac_sub);
+            let sp = a.v_rel.length();
+            if a.area > 0.0 && sp > 1e-6 {
+                f += a.v_rel * (-0.5 * a.rho * DRAG_CD * a.area * sp);
+            }
+            crate::world_step::coupling::add_force(bodies, i, f, Vec3::ZERO);
+        }
+    }
+    // 附加质量：把**已累加的力**（重力 + 浮力 + 阻力）按 m/(m+m_a) 缩放（C_m = 0 ⇒ 一字不动）。
+    crate::world_step::added_mass::scale(bodies, i, a.c_m, a.rho, a.vol, a.frac_sub);
+}
+
+/// 旧口径的阻力系数（与 `medium.rs` 段①同值；分开声明以免跨函数依赖）。
+const DRAG_CD: f32 = 1.0;
+
 #[cfg(test)]
 mod tests {
     // 新文件禁 glob import（`glob-gate`）⇒ 显式列名
