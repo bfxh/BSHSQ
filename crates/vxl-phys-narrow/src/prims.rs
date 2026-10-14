@@ -14,28 +14,17 @@ pub(crate) fn sphere_convex_ab(
 ) -> Option<(Vec3, f32, Vec3)> {
     let idx = crate::support::poly_for(np, convex)?;
     np.ws.poly_b.fill(&np.ws.polys[idx], cpos, crot);
-    let (closest, d2, inside, in_n) = closest_point_on_poly(&np.ws.poly_b, center);
-    if inside {
-        // ⚠️ 穿透 = `radius − max_d`；旧写 `+ max_d` 越深报得越浅 ⇒ 球穿过实心盒（见 tests/deep_penetration.rs）
-        let max_d = max_plane_d_of(&np.ws.poly_b, center);
-        let depth = radius - max_d;
-        if depth <= 0.0 {
-            return None;
-        }
-        let surface = center - in_n * max_d;
-        Some((-in_n, depth, surface))
-    } else {
-        let dist = d2.sqrt();
-        if dist >= radius {
-            return None;
-        }
-        let n = if dist > 1e-9 {
-            (closest - center) * (1.0 / dist)
-        } else {
-            Vec3::Y
-        };
-        Some((n, radius - dist, closest))
+    let (closest, d2, inside, _in_n) = closest_point_on_poly(&np.ws.poly_b, center);
+    let dist = d2.sqrt();
+    // 体内 **或**「球心落在体表面上」（`closest − center` 只剩浮点噪声 ⇒ 方向不可用）⇒ 同一个
+    // **最近面**解析口径（口径与判据都在 `surface.rs`；穿透 = `radius − max_d`，不是 `+ max_d`）。
+    if inside || dist < crate::surface::on_surface_eps(center) {
+        return crate::surface::sphere_exit(&np.ws.poly_b, center, radius);
     }
+    if dist >= radius {
+        return None;
+    }
+    Some(((closest - center) * (1.0 / dist), radius - dist, closest))
 }
 
 /// **胶囊中心线 ↔ 凸体**：中心线取最近点后复用球的解析路径（`sphere_convex_ab`）。

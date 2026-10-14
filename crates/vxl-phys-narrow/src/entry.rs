@@ -6,17 +6,9 @@ use super::*;
 /// （那边标定 32768）。**与 `ScopedPool::min_parallel` 默认值同属巧合，不要合并这两个来源。**
 const NARROW_MIN_PARALLEL: usize = 2048;
 
-/// 内部时「最大平面距」（全部为负；面数小，代价可忽略）。
+/// 内部时「最大平面距」（全部为负；面数小，代价可忽略）。**最近面**口径见 `surface.rs`。
 pub(crate) fn max_plane_d_of(poly: &WorldPoly, p: Vec3) -> f32 {
-    let mut max_d = f32::MIN;
-    for f in 0..poly.face_normal.len() {
-        let s = poly.face_start[f] as usize;
-        let d = (p - poly.verts[s]).dot(poly.face_normal[f]);
-        if d > max_d {
-            max_d = d;
-        }
-    }
-    max_d
+    crate::surface::nearest_face_of(poly, p).0
 }
 
 impl NarrowPhase for DefaultNarrowPhase {

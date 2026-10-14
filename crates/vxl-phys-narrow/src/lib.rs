@@ -40,6 +40,7 @@ mod provider;
 mod sat;
 mod store;
 mod support;
+mod surface;
 mod types;
 pub(crate) use self::{entry::*, geom::*};
 pub use self::{mesh_store::*, phase::*, store::*, types::*};

@@ -1,15 +1,25 @@
 //! **深穿透恢复探针**（`SURVEY-RIGID-HARD-CASES §6.3①` 的判据：把球**埋进**地板半米 ⇒
 //! 允许顶出、**能量不增**、不抖）。
 //!
-//! 四条**不同体积通道**各来一档（同一场景、同一埋深、同一半径）：
-//! `mesh`（三角网提供者）、`voxel`（体素体积）、`splat`（高斯喷溅 SDF 场）、`hull`（凸体外壳）。
-//! 用途：§6.2① 说"体素/SDF 都当**表面**用，深穿透明确不保证" —— 这条把它**量出来**。
+//! 五条**不同体积通道**各来一档（同一场景、同一埋深、同一半径）：`mesh`（三角网提供者）、
+//! `voxel`（体素体积）、`splat`（高斯喷溅 SDF 场）、`hull`（凸体外壳）、`box`（静态盒，走
+//! `prims::sphere_convex_ab` 的解析腿）。用途：§6.2① 说"体素/SDF 都当**表面**用，深穿透明确不保证"
+//! —— 这条把它**量出来**。
+//!
+//! ⚠️ **`box` 与 `hull` 两档在埋 0.2 / 0.5 m 时会走"球心恰好落在顶面平面"那一 tick**（f32 累加
+//! 正好落在 `y = 0`）—— P22 ② 的侧滑就是在那一 tick 塞进来的（斜法线 / 壳角接触点）。
+//! 判据在 `tests/deep_penetration.rs`（⑤ 用 μ = 0 把摩擦这条腿关掉）。
 //!
 //! 跑法：
 //! ```text
 //! cargo run -q --release -p vxl-phys --example deep_penetration_probe
 //! PROBE_DEPTH=0.5 PROBE_TICKS=600 cargo run -q --release -p vxl-phys --example deep_penetration_probe
 //! ```
+//!
+//! 旋钮（`PROBE_*` 环境变量）：`PROBE_DEPTH`（埋深，默认 0.5）、`PROBE_TICKS`（默认 400）、
+//! `PROBE_MU`（摩擦系数，默认 0.9；**置 0** 可把横向速度/自旋全归到接触口径上）、
+//! `PROBE_SUBSTEPS`（≥1 时覆盖子步数，默认用 `PhysConfig::default`）、`PROBE_TRACE` +
+//! `PROBE_TRACE_N`（逐 tick 打印位置/速度/流形，法线 5 位小数）。
 use vxl_phys::World;
 use vxl_phys_core::{PhysConfig, Quat, Shape, Vec3};
 use vxl_phys_terrain::voxel::VoxelVolume;
@@ -90,10 +100,20 @@ fn run(
     depth: f32,
     ticks: usize,
 ) -> Reading {
-    let mut w = World::new(PhysConfig::default());
+    let subs = env_f32("PROBE_SUBSTEPS", 0.0);
+    let cfg = if subs >= 1.0 {
+        PhysConfig {
+            substeps: subs as u32,
+            ..PhysConfig::default()
+        }
+    } else {
+        PhysConfig::default()
+    };
+    let mut w = World::new(cfg);
     build(&mut w);
+    let mu = env_f32("PROBE_MU", 0.9);
     let m = w.add_material(vxl_phys_core::Material {
-        friction: vxl_phys_core::FrictionModel::Coulomb { mu: 0.9 },
+        friction: vxl_phys_core::FrictionModel::Coulomb { mu },
         restitution: 0.02,
     });
     let i = w.add_dynamic(
@@ -143,7 +163,7 @@ fn run(
                         .map(|p| format!("{:+.2},{:+.2},{:+.2}", p.point.x, p.point.y, p.point.z))
                         .unwrap_or_default();
                     format!(
-                        "({},{}) n=({:+.2},{:+.2},{:+.2}) d={d:+.4} p=({p0})",
+                        "({},{}) n=({:+.5},{:+.5},{:+.5}) d={d:+.5} p=({p0})",
                         mf.a, mf.b, mf.normal.x, mf.normal.y, mf.normal.z,
                     )
                 })

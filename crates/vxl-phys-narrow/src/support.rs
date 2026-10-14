@@ -276,14 +276,14 @@ pub(crate) fn hull_pair(
     let other: &dyn gjk::Support = if a_is_hull { &ub } else { &ua };
     let plane = n.dot(other.support(n));
     let pts = hull_points_in_band(&np.ws.hull_pts[side], plane, n, np.skin);
-    if pts.is_empty() {
+    let Some(pts) = crate::hull_sphere::band_points(pts, other_shape, cb, n) else {
         return;
-    }
+    };
     out.push(Manifold {
         a,
         b,
         normal: -n_p, // 流形约定：a → b
-        points: ContactPoints::from_slice(&pts),
+        points: pts,
     });
 }
 
