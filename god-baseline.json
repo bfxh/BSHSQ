@@ -653,11 +653,16 @@
     "crates/vxl-phys-narrow/src/hf.rs": {
       "file_lines": 129,
       "max_fn_lines": 50,
-      "max_type_members": 3
+      "max_type_members": 0
     },
     "crates/vxl-phys-narrow/src/lib.rs": {
-      "file_lines": 51,
+      "file_lines": 52,
       "max_fn_lines": 0,
+      "max_type_members": 0
+    },
+    "crates/vxl-phys-narrow/src/mesh_faces.rs": {
+      "file_lines": 494,
+      "max_fn_lines": 65,
       "max_type_members": 0
     },
     "crates/vxl-phys-narrow/src/mesh_grid.rs": {
@@ -666,14 +671,14 @@
       "max_type_members": 2
     },
     "crates/vxl-phys-narrow/src/mesh_mesh.rs": {
-      "file_lines": 164,
+      "file_lines": 161,
       "max_fn_lines": 72,
-      "max_type_members": 3
+      "max_type_members": 0
     },
     "crates/vxl-phys-narrow/src/mesh_pair.rs": {
-      "file_lines": 561,
+      "file_lines": 536,
       "max_fn_lines": 86,
-      "max_type_members": 5
+      "max_type_members": 0
     },
     "crates/vxl-phys-narrow/src/mesh_store.rs": {
       "file_lines": 316,
@@ -693,7 +698,7 @@
     "crates/vxl-phys-narrow/src/pair_shaped/capsule.rs": {
       "file_lines": 208,
       "max_fn_lines": 94,
-      "max_type_members": 2
+      "max_type_members": 0
     },
     "crates/vxl-phys-narrow/src/phase.rs": {
       "file_lines": 180,
@@ -706,9 +711,9 @@
       "max_type_members": 6
     },
     "crates/vxl-phys-narrow/src/prims.rs": {
-      "file_lines": 156,
+      "file_lines": 108,
       "max_fn_lines": 38,
-      "max_type_members": 4
+      "max_type_members": 0
     },
     "crates/vxl-phys-narrow/src/provider.rs": {
       "file_lines": 257,
@@ -716,9 +721,14 @@
       "max_type_members": 2
     },
     "crates/vxl-phys-narrow/src/sat.rs": {
-      "file_lines": 455,
+      "file_lines": 452,
       "max_fn_lines": 76,
-      "max_type_members": 10
+      "max_type_members": 0
+    },
+    "crates/vxl-phys-narrow/src/select.rs": {
+      "file_lines": 47,
+      "max_fn_lines": 33,
+      "max_type_members": 0
     },
     "crates/vxl-phys-narrow/src/simd.rs": {
       "file_lines": 388,
@@ -733,7 +743,7 @@
     "crates/vxl-phys-narrow/src/support.rs": {
       "file_lines": 427,
       "max_fn_lines": 88,
-      "max_type_members": 17
+      "max_type_members": 9
     },
     "crates/vxl-phys-narrow/src/tests.rs": {
       "file_lines": 33,
@@ -1030,6 +1040,11 @@
       "max_fn_lines": 26,
       "max_type_members": 0
     },
+    "crates/vxl-phys-solver/src/joints/project.rs": {
+      "file_lines": 102,
+      "max_fn_lines": 21,
+      "max_type_members": 3
+    },
     "crates/vxl-phys-solver/src/joints/solve.rs": {
       "file_lines": 387,
       "max_fn_lines": 66,
@@ -1039,11 +1054,6 @@
       "file_lines": 107,
       "max_fn_lines": 16,
       "max_type_members": 12
-    },
-    "crates/vxl-phys-solver/src/joints/project.rs": {
-      "file_lines": 102,
-      "max_fn_lines": 21,
-      "max_type_members": 3
     },
     "crates/vxl-phys-solver/src/lib.rs": {
       "file_lines": 99,
@@ -1480,11 +1490,6 @@
       "max_fn_lines": 114,
       "max_type_members": 0
     },
-    "crates/vxl-phys/tests/friction_anisotropy_contracts.rs": {
-      "file_lines": 208,
-      "max_fn_lines": 40,
-      "max_type_members": 0
-    },
     "crates/vxl-phys/tests/fluid_boundary.rs": {
       "file_lines": 263,
       "max_fn_lines": 56,
@@ -1503,6 +1508,11 @@
     "crates/vxl-phys/tests/fluid_reaction_torque.rs": {
       "file_lines": 278,
       "max_fn_lines": 77,
+      "max_type_members": 0
+    },
+    "crates/vxl-phys/tests/friction_anisotropy_contracts.rs": {
+      "file_lines": 208,
+      "max_fn_lines": 40,
       "max_type_members": 0
     },
     "crates/vxl-phys/tests/kinematic_contracts.rs": {

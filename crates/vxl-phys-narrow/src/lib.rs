@@ -38,6 +38,7 @@ mod phase;
 mod prims;
 mod provider;
 mod sat;
+mod select;
 mod store;
 mod support;
 mod surface;

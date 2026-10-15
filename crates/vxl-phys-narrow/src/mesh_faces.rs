@@ -30,7 +30,7 @@
 //! ⚠️ 法线符号由"**盒心在三角哪一侧**"定 —— 不引入内外判定，但保证体**从哪一侧来就被推回
 //! 哪一侧**（提供者侧 `surface_crossing` 同款口径）。
 use super::{point_shape, point_triangle};
-use crate::prims::select_contacts;
+use crate::select::select_contacts;
 use crate::{ContactPoint, ContactPoints, DefaultNarrowPhase, Manifold};
 use vxl_phys_core::{Mat3, Quat, Shape, Vec3};
 

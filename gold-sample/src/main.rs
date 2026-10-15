@@ -197,6 +197,23 @@ fn summary_vxl(w: &World, ids: &[usize]) -> Sum {
     }
 }
 
+/// 末态穿透读数：全流形最大 `depth` + 「深于 `slop`」的接触**点数**（引擎自有穿透容差
+/// `PhysConfig::linear_slop` = 5 mm）。为什么要计数而不只看 max：`max` 由单个点决定
+/// （离群脆弱，与 `max|Δpos|` 同病），计数是稳健统计量，语义也直接 ——「有没有接触停在
+/// 契约之外」。穿透 > slop ⇒ 去穿透偏置恒不为 0 ⇒ 体永不入睡（P20 的根因）。
+fn penetration(w: &World, slop: f32) -> (f32, usize) {
+    let (mut deep, mut n_over) = (0.0f32, 0usize);
+    for m in w.manifolds() {
+        for p in &m.points {
+            deep = deep.max(p.depth);
+            if p.depth > slop {
+                n_over += 1;
+            }
+        }
+    }
+    (deep, n_over)
+}
+
 /// 超阈分解（仅线性 / 仅角速 / 双超 / 总数；阈值 4 cm/s、0.05 rad/s）。
 ///
 /// **为什么要按 50 tick 采样**（2026-09-20 教训）：塔的 KE 在 tick ~150 后就进入
@@ -467,6 +484,8 @@ fn main() {
     // 已吃过同类教训：子步加到 32 时它反飙而超阈体数继续降）⇒ 同报 `p95/mean`，
     // 用于判别"整体系统性偏移"还是"一个离群体"。
     let mut max_d = 0.0f32;
+    let mut max_dxz = 0.0f32;
+    let mut max_dy = 0.0f32;
     let mut ds: Vec<f32> = Vec::new();
     println!("== 末态参照体位姿（vxl vs rapier）：");
     for &k in &refs {
@@ -475,6 +494,9 @@ fn main() {
         let rp = rw.bodies.get(rhs[k]).expect("body").translation();
         let d = (vp - Vec3::new(rp.x, rp.y, rp.z)).length();
         max_d = max_d.max(d);
+        // 分解：横向（xz 平面距离）与竖向（|Δy|）分别记账 —— 两轴量的不是同一件事（见下）。
+        max_dxz = max_dxz.max((vp.x - rp.x).hypot(vp.z - rp.z));
+        max_dy = max_dy.max((vp.y - rp.y).abs());
         ds.push(d);
         println!(
             "  体{k:5} vxl({:6.3},{:6.3},{:6.3}) rapier({:6.3},{:6.3},{:6.3}) |Δ| {d:.4}",
@@ -531,9 +553,34 @@ fn main() {
     // ⇒ 1% = 0.13 m ⇒ 真正起约束的是 0.1 m 那一侧）。
     let h_nom = s.layers as f32 * s.spacing;
     let tol_d = 0.1f32.min(0.01 * h_nom);
+    // 旧口径 `max|Δpos| ≤ min(0.1, 1%×场景高)` **已拆轴、不再作判据**（下行只留读数做
+    // 换代/漂移追踪）：它的竖向项量的是「**与参照一样软不软**」——参照 Rapier 自己每层沉
+    // ~7 mm、最深穿透 25 mm（软接触），所以「过」曾只意味着**跟参照一样软**，而不是横向准。
+    println!("== 位置列历史读数（旧口径 max|Δpos| ≤ {tol_d:.4} m = min(0.1, 1%×{h_nom:.2} m)，已拆轴）：max {max_d:.4} m");
+    // **判据拆轴**（2026-10-16）：`max|Δpos|` 的两项量的是两件事 —— 竖向项是「**和参照
+    // 一样软不软**」（Rapier 自己每层沉 ~7 mm，见 `OPEN-PROBLEMS.md` P20 双轴追注），
+    // 横向项才是真·位置保真。故拆成两条**各自直接可判**的判据，阈值各有出处：
+    //   ① 横向：`max|Δxz| ≤ tol`（vs Rapier；保真轴，阈值与旧口径同一支）
+    //   ② 竖向：末态**最深穿透 ≤ `linear_slop`**（引擎自有穿透容差，`PhysConfig` 明写 5 mm）
+    //      —— 穿透深于 slop ⇒ 去穿透偏置恒不为 0 ⇒ 体永不入睡（**P20 的根因**）
+    let slop = PhysConfig::default().linear_slop;
+    let (deep_f, n_over) = penetration(&vw, slop);
+    println!("== 位置列分解（参照体，vs Rapier）：横向 max|Δxz| {max_dxz:.4} | 竖向 max|Δy| {max_dy:.4} m");
     println!(
-        "== 位置列判据（max|Δpos| ≤ {tol_d:.4} m = min(0.1, 1%×{h_nom:.2} m)）：max {max_d:.4} ⇒ {}",
-        if max_d <= tol_d { "✅ 过" } else { "⚠️ 超" }
+        "== 横向判据（max|Δxz| ≤ {tol_d:.4} m）：max {max_dxz:.4} ⇒ {}",
+        if max_dxz <= tol_d {
+            "✅ 过"
+        } else {
+            "⚠️ 超"
+        }
+    );
+    println!(
+        "== 竖向判据（末态最深穿透 ≤ linear_slop {slop:.4} m；超阈点 {n_over}）：最深 {deep_f:.4} ⇒ {}",
+        if deep_f <= slop {
+            "✅ 过"
+        } else {
+            "⚠️ 超（已知 P20 债务，见 OPEN-PROBLEMS）"
+        }
     );
     // 嗡振画像：超阈分解（线性/角速分别）+ 最活跃体明细（含层高）。
     // 计数复用 `over_threshold`（与 50 tick 随行打印**同源** ⇒ 两处不会漂开）。
@@ -587,9 +634,21 @@ fn main() {
         if (mean_d - fz.mean_dpos).abs() > 1e-4 {
             bad.push(format!("Δpos mean {mean_d:.4} ≠ 基线 {:.4}", fz.mean_dpos));
         }
+        if (max_dxz - fz.max_dxz).abs() > 1e-4 {
+            bad.push(format!(
+                "横向 max|Δxz| {max_dxz:.4} ≠ 基线 {:.4}",
+                fz.max_dxz
+            ));
+        }
+        if (deep_f - fz.deep).abs() > 1e-4 {
+            bad.push(format!("最深穿透 {deep_f:.4} ≠ 基线 {:.4}", fz.deep));
+        }
+        if n_over != fz.n_over {
+            bad.push(format!("超 slop 接触点 {n_over} ≠ 基线 {}", fz.n_over));
+        }
         if bad.is_empty() {
             println!(
-                "✅ 金样基线 PASS（{scene_name} / {ticks} tick）：入睡 {}/{}, 超阈 {ol}/{oa}/{ob}, Δpos max {max_d:.4} / mean {mean_d:.4}",
+                "✅ 金样基线 PASS（{scene_name} / {ticks} tick）：入睡 {}/{}, 超阈 {ol}/{oa}/{ob}, 横向 {max_dxz:.4} / 穿透 {deep_f:.4}（超 slop 点 {n_over}）, Δpos max {max_d:.4} / mean {mean_d:.4}",
                 a.sleeping,
                 vids.len()
             );
@@ -605,7 +664,9 @@ fn main() {
     }
 }
 
-/// 冻结基线（配方 → 读数）：四项都要逐计数/逐值相符，`Δpos` 用 1e-4 容差。
+/// 冻结基线（配方 → 读数）：入睡/三超阈计数**逐计数**相符，其余浮点读数用 1e-4 容差。
+/// 三轴各管一件事：**横向** `max|Δxz|`（保真）、**竖向** 末态最深穿透 + 超 `slop` 点数
+/// （自身物理契约）、**历史** `max|Δpos|`（旧口径读数，只做漂移追踪）。
 struct Frozen {
     sleeping: usize,
     ol: usize,
@@ -613,6 +674,12 @@ struct Frozen {
     ob: usize,
     max_dpos: f32,
     mean_dpos: f32,
+    /// 横向轴（`max|Δxz|` vs Rapier）：**保真判据所在轴**（1e-4 容差）。
+    max_dxz: f32,
+    /// 竖向轴（末态最深穿透）与「深于 `linear_slop` 的接触点数」：**自身物理契约**
+    /// （穿透 > slop ⇒ 去穿透偏置恒不为 0 ⇒ 体永不入睡，P20）。点数用精确比较。
+    deep: f32,
+    n_over: usize,
 }
 
 /// 只认**文档里那条门禁配方**（`docs/RECIPES.md` §金样门）；其余配方返回 `None` ⇒ 跳过判定
@@ -631,6 +698,13 @@ fn frozen_baseline(
     };
     match scene {
         // col45 / pile5：`600 16 0.01 4 3.0 30 4`
+        // ⚠️ 2026-10-16：选点规则**回退到原口径**（按深度序 + 空间去重 ≤4）。同日试过
+        // 「并列带内铺开（变体 B）」与「并列带内取最靠面心（变体 C）」：两者都在本场景与
+        // tower25 上把穿透/入睡修好（tower25 383 点超 slop → 0、入睡 2396 → 2500），
+        // 但都退化 1 万密堆压力档与宽堆聚合指标（默认档 Σv² 1.8124 → 3.01~3.09、
+        // `arena_bench pyramid` Σv² 0.7051 → 1.10~1.91）；且并列带规模/跨度分布在
+        // 「沉降」与「密堆坍塌」两场景族间统计无差别 ⇒ 无「限定规则」可分离。取数见
+        // `docs/EXPERIMENTS.md` / `docs/OPEN-PROBLEMS.md` §P20。
         "col45" if same(600, 16, 0.01, 4, 4) => Some(Frozen {
             sleeping: 45,
             ol: 0,
@@ -638,6 +712,9 @@ fn frozen_baseline(
             ob: 0,
             max_dpos: 0.0034,
             mean_dpos: 0.0016,
+            max_dxz: 0.0016,
+            deep: 0.0000,
+            n_over: 0,
         }),
         "pile5" if same(600, 16, 0.01, 4, 4) => Some(Frozen {
             sleeping: 2000,
@@ -646,8 +723,14 @@ fn frozen_baseline(
             ob: 0,
             max_dpos: 0.0041,
             mean_dpos: 0.0020,
+            max_dxz: 0.0032,
+            deep: 0.0000,
+            n_over: 0,
         }),
         // tower25：`2400 16 0.01 1 3.0 30 16`（塔要长跑才收敛）
+        // ⚠️ 竖向轴在本口径下**未达契约**（最深穿透 0.0063 > `linear_slop` 0.005、383 个
+        // 接触点超阈 ⇒ 去穿透偏置恒不为 0 ⇒ 104 个体永不入睡）：这是**已知 P20 债务**，
+        // 基线如实记录该读数（判据行照打 ⚠️）；本门管**漂移**，不管阈值。
         "tower25" if same(2400, 16, 0.01, 1, 16) => Some(Frozen {
             sleeping: 2396,
             ol: 0,
@@ -655,6 +738,9 @@ fn frozen_baseline(
             ob: 0,
             max_dpos: 0.0950,
             mean_dpos: 0.0572,
+            max_dxz: 0.0422,
+            deep: 0.0063,
+            n_over: 383,
         }),
         _ => None,
     }

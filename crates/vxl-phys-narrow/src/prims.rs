@@ -1,4 +1,4 @@
-//! prims：球-凸体 / 胶囊-凸体 / 接触点选点的**模块级自由函数**
+//! prims：球-凸体 / 胶囊-凸体的**模块级自由函数**（接触点选点在 `select.rs`）
 //! （2026-10-06 从 `impl DefaultNarrowPhase` 搬出；语义未改）。
 use super::*;
 
@@ -104,41 +104,4 @@ pub(crate) fn capsule_reach(
             Some((n, -depth, p, p))
         }
     }
-}
-
-/// 接触点统一选点：按深度降序 + 空间去重（min_sep 内视为同一点）+ 截断 ≤4。
-/// 展平多面体的同一顶点会以浮点噪声级差异重复出现，不去重会造成
-/// 单角多倍冲量 → 永续 rocking（能量泵）。
-pub(crate) fn select_contacts(np: &mut DefaultNarrowPhase) -> bool {
-    let min_sep = np.min_point_sep;
-    if np.ws.cand.is_empty() {
-        return false;
-    }
-    np.ws.cand.sort_by(|x, y| {
-        y.depth
-            .total_cmp(&x.depth)
-            .then(x.point.x.total_cmp(&y.point.x))
-            .then(x.point.y.total_cmp(&y.point.y))
-            .then(x.point.z.total_cmp(&y.point.z))
-    });
-    let min2 = min_sep * min_sep;
-    // 复用 scratch（T3：旧实现每调用一次 Vec::with_capacity(4) —— 8B 场景
-    // ~22 万次/帧的堆分配）。语义逐位不变：按深度序取 ≤4 个非重复点。
-    let mut kept = std::mem::take(&mut np.ws.kept_buf);
-    kept.clear();
-    for &c in np.ws.cand.iter() {
-        if kept.len() >= 4 {
-            break;
-        }
-        let dup = kept
-            .iter()
-            .any(|k| (k.point - c.point).length_squared() < min2);
-        if !dup {
-            kept.push(c);
-        }
-    }
-    np.ws.cand.clear();
-    np.ws.cand.extend_from_slice(&kept);
-    np.ws.kept_buf = kept;
-    !np.ws.cand.is_empty()
 }
