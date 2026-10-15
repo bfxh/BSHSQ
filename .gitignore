@@ -8,5 +8,5 @@
 # Python 缓存（门脚本以 python 跑 ⇒ 会在 scripts/ 下生成 __pycache__/）
 __pycache__/
 
-# 本地 Python 脚本唯一存放处：目录内容一律不入库（见 CLAUDE.md 的 Python 边界）
+# 本地 Python 脚本唯一存放处：内容一律不入库（由统一入口维护）
 .codex-local-python/
