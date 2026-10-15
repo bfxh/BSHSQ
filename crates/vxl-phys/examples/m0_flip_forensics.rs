@@ -338,6 +338,34 @@ impl WakeTally {
     }
 }
 
+/// 单体一次观测：把 `i` 的醒着邻居按判据归类并入 `t`（角速 hot 的来源记进板上）。
+fn tally_hot_one(w: &World, i: usize, cfg: &PhysConfig, t: &mut WakeTally) {
+    let (mut f, mut l, mut g) = (false, false, false);
+    for (o, _, _, kind) in hot_nbrs(w, i, cfg) {
+        match kind {
+            Hot::Fast => f = true,
+            Hot::Lin => l = true,
+            Hot::Ang => {
+                g = true;
+                t.board[o as usize] += 1;
+            }
+            Hot::Quiet => {}
+        }
+    }
+    if f {
+        t.fast += 1;
+    }
+    if l {
+        t.lin += 1;
+    }
+    if g {
+        t.ang += 1;
+    }
+    if !f && !l && !g {
+        t.silent += 1;
+    }
+}
+
 /// 逐 tick 扫"睡→醒"翻转，**复算** hot 判据并归类（探针不复现门与岛的调用序，
 /// 只复算"那一刻同流形醒着邻居是否够 hot"这一条）。
 fn wake_attribution(w: &mut World, dyns: &[usize], ticks: u32, cfg: &PhysConfig) -> WakeTally {
@@ -352,30 +380,7 @@ fn wake_attribution(w: &mut World, dyns: &[usize], ticks: u32, cfg: &PhysConfig)
             let a = w.bodies.awake[i];
             if a && !prev[k] {
                 t.flips += 1;
-                let (mut f, mut l, mut g) = (false, false, false);
-                for (o, _, _, kind) in hot_nbrs(w, i, cfg) {
-                    match kind {
-                        Hot::Fast => f = true,
-                        Hot::Lin => l = true,
-                        Hot::Ang => {
-                            g = true;
-                            t.board[o as usize] += 1;
-                        }
-                        Hot::Quiet => {}
-                    }
-                }
-                if f {
-                    t.fast += 1;
-                }
-                if l {
-                    t.lin += 1;
-                }
-                if g {
-                    t.ang += 1;
-                }
-                if !f && !l && !g {
-                    t.silent += 1;
-                }
+                tally_hot_one(w, i, cfg, &mut t);
             }
             prev[k] = a;
         }
@@ -576,16 +581,8 @@ fn minimal_main(rest: &[String]) {
     minimal_scene(&cfg, yaw_deg, ticks);
 }
 
-fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.first().map(String::as_str) == Some("min") {
-        minimal_main(&args[1..]);
-        return;
-    }
-    let k = knobs();
-    let cfg = k.config();
-    println!("== 档：{}", k.label());
-    // 第一趟：稳态抖动的**双轴**读数（含判据分类）。
+/// 第一趟：稳态抖动的**双轴**读数（含判据分类），按 `cad` 采样打印。
+fn pass_jitter(k: &Knobs, cfg: &PhysConfig) {
     let (mut w, dyns) = k.scene();
     println!(
         "== 抖动归因：tick | 醒着 | |v|<1e-3 | |v|≥{:.2} | |ω|≥{:.2} | 计时器=0 | |v| p50/p90/max | |ω| p50/p90/max",
@@ -595,11 +592,13 @@ fn main() {
     for t in 1..=k.ticks {
         w.step();
         if t % cad == 0 || t == k.ticks {
-            println!("{}", jitter_report(&w, &dyns, &cfg).line(t));
+            println!("{}", jitter_report(&w, &dyns, cfg).line(t));
         }
     }
+}
 
-    // 第二趟：翻转榜（哪个体在翻）。
+/// 第二趟：翻转榜（哪个体在翻）+ 合计；返回头号体 id（喂给末窗与快照两趟）。
+fn pass_flip_board(k: &Knobs) -> usize {
     let (mut w2, dyns2) = k.scene();
     let (flips, when) = flips_of(&mut w2, &dyns2, k.ticks);
     let mut order: Vec<usize> = (0..dyns2.len()).collect();
@@ -630,10 +629,13 @@ fn main() {
             "**不过**"
         }
     );
+    dyns2[order[0]]
+}
 
-    // 第三趟：唤醒归因（谁按的哪条判据）。
+/// 第三趟：唤醒归因（谁按的哪条判据）。
+fn pass_wake_attribution(k: &Knobs, cfg: &PhysConfig) {
     let (mut w3, dyns3) = k.scene();
-    let tally = wake_attribution(&mut w3, &dyns3, k.ticks, &cfg);
+    let tally = wake_attribution(&mut w3, &dyns3, k.ticks, cfg);
     println!(
         "== 唤醒归因（{} tick）：翻转 {} 次 ⇒ 强撞直通 {} / 线性 hot {} / 角速 hot {} / 无来源 {}",
         k.ticks, tally.flips, tally.fast, tally.lin, tally.ang, tally.silent
@@ -642,9 +644,11 @@ fn main() {
         "   角速 hot 来源榜（体 id, 记数）：{:?}",
         tally.top_sources(6)
     );
+}
 
-    // 第四趟：头号体 + 其动态邻居在末窗(500→600)的 |v|/|ω| 极值（证"残余抖动不衰减"）。
-    let top = dyns2[order[0]];
+/// 第四趟：头号体 + 其动态邻居（含二阶）在末窗的 `|v|`/`|ω|` 极值，以及末窗末的邻接表
+/// （证"残余抖动不衰减"）。
+fn pass_last_window(k: &Knobs, top: usize) {
     let (mut w4, _) = k.scene();
     let warm = k.ticks * 5 / 6;
     for _ in 0..warm {
@@ -674,6 +678,22 @@ fn main() {
             dyn_nbrs(&w4, i)
         );
     }
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("min") {
+        minimal_main(&args[1..]);
+        return;
+    }
+    let k = knobs();
+    let cfg = k.config();
+    println!("== 档：{}", k.label());
+    pass_jitter(&k, &cfg);
+    let top = pass_flip_board(&k);
+    pass_wake_attribution(&k, &cfg);
+    pass_last_window(&k, top);
+    // 第五趟：头号体的逐次翻转快照。
     let (mut w5, _) = k.scene();
     head_flip_trace(&mut w5, top, k.ticks, &cfg);
 }
