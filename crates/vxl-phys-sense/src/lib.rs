@@ -15,12 +15,22 @@
 //! 3. **预算**：每 tick cue 数有**上界**，且超预算时按 gain **降序**丢最弱的（显式规则，
 //!    不许默认全播——万级密堆一 tick 能产生上千次冲击，全播在听感上等于白噪）。
 //!
-//! **S1 范围**：冲击 → cue 归约 + 预算/优先级 + JSONL dump。持续接触（S2）、材质表（S3）、
-//! 震动设备包络（S4）见 `docs/ROUTE.md` §3.2 分期表。
+//! **分期**：S1 = 冲击（峰值）→ cue + 预算/优先级 + JSONL dump；**S2 = 持续接触（滑 / 滚）→
+//! 连续量 cue**（[`SlideCue`] / [`SenseExt::slide_cues`]，实现见 `slide.rs`）；**S3 = 材质表 /
+//! 资产映射**（[`SoundTable`] / [`map_banks`]：材质槽 → 音色组 id，**缺项显式拒绝**，实现见
+//! `table.rs`）；震动设备包络（S4）见 `docs/ROUTE.md` §3.2 分期表。
 
 #![forbid(unsafe_code)]
 
+mod slide;
+mod table;
+
 use vxl_phys::World;
+
+pub use slide::{
+    slide_jsonl, slide_jsonl_banked, write_slide_jsonl, write_slide_jsonl_banked, SlideCue,
+};
+pub use table::{map_banks, BankId, MaterialSlot, SoundTable, TableError};
 
 /// **一条感官 cue**（一次冲击的归约结果；`Copy` ⇒ 可当值传递，无生命周期包袱）。
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -54,6 +64,12 @@ pub struct SenseConfig {
     pub heavy_gain: f32,
     /// 轻击阈值：`gain ≥ light_gain` ⇒ 优先级 1（否则 2）。
     pub light_gain: f32,
+    /// **S2：每 tick 持续接触 cue 上界**（硬预算；超出按切向速度降序丢最慢的）。
+    pub max_slides_per_tick: usize,
+    /// **S2：低于此切向相对速度的接触点不产 cue**（"静止体不产生循环音"；`0` = 不过滤）。
+    pub min_slide_speed: f32,
+    /// **S2：满响的切向速度**：`gain = clamp(speed / full_slide_speed, 0, 1)`。
+    pub full_slide_speed: f32,
 }
 
 impl Default for SenseConfig {
@@ -67,6 +83,12 @@ impl Default for SenseConfig {
             full_approach: 8.0,
             heavy_gain: 0.6,
             light_gain: 0.25,
+            max_slides_per_tick: 16,
+            // 静置堆切向速度是数值噪声量级（远低于 0.05 m/s）；0.1 m/s 之上才当"真的在滑"
+            // （人手推一把 / 落体擦墙的量级都远超它）。
+            min_slide_speed: 0.1,
+            // 4 m/s 满响：摩擦滑降的稳态速度量级；再快也封顶（避免 gain 长时间顶在 1 无分辨力）。
+            full_slide_speed: 4.0,
         }
     }
 }
@@ -94,6 +116,17 @@ pub trait SenseExt {
     /// **只读契约**：实现只持有 `&self`，不借出任何 `&mut`；同一个 `out` 可跨 tick 反复追加
     /// （调用方自己决定要不要 `clear`）。
     fn sense_cues(&self, cfg: &SenseConfig, out: &mut Vec<Cue>) -> SenseStats;
+
+    /// **S2**：归约**本 tick**的持续接触（滑 / 滚）→ [`SlideCue`]，**追加**到 `out`。
+    ///
+    /// 事件源是 [`World::manifolds()`]：逐流形逐接触点算**切向相对速度**（相对速度去法向分量
+    /// 后的模），按**体**取本 tick 峰值发一条。**只读契约同 [`SenseExt::sense_cues`]**（不借出
+    /// `&mut`、不持有状态 ⇒ 零干扰；不记"上一 tick 是否在滑"，循环段由消费方连点成段）。
+    ///
+    /// `SenseStats` 字段在 S2 口径下的含义（与 S1 逐字段对应）：`records` = 扫过的接触点数；
+    /// `candidates` = 过 `min_slide_speed` 的点数；`emitted` = 写出的 cue 数（≤ 滑动体数）；
+    /// `dropped_weak` = 点级过滤数；`dropped_budget` = 因超 `max_slides_per_tick` 丢的**体**数。
+    fn slide_cues(&self, cfg: &SenseConfig, out: &mut Vec<SlideCue>) -> SenseStats;
 }
 
 impl SenseExt for World {
@@ -144,6 +177,11 @@ impl SenseExt for World {
         out.extend(cand.into_iter().map(|c| c.2));
         stats
     }
+
+    /// S2 持续接触归约（本体在 `slide::reduce_slides`；这里只委派，保持单一 `impl` 块）。
+    fn slide_cues(&self, cfg: &SenseConfig, out: &mut Vec<SlideCue>) -> SenseStats {
+        slide::reduce_slides(self, cfg, out)
+    }
 }
 
 /// 冲击体的材质槽（体号越界 ⇒ 槽 0 = 默认材质，口径同求解器 `material_pair` 的兜底）。
@@ -185,11 +223,27 @@ fn priority_of(gain: f32, cfg: &SenseConfig) -> u8 {
 /// 字段序固定：`tick / body / mat / gain / pos / approach / prio`。不写时间戳、不写平台信息
 /// （否则"机器无关"立刻失效）。
 pub fn write_jsonl<W: std::io::Write>(w: &mut W, cues: &[Cue]) -> std::io::Result<()> {
-    for c in cues {
-        writeln!(
+    write_jsonl_banked(w, cues, None)
+}
+
+/// 同 [`write_jsonl`]，但可**附带音色组 id**（S3）：`banks` 为 `Some` 时每行多一个 `"bank"`
+/// 字段（**追加在行尾**，前面字段逐字不变 ⇒ `None` 与 [`write_jsonl`] 逐字节相同，S1 基线不受
+/// 影响）。`banks` 长度与 cue 数不符 ⇒ `InvalidInput`（不做"部分映射"：半张表比直接报错更难查）。
+pub fn write_jsonl_banked<W: std::io::Write>(
+    w: &mut W,
+    cues: &[Cue],
+    banks: Option<&[BankId]>,
+) -> std::io::Result<()> {
+    if let Some(b) = banks {
+        if b.len() != cues.len() {
+            return Err(bank_len_mismatch(b.len(), cues.len()));
+        }
+    }
+    for (i, c) in cues.iter().enumerate() {
+        write!(
             w,
             "{{\"tick\":{},\"body\":{},\"mat\":{},\"gain\":{:.6},\"pos\":[{:.6},{:.6},{:.6}],\
-             \"approach\":{:.6},\"prio\":{}}}",
+             \"approach\":{:.6},\"prio\":{}",
             c.tick,
             c.body,
             c.material,
@@ -200,8 +254,20 @@ pub fn write_jsonl<W: std::io::Write>(w: &mut W, cues: &[Cue]) -> std::io::Resul
             c.approach,
             c.priority
         )?;
+        if let Some(b) = banks {
+            write!(w, ",\"bank\":{}", b[i].0)?;
+        }
+        writeln!(w, "}}")?;
     }
     Ok(())
+}
+
+/// `banks` 与 cue 数不符时的 I/O 错（调用方应保证等长，见 [`map_banks`]）。
+pub(crate) fn bank_len_mismatch(banks: usize, cues: usize) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        format!("banks 长度 {banks} 与 cue 数 {cues} 不一致"),
+    )
 }
 
 /// 便捷：cue 切片 → JSONL 字符串（判据/工具链用）。
@@ -209,6 +275,15 @@ pub fn jsonl(cues: &[Cue]) -> String {
     let mut s = Vec::new();
     // 写内存 `Vec<u8>` 不会失败（它的 `Write` 实现不返回 Err）；真出错时给空串而不是 panic。
     if write_jsonl(&mut s, cues).is_err() {
+        return String::new();
+    }
+    String::from_utf8_lossy(&s).into_owned()
+}
+
+/// 便捷：带音色组 id 的 cue 流 → JSONL 字符串（S3 工具链用；`banks` 需与 `cues` 等长）。
+pub fn jsonl_banked(cues: &[Cue], banks: &[BankId]) -> String {
+    let mut s = Vec::new();
+    if write_jsonl_banked(&mut s, cues, Some(banks)).is_err() {
         return String::new();
     }
     String::from_utf8_lossy(&s).into_owned()

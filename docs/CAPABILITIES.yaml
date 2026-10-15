@@ -444,6 +444,50 @@ capabilities:
           基线场景（体素地板 + 64 盒雨 / 300 tick / 预算 16）：冲击 2732 次 ⇒ cue 957 条、
           预算丢弃 1737 条、轻碰丢弃 38 条、峰值 16 条/tick（预算被顶满）。这组数是"预算真的
           在做事"的读证；场景空转（0 冲击）会被判据直接判红，不许假绿。
+      - id: s2_landed
+        note: >-
+          **S2 已落地（2026-10-16）**：`crates/vxl-phys-sense/src/slide.rs`——`pub struct
+          SlideCue`（tick / body / material / speed / pos / normal / priority）+
+          `SenseExt::slide_cues`（`World` 仍未加任何方法，扩展 trait 判据**第二次**成立）。
+          事件源 `World::manifolds()`：逐流形逐接触点算**切向相对速度**（相对速度 `v_b − v_a`
+          去法向分量，点速含旋转项 `v + ω×r`），按**体**取本 tick 峰值发一条；**无状态**——
+          不记"上一 tick 是否在滑"，循环段由消费方按 `(tick, body)` 连点成段。新增 `SenseConfig`
+          三参：`max_slides_per_tick`（每 tick 体数上界）/ `min_slide_speed`（"静止体不产生
+          循环音"的阈值）/ `full_slide_speed`（gain 满响速度）。判据两侧：库侧
+          `tests/slide_contracts.rs`（4 条：零干扰 / 逐字一致 / 预算 top-k 保留最快 / 静置段不产
+          cue），工具链侧 `scripts/gate_sense.sh` 的 `slide` 模式（同三道判据，基线
+          `bench/baselines/sense_dump_slide_300x64.json`）。
+      - id: s2_measurement
+        note: >-
+          S2 基线场景（**平滑静态盒地板** + 64 个贴地盒全带 `+x 3 m/s` / 300 tick / 预算 16）：
+          接触点 41552 ⇒ slide cue 608 条、预算丢弃 1824 条、静置弱过滤 32080 条、峰值
+          16 条/tick。为什么 S2 用**平滑**地板而 S1 用**体素**：S2 吃 `World::manifolds()`
+          （**不要求** provider），而体素地板的棱会让盒子**翻滚**（实测 `ωz` 冲到 ±8 rad/s），
+          切向速度信号被搅乱；平滑地板给的才是干净、稳态的持续滑移。
+      - id: s3_landed
+        note: >-
+          **S3 已落地（2026-10-16）**：`crates/vxl-phys-sense/src/table.rs`——`SoundTable`
+          （`<材质槽> -> <音色组 id>` 外部文本表：`#` 注释/空行忽略、升序定点存储 + 二分查找 ⇒
+          与书写顺序无关）、`BankId`、`TableError`（`Missing{material}` / `Syntax{line,reason}` /
+          `Duplicate{line,material}`，都带 Display + Error）、`trait MaterialSlot`（同时 impl 给
+          `Cue` 与 `SlideCue` ⇒ **S1/S2 两条流共用同一张表同一套判据**）、`map_banks(&SoundTable,
+          &[T])`。挂载方式是**追加不破坏**：`write_jsonl_banked` / `slide_jsonl_banked` 在行尾追加
+          `"bank"` 字段，原 `write_jsonl` / `slide_jsonl` 转调并传 `None` ⇒ 不给表时输出与 S1/S2
+          **逐字节相同**（两条基线不受影响，已实测）。**核心判据：缺项显式拒绝**——表里查不到的
+          材质槽 ⇒ 报错并点名该槽 + **退出码 2**，**绝不回落默认音**；`map_banks` 全有或全无
+          （不在缺项时部分映射）。`Material` 一个字段都没加（它是棘轮管的类型），映射全在外部表。
+          判据两侧：库侧 `tests/table_contracts.rs`（3 条：报错带行号 / 缺项拒绝不默认 / 两条流过
+          同一张表逐行等价），工具链侧 `scripts/gate_sense.sh` 的 `table` 模式。
+      - id: s3_measurement
+        note: >-
+          S3 例场（`bank` 模式：体素地板 + 64 盒雨**逐体挂 3 种材质**，槽 1/2/3 / 300 tick /
+          预算 16）：冲击流 957 条、槽分布 349/309/299 ⇒ 三种槽同时出现在一条流里。**为什么单开
+          这个场景**：S1/S2 的盒雨没显式挂材质（`mat` 全是默认槽 0），拿它演示"表按材质分派音色组
+          id"**判不出对错**——一行表查谁都对。门在**多槽**流上用**本门自造**的参考表
+          （`slot -> 1000+slot`）逐行对拍 `bank == 1000 + mat`（拿仓库示例表判是自指的，"永远返回
+          第一条"那种实现照样能对上自己的表），并要求**至少两个槽**真的出现、槽 ⊆ {1,2,3}；
+          再把流里第一个槽从参考表里删掉造"半张表"，要求退出码 2 + **点名**该槽 + **一行 cue 都
+          不产出**。仓库示例表 `assets/sound_table.txt` 另配 `impact`（槽 0）判一遍，防示例资产腐烂。
     required_evidence:
       - implementation_path
       - tests
@@ -452,6 +496,9 @@ capabilities:
     notes: >-
       本仓第一条"输出侧"域。它同时是 `ROUTE.md` §7 那条"域侧 API 走扩展 trait"的**第一次实考**：
       若 S1 能在**不碰 `World` 任何既有方法**的前提下落地，那条设计判据就被证实可用。
+      S1 → S2 → S3 三次落地都满足"`World` 一个方法都没加"（`SenseExt` 扩展 trait + 外部表），
+      该判据已被重复证实；S3 还加了第二条：**新增映射**走外部资产表而不是往 `Material`（棘轮管的
+      类型）塞字段。
 
   - id: PHY-SCOPE-ACOUSTIC-PROPAGATION
     title: 声学传播（射线追踪音频：反射/衍射/遮挡 + 孔隙传声 + 介质体积）

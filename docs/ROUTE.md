@@ -58,7 +58,7 @@
 | 车辆 | 射线悬挂 + 刷子轮胎 | SPEC §4.10 | `vxl-phys-wheeled` 骨架 |
 | 机械/关节 | 约束族（铰链/齿轮/绳…） | SPEC §2.5 | `vxl-phys-mech` 骨架 |
 | 海洋 | 高度场/波浪 + 浮力采样 | SPEC §4.10 同族 | `vxl-phys-marine` 骨架 |
-| **声音 / 震动（感官输出）** | **求解事件**（冲击记录 / 接触流形 / 材质） | **只读归约**：事件 → cue（不带任何回写） | **S1 已落地（2026-10-11）**：crate `vxl-phys-sense`（`SenseExt` 扩展 trait，`World` 零新方法）+ 判别器两侧：库侧 `tests/sense_contracts.rs`、工具链侧 `scripts/gate_sense.sh`（CI 承重 job `sense-gate`）。见 §3.2 |
+| **声音 / 震动（感官输出）** | **求解事件**（冲击记录 / 接触流形 / 材质） | **只读归约**：事件 → cue（不带任何回写） | **S1 已落地（2026-10-11）**、**S2（2026-10-16）**、**S3（2026-10-16）**：crate `vxl-phys-sense`（`SenseExt` 扩展 trait，`World` 零新方法；S3 材质→音色组 id 走**外部表**）+ 判别器两侧：库侧 `tests/sense_contracts.rs` / `slide_contracts.rs` / `table_contracts.rs`、工具链侧 `scripts/gate_sense.sh`（CI 承重 job `sense-gate`）。见 §3.2 |
 
 ### 3.1 高斯喷溅进物理的三层用法（新技术选型）
 
@@ -149,8 +149,8 @@
 | 期 | 内容 | 判据 |
 |---|---|---|
 | **S1** | 冲击 → cue 归约（强度由**法向接近速度**定、位置由接触点定）+ 预算与优先级 + cue 流 dump | 零干扰 / 确定性 / 预算 |
-| S2 | 持续接触（滑/滚）→ 连续量（供循环音与持续震动） | 同 S1 + "静止体不产生循环音"（非空洞） |
-| S3 | 材质表与资产映射（外部表 → 音色组 id） | 映射表缺项时**显式拒绝**（不静默用默认音） |
+| S2 | 持续接触（滑/滚）→ 连续量（供循环音与持续震动）**（已落地 2026-10-16）** | 同 S1 + "静止体不产生循环音"（非空洞） |
+| S3 | 材质表与资产映射（外部表 → 音色组 id）**（已落地 2026-10-16）** | 映射表缺项时**显式拒绝**（不静默用默认音）+ **多槽**流上逐行对拍（拿自造参考表，防自指） |
 | S4 | 震动设备输出（包络、上钳到 [0,1]、更新率/延迟口径） | 包络单调性与上钳边界 |
 
 **S1 的落点（已落地，2026-10-11）**：新建 crate `vxl-phys-sense`
@@ -173,8 +173,51 @@
 （见 `World::record_impacts`）——拿**静态盒**当地板会得到**空 cue 流**，四个判据一起红。
 工具链与判据的落地体必须是 provider。
 
-状态登记见 `docs/CAPABILITIES.yaml` 的 `PHY-SCOPE-SENSE`（`implementation: partial` = S1 落地、
-S2–S4 未做）。
+**S2 的落点（已落地，2026-10-16）**：同上一条路——**不碰 `World`**，`SenseExt` 加一个方法。
+
+| 件 | 落点 |
+|---|---|
+| 归约 API | `crates/vxl-phys-sense/src/slide.rs`：`SlideCue` / `SenseExt::slide_cues`（`impl` 保持单块，本体是自由函数 `slide::reduce_slides`） |
+| CLI | `crates/vxl-phys-sense/src/bin/sense_dump.rs` 第 4 参 `mode=impact\|slide`（默认 `impact` ⇒ S1 产物逐字不变） |
+| 库侧判据（CI 三工具链） | `crates/vxl-phys-sense/tests/slide_contracts.rs`（4 条：零干扰 / 逐字一致 / 预算 top-k / 静置不产 cue） |
+| 工具链侧门 | `scripts/gate_sense.sh` 的 `slide` 模式（与 `impact` 同三道判据） |
+| 基线 | `bench/baselines/sense_dump_slide_300x64.json`（含 slide 流 sha256） |
+
+**连续量取法**：接触点处的**切向相对速度**——`v_rel = (v_b + ω_b×r_b) − (v_a + ω_a×r_a)`
+（点速含旋转项，才含"滚"），去法向分量 `v_rel − (v_rel·n)n` 取模 ⇒ "滑得多快"。**归约无状态**：
+不记"上一 tick 是否在滑"，只发每 tick 的逐体峰值 cue；消费方按 `(tick, body)` 把连续 tick 连成段
+（段停即静音）——这样 S1 的三条契约逐条继承。
+
+**S2 基线读数**（**平滑静态盒地板** + 64 个贴地盒全带 `+x 3 m/s` / 300 tick / 预算 16）：
+接触点 41552 ⇒ slide cue 608 条、预算丢弃 1824 条、静置弱过滤 32080 条、峰值 16 条/tick。
+
+**踩坑（S2）**：`manifolds()` **不要求** provider（与 S1 的 `record_impacts` 不同），所以 S2 的
+地板**故意用平滑静态盒**：体素地板的棱会让盒子**翻滚**（实测 `ωz` 冲到 ±8 rad/s），切向速度信号
+被搅乱；S1 仍必须用体素/网格 provider。
+
+状态登记见 `docs/CAPABILITIES.yaml` 的 `PHY-SCOPE-SENSE`（`implementation: partial`）。
+
+**S3 的落点（已落地，2026-10-16）**：仍然**不碰 `World`**（判据第三次成立），映射做成**外部表**。
+
+| 项 | 位置 |
+|---|---|
+| 映射核心 | `crates/vxl-phys-sense/src/table.rs`：`SoundTable`（`<材质槽> -> <音色组 id>` 文本表）/ `BankId` / `TableError` / `MaterialSlot` / `map_banks` |
+| 挂载方式 | `write_jsonl_banked` / `slide_jsonl_banked` 在**行尾追加** `"bank"` 字段；原 `write_jsonl` / `slide_jsonl` 转调并传 `None` ⇒ 不给表时 S1/S2 产物**逐字节不变** |
+| CLI | `sense_dump` 第 4 参 `mode=impact\|slide\|bank`、第 5 参 `table=<路径>`；`bank` = **多材质**例场（逐体挂槽 1/2/3），**必须**给表 |
+| 示例资产 | `crates/vxl-phys-sense/assets/sound_table.txt`（格式 + 判据说明 + 一行槽 0） |
+| 库侧判据（CI 三工具链） | `crates/vxl-phys-sense/tests/table_contracts.rs`（3 条：报错带行号 / 缺项拒绝不默认 / 两条流同表逐行等价） |
+| 工具链侧门 | `scripts/gate_sense.sh` 的 `table` 模式（**多槽**流 + **本门自造**参考表逐行对拍 + 半张表必须退出码 2） |
+
+**判据 · 缺项显式拒绝**：表里查不到的材质槽 ⇒ 报错**点名该槽** + **退出码 2**，**绝不回落默认音**；
+`map_banks` **全有或全无**（不在缺项时部分映射，实测半张表下 stdout 一行不产出）。重复项、语法错
+（带行号）、表读不到（退出码 3）同样显式报错。
+
+**为什么门要自造参考表**：拿仓库示例表去判是**自指**的——"永远返回第一条"那种实现照样能对上自己
+的表。门在多槽流上用 `slot -> 1000+slot` 逐行对拍 `bank == 1000 + mat`（实测把槽 1 的表值改成 2001，
+第 1 行就被抓住），并要求至少两个槽真的出现（否则"选择"没发生 = 判据空洞）。
+
+**为什么单开 `bank` 例场**：S1/S2 的盒雨没显式挂材质（`mat` 全是默认槽 0），一行表查谁都对 ⇒
+判不出映射选择。`bank` 场景逐体挂槽 1/2/3，一条流里三槽同时出现（实测分布 349/309/299）。
 
 ### 3.3 声学传播（射线追踪音频：反射 / 衍射 / 遮挡 + **孔隙传声** + 介质体积）
 
