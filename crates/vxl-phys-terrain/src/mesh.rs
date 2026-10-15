@@ -4,12 +4,20 @@
 //! 加速：均匀网格（桶边长 = max(均边, `MIN_BIN`)，**三角形按其 AABB 登记进所有覆盖桶**
 //! ⇒ 单桶查询即可覆盖「覆盖查询点」的三角形；再查 3×3×3 邻域覆盖「近而不覆盖」的）。
 //!
-//! 接触模型（薄壳，与体素 SDF 不同的语义，文档内明示）：
-//! - `depth = −sd`，`sd = (p − q)·n` 为**带符号**面距离（q = 最近三角形上的最近点）
-//!   ⇒ **depth = 穿透量**（正 = 已在面里侧）；带内判据 `depth > −skin` ⇒ 地表上方 skin 内
-//!   也给出**预期接触**（speculative margin）。与高度场路径（`depth = h − v.y`）**同一口径**。
-//!   法线 = 该三角形**面法线**（朝向由三角形顶点序决定 ⇒ 关卡导出时朝外，与 glTF/OBJ 惯例一致）。
-//! - 无内外判定（薄壳语义）：远离面即无接触；穿到面背后会被面法线推出（单向屏障）。
+//! 接触模型（`MeshSemantics`，逐网标记；默认 `Solid`）：
+//! - **`Solid`（默认 = 历史口径，零换代）**：`depth = −sd`，`sd = (p − q)·n` 为**带符号**
+//!   面距离（q = 最近三角形上的最近点）⇒ **depth = 穿透量**（正 = 已在面里侧）；带内判据
+//!   `depth > −skin` ⇒ 面外 skin 内也给出**预期接触**（speculative margin），与高度场路径
+//!   （`depth = h − v.y`）**同一口径**。法线 = 该三角形**面法线**（朝向由顶点序决定 ⇒ 关卡
+//!   导出时朝外，与 glTF/OBJ 惯例一致）⇒ 里侧 = 实体内、推出方向 = 环绕法线。
+//! - **`Shell`（薄壳：单页布片/薄板/碎片，无厚、无内外）**：`sd < 0` 那侧来的查询把法线折向
+//!   自己那一侧、距离取 `|sd|` ⇒ **推回来处**。当前**生效面 = 球查询族**（`contacts_sphere`
+//!   ⇒ `Sphere` 与 `Capsule` 的逐轴球采样）；点/盒查询仍走环绕法线口径，它们各自的"体心在哪
+//!   一侧"折法在**采样层**（`ring_provider_contacts` / `mesh_cross.rs`）——两条路**互斥**，
+//!   别同时折（会折回去）。为什么必须逐网标记而不是一律折：同一局部几何（球心在面背后）在
+//!   实体下要**顶出去**（`rest_height_contract::mesh_sphere_inside_is_ejected`）、在薄壳下要
+//!   **推回来**，方向相反（P19 裁决：`docs/OPEN-PROBLEMS.md`）。
+//! - 两条语义都**无内外判定**：远离面即无接触；只是"面背后"那一侧的推出方向相反。
 //!
 //! 精度前提：查询只保证「距离 ≤ `bin/2` 的最近面」正确 ⇒ 皮肤带应 < `bin/2`
 //! （默认 `skin ≈ 0.02`、`bin ≥ 0.5` 时余量充足）。确定性：顶点/三角形序决定一切，
@@ -93,6 +101,21 @@ pub struct TriMesh {
     tri_lo: Vec<Vec3>,
     tri_hi: Vec<Vec3>,
     grid: Option<MeshGrid>,
+    /// **薄壳 / 实体语义**（P19 裁决出口；默认 `Solid` = 历史口径 ⇒ 零换代）。
+    semantics: MeshSemantics,
+}
+
+/// 三角网接触语义：`Solid`（默认，里侧 = 真穿透）| `Shell`（薄壳，两侧对称、无内外）。
+///
+/// 生效面 = **球查询族**（`Solid`/`Shell` 在 `contacts_sphere` 里选法线口径；`Capsule` 逐轴走
+/// 同一查询 ⇒ 一并生效）。点/盒查询不受影响（理由见模块头注第三条）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum MeshSemantics {
+    /// 实体：`sd` 用环绕法线定符号（历史口径）；里侧为正深度、推出方向 = 环绕法线。
+    #[default]
+    Solid,
+    /// 薄壳：法线折向**查询点那一侧** + 距离取 `|sd|` ⇒ 推回来处（单页布片/薄板/碎片）。
+    Shell,
 }
 
 #[derive(Clone, Debug)]
@@ -108,6 +131,29 @@ struct MeshGrid {
 const GRID_MAX_BINS: u64 = vxl_phys_core::grid::GRID_MAX_BINS as u64;
 
 impl TriMesh {
+    /// 逐网标记接触语义（默认 `Solid` ⇒ 与历史逐位一致）。
+    pub fn set_semantics(&mut self, s: MeshSemantics) {
+        self.semantics = s;
+    }
+
+    /// 当前语义。
+    pub fn semantics(&self) -> MeshSemantics {
+        self.semantics
+    }
+
+    /// `(环绕法线, 带符号距离) → (推出方向, 深度用距离)`。
+    ///
+    /// `Solid`（默认）**原样返回** ⇒ 与历史逐位一致（有反证：`m0_gates`/`determinism` 三道哈希
+    /// 在 ⑥ 标 `Shell` 后仍逐位未变 —— 默认档一行不走下面那支）。
+    /// `sd == 0`（查询点恰在面平面上）无"哪一侧"可言 ⇒ 按 `Solid` 原样返回（确定性、无歧义）。
+    #[inline]
+    fn oriented(&self, n: Vec3, sd: f32) -> (Vec3, f32) {
+        if self.semantics == MeshSemantics::Solid || sd == 0.0 {
+            return (n, sd);
+        }
+        (n * if sd > 0.0 { 1.0 } else { -1.0 }, sd.abs())
+    }
+
     /// 建网（顶点 + 三角索引；索引越界的三角形被跳过——不 panic，如实丢弃）。
     pub fn new(verts: Vec<Vec3>, tris: Vec<[u32; 3]>) -> Self {
         let n = verts.len() as u32;
@@ -139,6 +185,7 @@ impl TriMesh {
             tri_lo,
             tri_hi,
             grid: None,
+            semantics: MeshSemantics::Solid,
         }
     }
 
@@ -348,24 +395,8 @@ impl TriMesh {
                             if g.bins[i].is_empty() {
                                 continue;
                             }
-                            // 桶级剪枝：桶 AABB 到查询点的距离 > max_d ⇒ 整桶跳过
-                            // （桶内任一三角形只会更远）。
-                            if max_d.is_finite() {
-                                let lo = Vec3::new(
-                                    g.origin.x + x as f32 * g.bin,
-                                    g.origin.y + y as f32 * g.bin,
-                                    g.origin.z + z as f32 * g.bin,
-                                );
-                                let hi = lo + Vec3::splat(g.bin);
-                                let d2 = Vec3::new(
-                                    (lo.x - p.x).max(p.x - hi.x).max(0.0),
-                                    (lo.y - p.y).max(p.y - hi.y).max(0.0),
-                                    (lo.z - p.z).max(p.z - hi.z).max(0.0),
-                                )
-                                .length_squared();
-                                if d2 > max_d * max_d {
-                                    continue;
-                                }
+                            if self.bin_is_far(g, x, y, z, p, max_d) {
+                                continue;
                             }
                             if sampled {
                                 TRI_BINS.fetch_add(1, Ordering::Relaxed);
@@ -394,6 +425,27 @@ impl TriMesh {
                 best
             }
         }
+    }
+
+    /// 桶级剪枝：桶 AABB 到 `p` 的距离 > `max_d` ⇒ 整桶跳过（桶内任一三角形只会更远）。
+    /// 抽成助手是为了让 `closest` 留在函数长硬阈内（同 `probe_candidate_far`）。
+    fn bin_is_far(&self, g: &MeshGrid, x: usize, y: usize, z: usize, p: Vec3, max_d: f32) -> bool {
+        if !max_d.is_finite() {
+            return false; // 不剪枝（测试里的精确对照走这支）
+        }
+        let lo = Vec3::new(
+            g.origin.x + x as f32 * g.bin,
+            g.origin.y + y as f32 * g.bin,
+            g.origin.z + z as f32 * g.bin,
+        );
+        let hi = lo + Vec3::splat(g.bin);
+        let d2 = Vec3::new(
+            (lo.x - p.x).max(p.x - hi.x).max(0.0),
+            (lo.y - p.y).max(p.y - hi.y).max(0.0),
+            (lo.z - p.z).max(p.z - hi.z).max(0.0),
+        )
+        .length_squared();
+        d2 > max_d * max_d
     }
 }
 
@@ -459,6 +511,10 @@ impl ProviderColliders for TriMesh {
     /// ⇒ **静置时体比地表高约一个 skin**（实测：平地三角网上盒体高 3.5 cm、起伏网 1.4–2.0 cm；
     /// 而同档的高度场路径贴住 ⇒ 两条地形路口径不一致）。改成 `depth = −sd` 后
     /// **外侧 depth ≤ 0**（不再有虚假穿透），内侧仍为正 ⇒ 可恢复性不变（见 `shape-trimesh-sunk`）。
+    ///
+    /// ⚠️ **本查询不看 `MeshSemantics`**（`Shell` 只在 `contacts_sphere` 折法线，见那里）：圆柱/
+    /// 圆锥这一族的"体心在哪一侧"折法在**采样层**（`provider.rs::ring_provider_contacts`），
+    /// 这里再折一次会把那层的折法**折回去**（两层互消）。
     fn contacts_point(&self, _id: u32, p: Vec3, skin: f32, out: &mut Vec<InteropContact>) -> bool {
         let Some((_, q, n, ti)) = self.closest(p, skin) else {
             return true;
@@ -483,12 +539,16 @@ impl ProviderColliders for TriMesh {
 
     /// 球查询：`depth = r − sd(球心)`（**带符号**面距离；同点查询的符号修正）。
     ///
-    /// ⚠️ **这里刻意不折法线**（2026-10-14 实测翻案）：`sd` 用**环绕法线**定符号是"实体"语义 ——
-    /// 球心在地表**下方**时 `depth = r + |sd|` = **真的穿透量**（`rest_height_contract.rs` 的
-    /// `mesh_sphere_inside_is_ejected` 就靠它把陷网球顶出去：y = −0.20 → ≈ r）。
-    /// 折法线会把那条契约反过来（实测：陷网球被按在地里）。而"体从**背面**来"的薄壳档
-    /// （`ccd_thin_shell.rs` ⑥ 的球/胶囊）**仍然穿** —— 那不是漏配，是**语义冲突**：同一局部几何
-    /// 在"薄壳/实体"下的正确推出方向**相反** ⇒ 需**逐网标记**（shell/solid），见 P19 待裁决。
+    /// **法线口径按逐网语义取**（`oriented`）：`Solid`（默认）用**环绕法线**定符号 —— 球心在地表
+    /// **下方**时 `depth = r + |sd|` = **真的穿透量**（`rest_height_contract.rs` 的
+    /// `mesh_sphere_inside_is_ejected` 就靠它把陷网球顶出去：y = −0.20 → ≈ r）。`Shell` 则把法线
+    /// 折向**查询球心那一侧**、深度改用 `|sd|` ⇒ 从**背面**来的球/胶囊（`ccd_thin_shell.rs` ⑥）
+    /// 被推回**来处**，而不是算出一个指向"继续穿过去"的深度与法线（那会让 CCD 的闭合判据
+    /// `vn < 0` 永不成立：探针实测逐子步 360 采样 0 命中、直穿 395 m）。
+    ///
+    /// 实测（2026-10-15 复跑，⑥ 形状矩阵 60 m/s × 4×4 m 单页薄板标 `Shell`）：球停在 **−0.400**、
+    /// 胶囊 **−0.198**（各自前缘贴住壳面、`vx` 归零）；不标记（`Solid`）时两族都 **x = 395 直穿**。
+    /// 正面来的场景与 `Solid` **逐位相同** ⇒ 换代账零。本条把 P19 的"待裁决"落成"逐网标记"。
     fn contacts_sphere(
         &self,
         _id: u32,
@@ -500,7 +560,8 @@ impl ProviderColliders for TriMesh {
         let Some((_, q, n, ti)) = self.closest(center, radius + skin) else {
             return true;
         };
-        let sd = (center - q).dot(n);
+        let sd_raw = (center - q).dot(n);
+        let (n, sd) = self.oriented(n, sd_raw);
         let depth = radius - sd;
         if depth < -skin {
             return true;

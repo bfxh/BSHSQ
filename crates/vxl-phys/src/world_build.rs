@@ -107,8 +107,9 @@ impl World {
     }
 
     /// 注册**三角网格**（网格域：静态关卡几何）：返回 provider id + 静态 marker 体。
-    /// 接触语义为薄壳（`depth = skin − dist(最近面)`，法线 = 面法线），见
-    /// `vxl_phys_terrain::mesh` 模块文档（含「皮肤带 < bin/2」精度前提）。
+    /// 接触语义默认 `MeshSemantics::Solid`（`depth = −sd`，与高度场族同族）；单页薄壳（布片/
+    /// 薄板/碎片）须在**入世界之前** `set_semantics(MeshSemantics::Shell)` 显式标记 ⇒ 推出方向
+    /// 改按"查询点在哪一侧"取（理由与精度前提见 `vxl_phys_terrain::mesh` 模块文档）。
     pub fn add_mesh(&mut self, mut mesh: vxl_phys_terrain::mesh::TriMesh) -> BodyId {
         mesh.build_grid(); // 加速结构（桶边长 = max(均边, 0.5)）
         let id = self.providers.push_mesh(mesh);

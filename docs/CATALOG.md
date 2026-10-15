@@ -118,7 +118,7 @@
 | `solver` | warm 槽位表 | 每 tick | 稠密槽位 + 原位写 + 单遍剪枝（M1-PLAN §16-§18） |
 | `solver` | 休眠/CCD | 每 tick / 事件级 | `sleep`（岛级原子）＋ `ccd.rs`（命中判据：沿法向接近） |
 | `terrain` | `voxel.rs` | 域表示 | 占据位图 + 局域 SDF（自适应查询范围）+ 贪心提取/球域切割 |
-| `terrain` | `mesh.rs` | 域表示（三角网） | 薄壳语义：`depth = skin − 最近三角形距离`、法线 = 面法线（无内外判定）；Ericson 最近点闭式解；均匀网格（格边 = 平均边长、下限 0.5，三角形 AABB 登记覆盖格，3×3×3 邻域查询）；`build_grid()` 建表（`GRID_MAX_BINS` 封顶），不建表回退全扫；精度前提 `skin < 格边/2` |
+| `terrain` | `mesh.rs` | 域表示（三角网） | 接触语义：`depth = −sd`（`sd = (p − q)·n` 带符号面距离，正 = 里侧；两条语义均**无内外判定**）、法线 = 面法线；**逐网标记** `MeshSemantics{Solid(默认),Shell}`（`Shell` 把法线折向查询侧 ⇒ 单页薄壳；只作用于**球查询族**，点/盒在采样层折，见 `OPEN-PROBLEMS.md` P19）；Ericson 最近点闭式解；均匀网格（格边 = 平均边长、下限 0.5，三角形 AABB 登记覆盖格，3×3×3 邻域查询）；`build_grid()` 建表（`GRID_MAX_BINS` 封顶），不建表回退全扫；精度前提 `skin < 格边/2` |
 
 ## 4. 性能纪律（分类不得影响性能——用户令）
 
