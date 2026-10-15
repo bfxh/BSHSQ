@@ -116,6 +116,11 @@ bash scripts/gate_gold.sh          # 一条命令；逐项打印退出码，失�
 脚本做的就是下面四步（内部 `CARGO_TARGET_DIR` 默认 `C:/vxl-wl-target-gold`，可用
 `CARGO_TARGET_DIR_GOLD` 覆盖；日志落 `/tmp/g_*.log`，可用 `GOLD_LOG_DIR` 覆盖）：
 
+**CI 侧入口（2026-10-16 起两处，配方单一来源就是本脚本）**：`determinism` 档（三编译器
+跑 m3/m4/m5 等冻结自检）+ **`gold-sample` job**（真化后**直接调 `scripts/gate_gold.sh`**、
+push 与 PR 都跑、去掉 `continue-on-error`、并接进 `gates-summary.needs`）—— 此前的 CI 内联
+配方（`… 0.01 4 …`）已删，不再与本地脚本漂移。
+
 ```bash
 cd "/d/KF/BSHSQ/gold-sample"
 export CARGO_TARGET_DIR=C:/vxl-wl-target-gold

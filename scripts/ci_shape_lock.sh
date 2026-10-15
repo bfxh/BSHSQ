@@ -70,15 +70,16 @@ need_text "抖动 artifact 名没用 job-index（matrix.label 含 / 会让上传
 #    **按形状判定，不再手写枚举**：旧写法只列 12 个 dep，而 needs 里实际有 14 个 ——
 #    `ratchet` / `scale` 两条**没有任何门守**（有人从 needs 里删掉它们不会红）。这与 ⑧ 同源：
 #    "逐点枚举会漏"。以下规则让**新增承重 job 若不接进汇总就直接红**，不必再改本脚本。
-#    豁免（报告层，其 job 上方注释已写明"不进 gates-summary"）：coverage / gold-sample；
-#    汇总门自身不算承重门。
+#    豁免（报告层，其 job 上方注释已写明"不进 gates-summary"）：仅 coverage；
+#    汇总门自身不算承重门。（`gold-sample` 2026-10-16 真化后已进 needs ⇒ 不再豁免，
+#    若有人把它从 needs 里删掉即红。）
 jobs_all="$(awk '/^jobs:/{f=1;next} f && /^  [a-z][a-z0-9-]*:/{s=$0; sub(/:.*/,"",s); sub(/^  /,"",s); print s}' "$CI")"
 needs_all="$(awk '/^  gates-summary:/{f=1} f && /^    needs:/{g=1;next} g && /^      - /{print $2} g && /^    [a-z]/{exit}' "$CI")"
 if [ -z "$jobs_all" ] || [ -z "$needs_all" ]; then
   echo "❌ 形状锁从 ci.yml 提取不到 job/needs（结构变了 ⇒ 本门会静默失效）"
   FAIL=1
 else
-  for dep in $(printf '%s\n' "$jobs_all" | grep -vE '^(coverage|gold-sample|gates-summary)$'); do
+  for dep in $(printf '%s\n' "$jobs_all" | grep -vE '^(coverage|gates-summary)$'); do
     printf '%s\n' "$needs_all" | grep -qx -- "$dep" || {
       echo "❌ 汇总门 needs 漏了承重 job：$dep（新增门不接进汇总 = 白跑）"
       FAIL=1

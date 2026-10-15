@@ -497,47 +497,57 @@ impl Rope {
             let hits = std::mem::take(&mut self.hits);
             // **③ 施加**（顺序 Gauss-Seidel：`body_dv` 就地推进 —— 只是顺序变成了物理序）。
             for hit in &hits {
-                self.apply_body_hit(hit.i as usize, j, b, vpos, h, hit.n, hit.depth, hit.q);
+                self.apply_body_hit(hit, j, b, vpos, h);
             }
             self.hits = hits; // 归还暂存（`mem::take` 的配对；`hits` 的借用到此结束）
         }
     }
 
-    /// **施加一次体接触的响应**（§8.4.24 从 `project_body_contacts` 抽出 —— 那里加了"收集/排序"
-    /// 两段后到 125 行、越 god 门 120）。内容：两体按逆质量分担的几何解 `λ_geom` → 速度钳位 `λ_vel`
-    /// （= 无恢复系数）→ **位置口径补足** `body_dx`（只补位置不补速度，§8.4.9）→ 法向推出 + 库仑锥摩擦
-    /// （相对速度与法向同口径，§8.4.19）→ 反作用回填（含**就地推进**虚拟状态 = Gauss-Seidel）。
-    #[allow(clippy::too_many_arguments)] // 接触包：i/j/体/位姿/步长/法线/深度/接触点
-    fn apply_body_hit(
+    /// **施加一次体接触的响应**（§8.4.24 从 `project_body_contacts` 抽出；再拆三步以守住 god
+    /// 门"最长函数 ≤ 120 行"）：`body_hit_solve` 解 λ + 位置补足 → `body_hit_project` 法向推出 +
+    /// 库仑锥摩擦 → `body_hit_reaction` 反作用回填 + 就地推进虚拟状态（Gauss-Seidel）。
+    /// **逐位不变**：运算顺序、常量、分支照搬（`w_p`/`friction`/`inv_h` 在 helper 内重读，值同）。
+    fn apply_body_hit(&mut self, hit: &BodyHit, j: usize, b: &RigidProxy, vpos: Vec3, h: f32) {
+        let Some((lam, v_point)) = self.body_hit_solve(hit, j, b, vpos, h) else {
+            return;
+        };
+        let i = hit.i as usize;
+        let before = self.pos[i];
+        self.body_hit_project(hit, h, lam, v_point);
+        if b.inv_mass > 0.0 {
+            self.body_hit_reaction(hit, j, b, vpos, h, before);
+        }
+    }
+
+    /// **① λ 解 + 位置补足**（`apply_body_hit` 前半）：返回 `(λ, v_point)`。两体按逆质量分担的几何解
+    /// `λ_geom` → 速度钳位 `λ_vel`（= 无恢复系数）。`None` = `λ ≤ 0`（本子步不再接近）⇒ 调用方提前
+    /// 返回（**位置补足仍已按原顺序施加**）。
+    fn body_hit_solve(
         &mut self,
-        i: usize,
+        hit: &BodyHit,
         j: usize,
         b: &RigidProxy,
         vpos: Vec3,
         h: f32,
-        n: Vec3,
-        depth: f32,
-        q: Vec3,
-    ) {
+    ) -> Option<(f32, Vec3)> {
+        let i = hit.i as usize;
+        let n = hit.n;
+        let depth = hit.depth;
+        let q = hit.q;
         let inv_h = 1.0 / h;
-        let friction = self.friction;
-        // **按逆质量分担的两体约束**（α=0）：`λ = depth/(w_p + w_b)`，
-        // 粒子沿 +n 让 `w_p·λ`、体（若有质量）沿 −n 让 `w_b·λ` —— 相对位移正好合上穿透量。
-        // ⚠️ **不能让粒子吃满穿透量**（首版就是这么写的）：那样体的位置永远不被挡，只吃到
-        // 与穿透量成正比的巨大冲量 ⇒ 盒子"被踹飞着掉下去"（实测 y 比自由落体还低）。
-        // 静态提供者/静态体（`w_b = 0`）下 `λ = depth/w_p` ⇒ 与既有行为**逐位一致**。
+        // **按逆质量分担的两体约束**（α=0）：`λ = depth/(w_p + w_b)`，粒子沿 +n 让 `w_p·λ`、
+        // 体（若有质量）沿 −n 让 `w_b·λ`。⚠️ **不能让粒子吃满穿透量**（首版就是这么写的）：那样
+        // 体的位置永远不被挡、只吃到与穿透量成正比的巨大冲量 ⇒ 盒子"被踹飞着掉下去"（实测 y
+        // 比自由落体还低）。静态提供者/静态体（`w_b = 0`）下 `λ = depth/w_p` ⇒ 与既有**逐位一致**。
         let w_p = self.inv_mass[i];
         let w_b = b.inv_mass;
-        // **冲量上限 = 消掉本次接近速度所需**（顺序冲量的标准钳位；物理上 = 无恢复系数）。
-        // 为什么必须有：位置口径按几何穿透量解会让"一子步内冒出的深穿透"反射出巨大速度
-        // ——实测 0.035 m 的穿透 ⇒ 8.4 m/s/粒子 ⇒ 十几颗粒子把盒子踹成 **+38 m/s**。
-        // 钳位后：体不会被推得超过"刚好不再接近"，穿透量本身不强行愈合（不再增长即可）。
+        // **冲量上限 = 消掉本次接近速度所需**（顺序冲量的标准钳位；物理上 = 无恢复系数）：否则
+        // 一子步内冒出的深穿透会反射出巨大速度（实测 0.035 m 的穿透 ⇒ 8.4 m/s/粒子 ⇒ +38 m/s）。
         let v_p = (self.pos[i] - self.prev[i]) * inv_h;
         let v_b = b.linvel + self.body_dv[j];
-        // **接触点速度**（§8.4.30 / 计划 2c-2）：体在转时，**材料点**的速度是 `v + ω × r`
-        // （`r = q − vpos`），不是体心速度。**法向的 `approach` 与摩擦的滑移量共用这一个口径** ——
-        // §8.4.19 与 §8.4.25 两次都栽在"两支用了不同的相对速度"上（法向用新值、摩擦用旧值），
-        // 所以这里**一次改齐**。`ω = 0` ⇒ `v_point == v_b` ⇒ 与既有行为逐位一致（零换代门）。
+        // **接触点速度**（§8.4.30 / 计划 2c-2）：体在转时，**材料点**速度是 `v + ω × r`
+        // （`r = q − vpos`），不是体心速度。法向 `approach` 与摩擦滑移**共用这一个口径**（§8.4.19
+        // 与 §8.4.25 两次都栽在"两支用了不同的相对速度"上）。`ω = 0` ⇒ `v_point == v_b` ⇒ 逐位一致。
         let v_point = v_b + b.angvel.cross(q - vpos);
         let approach = (v_point - v_p).dot(n);
         let lam_geom = depth / (w_p + w_b + self.contact_compliance / (h * h));
@@ -547,81 +557,86 @@ impl Rope {
             0.0
         };
         let lam = lam_geom.min(lam_vel);
-        // **位置口径的补足**（§8.4.9）：被速度钳位压掉的那一份**只补位置、不补速度**
-        //（静载下钳位恒 0 ⇒ 不补就是"只回速度不回位置"的位置漏）。速度侧不动 ⇒
-        // 不会把位置修正反射成速度；钳位生效时（运动/冲击）该项恒 0 ⇒ 既有工况逐位不变。
-        //
-        // ⚠️ 补足量**同时累加进 `body_disp`**（布料 294849f 吃过的同一刀，2026-10-01 补到绳）：
-        // `vpos = b.pos + body_disp` 是"体在本子步真实位置"的模拟，位置腿是这条轨迹的一部分——
-        // 不进 ⇒ 下一子步**重新测到同一份穿透** ⇒ 一份穿透被"接触数 × 子步数"重复计账
-        // ⇒ 深穿时单 tick 上抛十几厘米 ⇒ 弹起 ⇒ 接触丢失 ⇒ 弹跳极限环。`disp` **只用于接触
-        // 检测**、不落盘到体的真实位置（门面的 `position += body_dx` 不重复施加）。
+        // **位置口径的补足**（§8.4.9）：被速度钳位压掉的那一份**只补位置、不补速度**；补足量
+        // **同时累加进 `body_disp`**（布料 294849f、绳 2026-10-01 同一刀）：`vpos = b.pos + body_disp`
+        // 是体在本子步真实位置的模拟，不进 ⇒ 同一份穿透被"接触数 × 子步数"重复计账 ⇒ 深穿上抛 ⇒
+        // 弹跳极限环。`disp` **只用于接触检测**，不落盘到体的真实位置（门面 `position += body_dx` 不重复）。
         if b.inv_mass > 0.0 && lam_geom > lam {
             let make_up = n * (b.inv_mass * (lam_geom - lam));
             self.body_dx[j] -= make_up;
             self.body_disp[j] -= make_up;
         }
         if lam <= 0.0 {
-            return;
+            return None;
         }
-        let before = self.pos[i];
+        Some((lam, v_point))
+    }
+
+    /// **② 法向推出 + 库仑锥摩擦**（`apply_body_hit` 中段）：位移 = `w_p·λ`；切向按库仑锥限制滑移
+    /// （预算取 `μ·w_p·λ` = 该接触**实际**施加的法向冲量口径，不是几何穿透量 `depth`）。
+    fn body_hit_project(&mut self, hit: &BodyHit, h: f32, lam: f32, v_point: Vec3) {
+        let i = hit.i as usize;
+        let n = hit.n;
+        let w_p = self.inv_mass[i];
+        let friction = self.friction;
         // 法向推出（位移 = `w_p·λ`）。
         self.pos[i] += n * (w_p * lam);
-        // 切向：库仑锥（锥内整段吃掉 = 静摩擦；超出按动摩擦滑）——同提供者路径，
-        // 但滑移量取**相对体**的（体在动时绳不该被"粘"在原地）。
+        // 切向：库仑锥（锥内整段吃掉 = 静摩擦；超出按动摩擦滑）——同提供者路径，滑移量取
+        // **相对体**的（`v_point` 与法向同口径，§8.4.19；体在动时绳不该被"粘"在原地）。
         if friction > 0.0 {
-            // **相对速度与法向同口径**（§8.4.19）：法向那支用 `v_b = b.linvel + body_dv[j]`
-            // （见上面的 `approach`），摩擦这里原来只用 `b.linvel` ⇒ 子步内 `body_dv` 一涨，
-            // 滑移估计就**过期** ⇒ 系统性切向偏置（实测：`μ=0` 时盒子 3 维下托得住，
-            // `μ` 越大横向蠕变越猛 ⇒ ~1 mm/tick、400 tick 滑出绳端）。
             let dp = self.pos[i] - self.prev[i] - v_point * h;
             let t = dp - n * dp.dot(n);
             let slip = t.length();
             if slip > 0.0 {
-                // **候选①（§8.4.25 实验）：库仑锥的冲量口径** `|J_t| ≤ μ·J_n`。
-                // 本接触**实际**施加的法向冲量 ∝ `λ`（`J_n = m_p·w_p·λ/h`），**不是**几何穿透量
-                // `depth`（后者只在几何支被选中时等于 λ 的口径）⇒ 位置预算取 `μ·w_p·λ`。
-                // ⚠️ 这一版**预期更小**（静载下 λ 被速度钳位到远小于 λ_geom）⇒ 若它把托住打坏，
-                // 说明"现在的摩擦预算偏大"本身是**承重**的（`μ·depth` 在静载下远大于真实 `μ·J_n`）。
                 let budget = friction * (w_p * lam);
                 let removed = if slip < budget { slip } else { budget };
                 self.pos[i] -= t * (removed / slip);
             }
         }
-        // 反作用（只回填给能动的体），并**就地推进虚拟状态** ⇒ 同一子步里后续粒子
-        // 看到的是"已经被推开、且已被推走"的体（Gauss-Seidel；不做这层就是 Jacobi 叠加）。
-        if b.inv_mass > 0.0 {
-            let d = self.pos[i] - before;
-            let impulse = d * (-inv_h / self.inv_mass[i]);
-            let r = q - vpos;
-            let torque = Vec3::new(
-                r.y * impulse.z - r.z * impulse.y,
-                r.z * impulse.x - r.x * impulse.z,
-                r.x * impulse.y - r.y * impulse.x,
-            );
-            self.body_dv[j] += impulse * b.inv_mass;
-            self.body_disp[j] += impulse * (b.inv_mass * h);
-            // **角反作用**（计划 2c-3，开关默认关）：`r × J` 折成角速度增量，与 `body_dv` 对平移对称
-            // ⇒ 同一子步里后续粒子看到"已被转过一点"的体。量级由法向那支的钳位
-            // `min(λ_geom, λ_vel)` 限制（`r×J` 与 `J` 同源）⇒ 不必另设钳位。
-            // `I⁻¹` 在本体系逐轴相乘、再转回世界（与积分器 `apply_world_inv_inertia` 同口径）。
-            if self.angular_reaction {
-                let m = Mat3::from_quat(self.vrot.cur[j]);
-                let tau_local = m.transpose_mul_vec3(torque);
-                let dw = m.mul_vec3(tau_local.mul_per_elem(b.local_inv_inertia));
-                self.vrot.dw[j] += dw;
+    }
+
+    /// **③ 反作用回填 + 就地推进虚拟状态**（`apply_body_hit` 末段；仅 `b.inv_mass > 0` 调用）：
+    /// 粒子动量变化取反作用在体表接触点 ⇒ 平移/角冲量；就地推进 = 同一子步后续粒子看到已推走的体。
+    fn body_hit_reaction(
+        &mut self,
+        hit: &BodyHit,
+        j: usize,
+        b: &RigidProxy,
+        vpos: Vec3,
+        h: f32,
+        before: Vec3,
+    ) {
+        let i = hit.i as usize;
+        let q = hit.q;
+        let inv_h = 1.0 / h;
+        let d = self.pos[i] - before;
+        let impulse = d * (-inv_h / self.inv_mass[i]);
+        let r = q - vpos;
+        let torque = Vec3::new(
+            r.y * impulse.z - r.z * impulse.y,
+            r.z * impulse.x - r.x * impulse.z,
+            r.x * impulse.y - r.y * impulse.x,
+        );
+        self.body_dv[j] += impulse * b.inv_mass;
+        self.body_disp[j] += impulse * (b.inv_mass * h);
+        // **角反作用**（计划 2c-3，开关默认关）：`r × J` 折成角速度增量，与 `body_dv` 对平移对称；
+        // `I⁻¹` 在本体系逐轴相乘、再转回世界（与积分器 `apply_world_inv_inertia` 同口径）。
+        if self.angular_reaction {
+            let m = Mat3::from_quat(self.vrot.cur[j]);
+            let tau_local = m.transpose_mul_vec3(torque);
+            let dw = m.mul_vec3(tau_local.mul_per_elem(b.local_inv_inertia));
+            self.vrot.dw[j] += dw;
+        }
+        match self.reactions.iter_mut().find(|e| e.body == b.body) {
+            Some(e) => {
+                e.impulse += impulse;
+                e.torque += torque;
             }
-            match self.reactions.iter_mut().find(|e| e.body == b.body) {
-                Some(e) => {
-                    e.impulse += impulse;
-                    e.torque += torque;
-                }
-                None => self.reactions.push(RigidReaction {
-                    body: b.body,
-                    impulse,
-                    torque,
-                }),
-            }
+            None => self.reactions.push(RigidReaction {
+                body: b.body,
+                impulse,
+                torque,
+            }),
         }
     }
 }

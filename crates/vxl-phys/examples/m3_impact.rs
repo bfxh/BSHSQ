@@ -19,6 +19,20 @@ fn main() {
     // 触发阈值（m/s）：低阈值 ⇒ 碎块自己落地也触发 ⇒ 级联挖穿地板（实测教训）
     let threshold: f32 = args.next().and_then(|s| s.parse().ok()).unwrap_or(8.0);
 
+    let (mut w, filled0) = build_world(speed);
+
+    println!(
+        "场景：体素墙 {} 格（初始）| 炮弹 {speed} m/s | {ticks} tick | 阈值 {threshold} m/s",
+        filled0
+    );
+    println!("tick | 墙体素 | 碎块累计 | 动态体 | KE(J) | 清醒 | 最深");
+    let (debris_total, first_hit) = simulate(&mut w, ticks);
+    print_ke_top(&w);
+    print_summary(&mut w, filled0, debris_total, first_hit);
+}
+
+/// 建世界：地板（3 层厚）+ 墙（1 格厚、4 格高、8 格深）+ 一枚炮弹；返回 `(世界, 初始墙体素)`。
+fn build_world(speed: f32) -> (World, usize) {
     // **本例不触发 CCD**：引擎默认档是选择性 10 m/s（§4.3 与 skin 成对），而本例默认弹速
     // 8 m/s < 10 ⇒ 扫掠不跑（8 m/s = 0.13 m/tick < 皮肤带 × 格边距 ⇒ 无隧穿）。
     // ⚠️ 历史：早期「CCD × 静止接触」会互相打架（贴地滑行的体每个采样都被判命中 ⇒ 钳回
@@ -44,12 +58,11 @@ fn main() {
         2000.0,
     );
     w.bodies.linvel[bullet as usize] = Vec3::new(speed, 0.0, 0.0);
+    (w, filled0)
+}
 
-    println!(
-        "场景：体素墙 {} 格（初始）| 炮弹 {speed} m/s | {ticks} tick | 阈值 {threshold} m/s",
-        filled0
-    );
-    println!("tick | 墙体素 | 碎块累计 | 动态体 | KE(J) | 清醒 | 最深");
+/// 主循环：逐 tick 推进 + 冲击破坏，每 20 tick（与末 tick）打印一次读数；返回 `(碎块累计, 首次命中)`。
+fn simulate(w: &mut World, ticks: usize) -> (usize, Option<usize>) {
     let mut debris_total = 0usize;
     let mut first_hit = None;
     for t in 1..=ticks {
@@ -89,29 +102,35 @@ fn main() {
             );
         }
     }
-    // KE 前 5 体诊断（质量/速度）——用于判别「注入」vs「重碎块自由落体」
-    {
-        let mut top: Vec<(f32, f32, f32, Vec3)> = Vec::new();
-        for i in 0..w.bodies.len() {
-            if w.bodies.is_dynamic(i) {
-                let m = 1.0 / w.bodies.inv_mass[i].max(1e-12);
-                let v = w.bodies.linvel[i];
-                top.push((
-                    0.5 * m * v.length_squared(),
-                    m,
-                    v.length(),
-                    w.bodies.position[i],
-                ));
-            }
-        }
-        top.sort_by(|a, b| b.0.total_cmp(&a.0));
-        for (ke, m, sp, pos) in top.iter().take(5) {
-            println!(
-                "KE-top: {ke:>12.1} J | m={m:>10.1} kg | |v|={sp:>7.2} | pos=({:.2},{:.2},{:.2})",
-                pos.x, pos.y, pos.z
-            );
+    (debris_total, first_hit)
+}
+
+/// KE 前 5 体诊断（质量/速度）——用于判别「注入」vs「重碎块自由落体」。
+fn print_ke_top(w: &World) {
+    let mut top: Vec<(f32, f32, f32, Vec3)> = Vec::new();
+    for i in 0..w.bodies.len() {
+        if w.bodies.is_dynamic(i) {
+            let m = 1.0 / w.bodies.inv_mass[i].max(1e-12);
+            let v = w.bodies.linvel[i];
+            top.push((
+                0.5 * m * v.length_squared(),
+                m,
+                v.length(),
+                w.bodies.position[i],
+            ));
         }
     }
+    top.sort_by(|a, b| b.0.total_cmp(&a.0));
+    for (ke, m, sp, pos) in top.iter().take(5) {
+        println!(
+            "KE-top: {ke:>12.1} J | m={m:>10.1} kg | |v|={sp:>7.2} | pos=({:.2},{:.2},{:.2})",
+            pos.x, pos.y, pos.z
+        );
+    }
+}
+
+/// 末态汇总：挖掉格数、碎块数、逃逸数、首次命中 tick、末态干净与否、状态哈希。
+fn print_summary(w: &mut World, fill0: usize, debris: usize, first: Option<usize>) {
     let filled1 = w.providers().voxel(0).unwrap().filled_count();
     let h = w.health();
     let mut fallen = 0usize;
@@ -122,12 +141,12 @@ fn main() {
     }
     println!(
         "== 汇总：挖掉 {} 格（{} → {}）| 碎块 {} 个 | 逃逸(掉出世界) {} 个 | 首次命中 tick {:?} | 末态干净 {} | hash {:#x}",
-        filled0 - filled1,
-        filled0,
+        fill0 - filled1,
+        fill0,
         filled1,
-        debris_total,
+        debris,
         fallen,
-        first_hit,
+        first,
         h.is_clean(),
         w.state_hash()
     );

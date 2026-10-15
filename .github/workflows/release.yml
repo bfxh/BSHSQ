@@ -32,7 +32,7 @@ jobs:
     name: 发版门（五项 + 行为门）
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable # zizmor: ignore[unpinned-uses] ref 即工具链名，无固定 SHA 语义
@@ -53,7 +53,7 @@ jobs:
       - name: test
         run: |
           set +e
-          cargo test --release > test.log 2>&1
+          cargo test --release --workspace --exclude vxl-phys-gpu > test.log 2>&1
           rc=$?
           echo "test=$rc"
           tail -40 test.log
@@ -81,22 +81,23 @@ jobs:
             [ "$r" -eq 0 ] || rc=$r
           done
           exit "$rc"
-      - name: 金样三场景（保真门）
-        working-directory: gold-sample
+      - name: 金样门（唯一配方来源：scripts/gate_gold.sh）
+        env:
+          # 脚本默认 target 目录是给 Windows 本地留的 `C:/…`（Linux 上会造出名为 `C:` 的目录）
+          # ⇒ 显式给路径。日志落工作区，随 artifact 上传（含 m3/m4/m5 的冻结结果）。
+          CARGO_TARGET_DIR_GOLD: target
+          CARGO_TARGET_DIR_M3: target
+          GOLD_LOG_DIR: ${{ github.workspace }}/gold-logs
         run: |
-          # 同上：不用管道接 tee，逐场景取 rc；任一场景非 0 ⇒ 本步非 0。
+          # 唯一配方来源（fmt / clippy / 三 Rapier 场景 / 五个 vxl 金样全判冻结基线）。
+          # 不用管道接 tee（⑦）：逐条取 rc、先打诊断再退出。⚠️ 不写 working-directory：
+          # 脚本用 BASH_SOURCE 自己找仓库根，末参 `.` 只是占位。
+          mkdir -p "$GOLD_LOG_DIR"
           set +e
-          rc=0
-          for s in col45 pile5 tower25; do
-            {
-              echo "=== $s ==="
-              cargo run --release -q -- "$s" 600 16 0.01 1 3.0 30 16 - 0 2>&1
-            } > gold-$s.txt 2>&1
-            r=$?
-            echo "gold-$s=$r"
-            tail -20 gold-$s.txt
-            [ "$r" -eq 0 ] || rc=$r
-          done
+          bash scripts/gate_gold.sh . > gold.log 2>&1
+          rc=$?
+          echo "gold=$rc"
+          tail -40 gold.log
           exit "$rc"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
@@ -104,7 +105,7 @@ jobs:
           name: release-gates
           path: |
             *.log
-            gold-sample/gold-*.txt
+            gold-logs/
 
   # ==================== 建 Release（仅当门禁全绿） ====================
   release:
@@ -114,7 +115,7 @@ jobs:
     permissions:
       contents: write # 建 Release 必需；仅本 job、仅此一项
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8

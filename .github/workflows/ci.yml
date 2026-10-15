@@ -27,8 +27,8 @@ name: ci
 #   · **runner 分配与缓存抖动**：零编译的文本层合并成一个 job，少几次 runner 起停。
 # 纪律不变：**改动引擎代码的任何提交仍跑全部门禁**（不许拿"省钱"当跳门理由——现在没这个理由了）。
 # ① 同分支新推送自动取消旧运行（高频推送下旧运行不再烧完整管线）；
-# ② 纯文档/工具目录改动跳过（docs/**、**/*.md、gold-sample/** 不产出引擎
-#    二进制，门禁无判定力；gold-sample 为独立包不进 workspace）；
+# ② 纯文档改动跳过（docs/**、**/*.md 不产出引擎
+#    二进制，门禁无判定力）；
 # ③ 编译类 job 统一挂 rust-cache（Cargo.lock 键控）；
 # ④ 零编译的文本层检查合并在一个 job 内（省 runner 分配开销）；
 # ⑤ **分支推送不再触发全量**（2026-10-04 实测：同一 commit 被 `push` 与 `pull_request`
@@ -44,12 +44,13 @@ on:
     paths-ignore:
       - "docs/**"
       - "**/*.md"
-      - "gold-sample/**"
+      # ⚠️ 2026-10-16：`gold-sample/**` 已从跳过表移除 —— 金样门真化后它是**承重门**
+      # （进 `gates-summary.needs`）。只改 `gold-sample/**` 的推送若被整条跳过，
+      # 等于冻结基线没人守（这正是内联配方漂移能活下来的原因）。
   pull_request:
     paths-ignore:
       - "docs/**"
       - "**/*.md"
-      - "gold-sample/**"
   workflow_dispatch:
 
 concurrency:
@@ -592,14 +593,15 @@ jobs:
   # （自己 28.6 min；同期 MSVC 编译 20.6 min、Clang 10.3、GCC 9.9），而 `gates-summary` 在
   # 21.4 min 就出了**判定** ⇒ 它对"门"零贡献，只把每次 PR/主干 run 的**完成时刻**拖后 ~7 min。
   # 报告层留在 main（产物供趋势观察）与手动补跑（`gh workflow run ci.yml`）足够。
-  # 与 `gold-sample` 的 `!= 'push'` 正好互补：一个 PR 侧报告、一个主干侧报告。
-  # 要恢复成"每次 PR 都跑"：删掉下面这行 `if:` 即可（判据/产物都不变）。
+  # ⚠️ 此前与 `gold-sample` 互补（`!= 'push'` vs `!= 'pull_request'`）；2026-10-16 金样门真化后
+  # `gold-sample` 的 `!= 'push'` 已删、push 与 PR 都跑并进 `gates-summary.needs` ⇒ 现在只剩
+  # 覆盖率留在报告层。要恢复成"每次 PR 都跑"：删掉下面这行 `if:` 即可（判据/产物都不变）。
   coverage:
     name: 覆盖率 (报告)
     runs-on: ubuntu-latest
     continue-on-error: true
     if: github.event_name != 'pull_request'
-    timeout-minutes: 40   # 只是防跑飞：**实测 28.6 min** ⇒ 别设得比它低（设 20 会把正常跑掐掉）
+    timeout-minutes: 60   # 防挂死：**实测 28.6 min**，给足余量（原先 40，2026-10-16 上调）
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -626,16 +628,24 @@ jobs:
             cov.json
             cov-summary.txt
 
-  # ==================== 金样层（T5）：Rapier 对照三场景（报告层，不阻断） ====================
+  # ==================== 金样层（T5）：唯一配方来源 `scripts/gate_gold.sh`（承重门） ====================
   # 独立包（gold-sample 自带 [workspace]，不进主 workspace）⇒ 需单列 job；首次构建要
-  # 拉 rapier 依赖图（网络 + 1-3 分钟）⇒ **只在 PR 与手动触发时跑**（推送不跑，控成本）。
-  # 报告层语义：容差表当前有已知缺口（速度/入睡两列，见 docs/M1-PLAN.md T5），故
-  # continue-on-error 且不进 gates-summary —— 红=提示，不拦门。
+  # 拉 rapier 依赖图（网络 + 1-3 分钟）。
+  # **2026-10-16 真化**（此前是报告层：push 不跑 + `continue-on-error` + 不进 needs ⇒ 红了不拦门）：
+  #   ① push 与 PR 都跑；② 去掉 `continue-on-error`；③ 步骤改调**唯一配方来源**
+  #   `scripts/gate_gold.sh`（此前 CI 内联配方与本地脚本已漂移：`… 0.01 4 …` vs `… 0.01 1 …`）；
+  #   ④ 接进 `gates-summary.needs`。脚本内部 fmt/clippy + 三 Rapier 场景 + 五个 vxl 金样
+  #   （m3/m4/m5）全跑、逐项判冻结基线 ⇒ 与本地 `bash scripts/gate_gold.sh` 同一口径。
   gold-sample:
     name: 金样 (Rapier 对照)
-    if: github.event_name != 'push'
-    continue-on-error: true
     runs-on: ubuntu-latest
+    env:
+      # 脚本默认 target 目录是给 Windows 本地留的 `C:/…`（Linux 上会造出名为 `C:` 的目录）
+      # ⇒ runner 上显式落到 rust-cache 认得的 `target`。
+      CARGO_TARGET_DIR_GOLD: target
+      CARGO_TARGET_DIR_M3: target
+      # 日志落工作区，随 artifact 上传（m3/m4/m5 的冻结结果就在里面）。
+      GOLD_LOG_DIR: ${{ github.workspace }}/gold-logs
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -644,22 +654,16 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           workspaces: gold-sample
-      # 配方（必须 substeps=4：默认 1 时 tower25 会塌，见 M1-PLAN T5 注）。
-      - name: 三场景对拍（col45 / pile5 / tower25）
-        working-directory: gold-sample
-        run: |
-          # 报告层也要真退出码：`cargo run … | tee` 失败会被 tee 的 0 吞掉，artifact 就记成"跑完了"。
-          set -o pipefail
-          for s in col45 pile5 tower25; do
-            echo "=== $s ===" | tee gold-$s.txt
-            cargo run --release -- "$s" 600 16 0.01 4 3.0 30 4 2>&1 | tee -a gold-$s.txt
-          done
+      # 唯一配方来源（fmt / clippy / col45 / pile5 / tower25 / m3 / m4 / m5 全判冻结基线）。
+      # ⚠️ 不写 working-directory：脚本用 BASH_SOURCE 自己找仓库根，末参 `.` 只是占位。
+      - name: 金样门（唯一配方来源：scripts/gate_gold.sh）
+        run: mkdir -p "$GOLD_LOG_DIR" && bash scripts/gate_gold.sh .
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: gold-sample
           path: |
-            gold-sample/gold-*.txt
+            gold-logs/
 
   # ==================== 规模档（10 万 + 10 万）：**此前只在本地跑**，2026-10-06 搬进 CI ====================
   # 为什么必须在 CI：`gate_scale.sh` 判的是**确定性量**（NaN / 深穿透 / 峰值流形 / 峰值接触点 /
@@ -763,6 +767,7 @@ jobs:
       - determinism-arm64
       - hash-compare
       - ratchet
+      - gold-sample
       - scale
       - realism-bench
       - sense-gate

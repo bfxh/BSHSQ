@@ -114,6 +114,9 @@ step security_review 0 python scripts/security_review.py
 step security_selftest 0 python scripts/security_review.py --selftest
 # CI 形状锁：硬门、汇总门 needs、安全/成本基线、action 钉 SHA 不被悄悄退役
 step ci_shape 0 bash scripts/ci_shape_lock.sh .
+# CI 的 ratchet 细粒度静态门（24 道，含 security_review）本机此前只经 CI 跑 ⇒ 「本地全绿再推」
+# 会漏判这一整片（口径与 CI 的 `ratchet` job 同源：同一个 `scripts/local_gate.py`）。接进本地全量。
+step local_all 0 python -X utf8 scripts/local_gate.py
 # 命名纪律门（占位词/杂物/退役旧名）：CI 有独立 workflow 跑它，但本地入口原先没接 ⇒
 # 「本地全绿再推」会漏判这一门（2026-10-15 就这么红过一次）。参数与 .github/workflows/naming-gate.yml 同源。
 step naming 0 python -X utf8 scripts/naming_gate.py --forbid "RUST WL" --forbid "RUST-WL" --allow-name vxl-phys --allow-name vxl_phys  # naming:allow（退役旧名作为门参数传入，与 CI 同一行）

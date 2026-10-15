@@ -396,7 +396,7 @@
       "max_type_members": 0
     },
     "crates/vxl-phys-gpu/examples/gpu_walls_probe.rs": {
-      "file_lines": 799,
+      "file_lines": 250,
       "max_fn_lines": 114,
       "max_type_members": 0
     },
@@ -404,6 +404,11 @@
       "file_lines": 196,
       "max_fn_lines": 79,
       "max_type_members": 9
+    },
+    "crates/vxl-phys-gpu/examples/gpu_walls_probe/phases.rs": {
+      "file_lines": 568,
+      "max_fn_lines": 88,
+      "max_type_members": 0
     },
     "crates/vxl-phys-gpu/src/bbox.rs": {
       "file_lines": 621,
@@ -436,8 +441,8 @@
       "max_type_members": 12
     },
     "crates/vxl-phys-gpu/src/pipeline.rs": {
-      "file_lines": 778,
-      "max_fn_lines": 87,
+      "file_lines": 489,
+      "max_fn_lines": 85,
       "max_type_members": 16
     },
     "crates/vxl-phys-gpu/src/pipeline/bind_layout.rs": {
@@ -449,6 +454,11 @@
       "file_lines": 248,
       "max_fn_lines": 49,
       "max_type_members": 8
+    },
+    "crates/vxl-phys-gpu/src/pipeline/construct.rs": {
+      "file_lines": 304,
+      "max_fn_lines": 87,
+      "max_type_members": 0
     },
     "crates/vxl-phys-gpu/src/pipeline/coupling.rs": {
       "file_lines": 52,
@@ -881,8 +891,8 @@
       "max_type_members": 8
     },
     "crates/vxl-phys-soft/src/rope.rs": {
-      "file_lines": 628,
-      "max_fn_lines": 116,
+      "file_lines": 643,
+      "max_fn_lines": 86,
       "max_type_members": 23
     },
     "crates/vxl-phys-soft/tests/angular_reaction_holds.rs": {
@@ -1226,8 +1236,8 @@
       "max_type_members": 0
     },
     "crates/vxl-phys/examples/m3_impact.rs": {
-      "file_lines": 135,
-      "max_fn_lines": 120,
+      "file_lines": 154,
+      "max_fn_lines": 42,
       "max_type_members": 0
     },
     "crates/vxl-phys/examples/m3_voronoi.rs": {

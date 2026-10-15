@@ -238,7 +238,9 @@
    "除报告层豁免外每个 job 都必须在 needs 里 + 反向查拼错 + 提取为空直接红"。两条的判据都是
    **下一个同类改动不必再改脚本**。
 2. **PR 绿 ≠ 主干绿**：合并后 main 的那次 **push run** 才是主干事实状态 —— 每次合并后都要盯到绿。
-   ⚠️ 本仓 push 事件下 `gold-sample` 按设计 skipped（`if: github.event_name != 'push'`），别当红。
+   ⚠️ 2026-10-16 更新：`gold-sample` 已**真化**（删 `if: github.event_name != 'push'`、去
+   `continue-on-error`、步骤改调唯一配方来源 `scripts/gate_gold.sh`、并进 `gates-summary.needs`）
+   ⇒ push 与 PR 都跑、红了拦门；"push 下按设计 skipped、别当红"这条**已作废**。
 3. **平台也会漏建 job**（本轮实测一次）：`#151` 合并后 main run 报 `failure`，但 job 列表只有
    **20** 个（正常 21）、且**所有列出的 job 都 success/skipped** —— 缺的是 `汇总（提交门）`，而它
    needs 里 14 个 job 全 success、定义也完好。⇒ 判定为 GitHub 侧漏建；**处理 = API 重跑同一
@@ -248,6 +250,13 @@
    分清的收益：改动 CI 前先问"我要缩短的是**判定**还是**归档**"；只为归档尾巴动配置就是
    KNOWLEDGE §1.9 说的"为了维护而维护"（本轮实测后**决定不动**，数据留 `RECIPES` 等 CI 段）。
    真要缩短判定得动关键路径（MSVC release 编译 20.6 min）—— 那是编译器覆盖面的设计取舍。
+5. **`gate_probe.py` 的两条 Windows 坑**（2026-10-16 实测踩中，CI/Linux 无此问题）：
+   ① 它调子门**不带链内参数**（`local_gate.py` 给的 `--git-tracked` / `--root .`）⇒ 它扫的是
+   **工作树**而不是 git 面 ⇒ 只要仓里有**未入库**的 `.rs` / `Cargo.toml`（草稿、临时注入），
+   十几道门就集体报「注入前已红（基线未绿）」——**假红级联，别误判成门坏了**；草稿放仓外。
+   ② 子进程不继承调用方的 `-X utf8`，且本脚本 `text=True` 按父进程码页解码 ⇒ 直接
+   `python scripts/gate_probe.py` 会 `UnicodeDecodeError`（单字节 0xb7/0xa3）中途崩。
+   **照链内口径跑**（`local_gate.py` 会注入 `PYTHONUTF8=1`），或自己先 `export PYTHONUTF8=1`。
 
 ### D. 台账
 
