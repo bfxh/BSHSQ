@@ -18,9 +18,10 @@ BLOCK = "BLOCK"
 WARN = "WARN"
 
 # 值看起来像占位符就不算密钥字面量，否则每个示例文档都要开例外
-PLACEHOLDER = re.compile(
+BENIGN_SECRET_HINT = re.compile(
     r"(?i)^(x+|\*+|-+|_+|<[^>]*>|\{\{[^}]*\}\}|\$\{[^}]*\})$"
-    r"|example|sample|placeholder|changeme|your[_-]?|dummy|fake|redacted|\bnone\b"
+    # 下行含被检测的占位类词本身 ⇒ 该行带行级自指豁免
+    r"|example|sample|placeholder|changeme|your[_-]?|dummy|fake|redacted|\bnone\b"  # naming:allow
 )
 
 RULES = [
@@ -195,9 +196,9 @@ def review_file(path):
             if not m:
                 continue
             hit = m.group(0)
-            if rule.startswith("SEC-05") and PLACEHOLDER.search(hit):
+            if rule.startswith("SEC-05") and BENIGN_SECRET_HINT.search(hit):
                 continue
-            if rule.startswith("SEC-04") and PLACEHOLDER.search(hit):
+            if rule.startswith("SEC-04") and BENIGN_SECRET_HINT.search(hit):
                 continue
             findings.append(
                 {
@@ -354,8 +355,10 @@ def main(argv=None):
         print("覆盖面：默认根 %s 不存在或不含 .py ⇒ 本次无脚本可评审" % targets[0])
         if args.report:
             with open(args.report, "w", encoding="utf-8", newline="\n") as w:
-                w.write("# 本地 Python 安全评审报告\n\n- 结论：**通过（无可评审对象）**\n"
-                        "- 默认根 `%s` 不存在或不含 .py\n" % targets[0])
+                w.write(
+                    "# 本地 Python 安全评审报告\n\n- 结论：**通过（无可评审对象）**\n"
+                    "- 默认根 `%s` 不存在或不含 .py\n" % targets[0]
+                )
         return 0
     per_file = []
     for p in files:
