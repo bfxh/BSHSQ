@@ -114,6 +114,9 @@ step security_review 0 python scripts/security_review.py
 step security_selftest 0 python scripts/security_review.py --selftest
 # CI 形状锁：硬门、汇总门 needs、安全/成本基线、action 钉 SHA 不被悄悄退役
 step ci_shape 0 bash scripts/ci_shape_lock.sh .
+# 命名纪律门（占位词/杂物/退役旧名）：CI 有独立 workflow 跑它，但本地入口原先没接 ⇒
+# 「本地全绿再推」会漏判这一门（2026-10-15 就这么红过一次）。参数与 .github/workflows/naming-gate.yml 同源。
+step naming 0 python -X utf8 scripts/naming_gate.py --forbid "RUST WL" --forbid "RUST-WL" --allow-name vxl-phys --allow-name vxl_phys  # naming:allow（退役旧名作为门参数传入，与 CI 同一行）
 step typos 0 /c/vxl-wl-tools/typos.exe .
 # 真实性基准门（R1–R7）：跑 bench/realism-probe，与基线比关键不变量。
 # 为什么它能进 CI 而计时门不能：这七个量**机器无关**（2026-10-09 跨 Windows/Linux 逐字一致）；
