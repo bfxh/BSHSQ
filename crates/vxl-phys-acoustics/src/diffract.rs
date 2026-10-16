@@ -5,6 +5,7 @@
 
 use crate::medium::seg_effect;
 use crate::{AcousticStats, Ctx, Edge, PathKind, SoundPath, BANDS};
+use core::f32::consts::PI;
 use vxl_phys::Vec3;
 
 /// Fermat 二分次数：定次数、无早退 ⇒ 逐位可复现（`f32` 尾数 24 位，48 次远超够用）。
@@ -44,6 +45,19 @@ pub(crate) fn push_diffraction(out: &mut Vec<SoundPath>, st: &mut AcousticStats,
         // A9a：`excess` = 折线超出直连的**多余路程**（`≥ 0`）⇒ `ν = 2√(Δ/λ)`。只在逐带声明了
         // 频率时才启用（否则 `dir_factor` = 旧口径，逐位不变）。
         let excess = (d1 + d2) - (cx.listener.pos - cx.src).length();
+        // A9b：楔角修正的 **band 无关**框架（`None` = 刀口 / 退化 ⇒ `fac = 1`，逐位回到 A9a）。
+        let frame = match e.wedge.as_ref() {
+            Some(w) => {
+                let seg = e.b - e.a;
+                let len = seg.length();
+                if len > 1e-6 {
+                    crate::utd::WedgeFrame::build(w, p, seg * (1.0 / len), cx.src, cx.listener.pos)
+                } else {
+                    None
+                }
+            }
+            None => None,
+        };
         let (t1, a1) = seg_effect(cx.geo.medium, cx.src, p, cx.c, cx.cfg.medium_step);
         let (t2, a2) = seg_effect(cx.geo.medium, p, cx.listener.pos, cx.c, cx.cfg.medium_step);
         let mut bands = [0.0f32; BANDS];
@@ -56,7 +70,8 @@ pub(crate) fn push_diffraction(out: &mut Vec<SoundPath>, st: &mut AcousticStats,
         {
             let lambda = crate::utd::wavelength(cx.c, cx.cfg.band_hz[b]);
             let df = if lambda > 0.0 {
-                crate::utd::knife_gain(crate::utd::fresnel_nu(excess, lambda))
+                let fac = frame.as_ref().map_or(1.0, |f| f.factor(2.0 * PI / lambda));
+                crate::utd::knife_gain(crate::utd::fresnel_nu(excess, lambda)) * fac
             } else {
                 dir_factor
             };

@@ -28,12 +28,15 @@
 //! 判据：`tests/a9_utd.rs`（表值 / 导数据恒等式 / 与**独立 Simpson 积分**逐点对拍）。
 //!
 //! ## 边界（写清，不是漏）
-//! · **A9a 只做刀刃（半平面，`n = 2`）**：墙沿 / 屏障顶这类「薄边」就是它。**一般楔角 `n`（直角墙角
-//!   之类）的 UTD 系数留 A9b**（届时给 `Edge` 引 `wedge: Option<Wedge>` 按楔角选模型，非破坏）。
+//! · **A9a 只做刀刃（半平面，`n = 2`）**：墙沿 / 屏障顶这类「薄边」就是它。**A9b** 补上**一般
+//!   楔角 `n`**（直角墙角之类）：给 `Edge` 引 `wedge: Option<[`Wedge`]>`，按 KP 式算楔角系数，
+//!   再以**刀刃修正因子** `fac = min(|D_n|²/|D_2|², [`WEDGE_FACTOR_MAX`])` 乘到 A9a 上 ——
+//!   `n = 2` ⇒ `fac = 1`（**逐位回到 A9a**）；`n → 1`（平壁）⇒ `fac → 0`。非破坏（`None` = 刀口）。
 //! · **阴影边界值变了**：旧口径在掠射（刚被挡）时 `D → 1`；真 Fresnel 在阴影边界是 `|E/E₀| = 1/2`
 //!   （**恰好 −6.02 dB**，经典的「半场」）。这是**口径修正**、不是回归。
 
-use core::f32::consts::PI;
+use core::f32::consts::{FRAC_PI_4, PI};
+use vxl_phys::Vec3;
 
 /// 幂级数项数上限（`x < 2.5` 时用不到这么多；防病态入参把循环拉长）。
 const MAX_TERMS: u32 = 4096;
@@ -149,4 +152,174 @@ pub fn knife_gain(nu: f32) -> f32 {
     let (c, s) = fresnel_cs(nu);
     let (a, b) = (0.5 - c, 0.5 - s);
     0.5 * (a * a + b * b)
+}
+
+// ---------------------------------------------------------------------------
+// A9b：一般楔角 UTD 系数（Kouyoumjian–Pathak）+ 刀刃修正因子
+// ---------------------------------------------------------------------------
+
+/// **A9b：一般楔角**的几何（挂在 [`Edge::wedge`](crate::Edge::wedge) 上）。
+///
+/// 绕棱在 **⊥ 棱**平面里量角：`face0` 是**场区一侧**的一条棱面方向（量角基准，角度 `0`）；
+/// 另一条棱面在 `b_axis = edge_dir × a_axis` 正向转过 `n·π`（`a_axis` = `face0` 在 ⊥ 棱平面内的
+/// 单位投影，`n = 2 − Ω/π`）。**场区** = `[0, n·π]`，**楔体（材料）** = 余下 `[n·π, 2π]`，
+/// 内角 `Ω = (2−n)·π`。声源 / 听者应落在场区。
+///
+/// `Ω = 0`（无材料）⇒ `n = 2` = **刀口** ⇒ 修正因子恒 `1`（**逐位回到 A9a**）；
+/// `Ω = π`（平壁）⇒ `n = 1` ⇒ 系数 `→ 0`（无绕射）。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Wedge {
+    /// 楔体**内角** `Ω ∈ [0, π]`（弧度；越界按端点钳）。
+    pub interior_angle: f32,
+    /// **面 0 方向**（自棱点指向场区一侧；不必 ⊥ 棱，用时会投影到 ⊥ 棱平面）。
+    pub face0: Vec3,
+}
+
+/// [`WedgeFrame::factor`] 的**钳位上界**（A9b 工程口径）。
+///
+/// 系数比 `|D_n|²/|D_2|²` 在**参考刀刃系数趋零**处会发散（实测中位数 ~`1`、长尾到 `1e6`）；
+/// 本层按**分母地板 + 钳位**处理：`fac = min(|D_n|²/|D_2|², WEDGE_FACTOR_MAX)`（等价于把
+/// `|D_2|²` 抬到 `|D_n|²/WEDGE_FACTOR_MAX`）。这是**工程上界**、不是物理推导。
+pub const WEDGE_FACTOR_MAX: f32 = 4.0;
+
+/// 楔角几何的 **逐带无关**框架（`φ`、`φ'`、`n`、`L`）；`build` 退化时给 `None`（调用侧退回刀口）。
+pub struct WedgeFrame {
+    phi: f32,
+    phip: f32,
+    n: f32,
+    l: f32,
+}
+
+impl WedgeFrame {
+    /// 从棱点 `apex`、棱方向 `edge_dir`（单位）、声源 / 听者构造；退化时 `None`（调用侧退回刀口）。
+    pub fn build(w: &Wedge, apex: Vec3, edge_dir: Vec3, src: Vec3, dst: Vec3) -> Option<Self> {
+        let ax = (w.face0 - edge_dir * w.face0.dot(edge_dir)).normalize();
+        if ax.length_squared() < 0.5 {
+            return None;
+        }
+        let bx = edge_dir.cross(ax);
+        let (vi, vr) = (src - apex, dst - apex);
+        if vi.length_squared() < 1e-6 || vr.length_squared() < 1e-6 {
+            return None;
+        }
+        let ui = vi - edge_dir * vi.dot(edge_dir);
+        let ur = vr - edge_dir * vr.dot(edge_dir);
+        if ui.length_squared() < 1e-6 || ur.length_squared() < 1e-6 {
+            return None;
+        }
+        let (d1, d2) = (vi.length(), vr.length());
+        let omega = w.interior_angle.clamp(0.0, PI);
+        Some(Self {
+            phi: angle_in_plane(ur, ax, bx),
+            phip: angle_in_plane(ui, ax, bx),
+            n: 2.0 - omega / PI,
+            l: d1 * d2 / (d1 + d2),
+        })
+    }
+
+    /// 该带的**楔角修正因子** `fac ∈ [0, WEDGE_FACTOR_MAX]`（`n = 2` ⇒ 恒 `1.0`）。
+    pub fn factor(&self, k: f32) -> f32 {
+        if self.n >= 2.0 {
+            return 1.0;
+        }
+        if self.n <= 1.0 {
+            return 0.0;
+        }
+        let (mn, qn) = mag_scaled(utd_soft(self.n, self.phi, self.phip, k, self.l));
+        let (m2, q2) = mag_scaled(utd_soft(2.0, self.phi, self.phip, k, self.l));
+        if m2 <= 0.0 {
+            return if mn > 0.0 { WEDGE_FACTOR_MAX } else { 0.0 };
+        }
+        let t = (mn / m2) * (qn / q2); // |D_n| / |D_2|（用缩放幅值算，避免溢出）
+        let fac = (t * t).min(WEDGE_FACTOR_MAX);
+        if fac.is_nan() {
+            WEDGE_FACTOR_MAX
+        } else {
+            fac
+        }
+    }
+}
+
+/// 命中场区平面内的**极角**（`v` 相对基准 `ax`、正向 `bx`），落在 `[0, 2π)`。
+fn angle_in_plane(v: Vec3, ax: Vec3, bx: Vec3) -> f32 {
+    let a = v.dot(ax);
+    let b = v.dot(bx);
+    let t = b.atan2(a);
+    if t < 0.0 {
+        t + 2.0 * PI
+    } else {
+        t
+    }
+}
+
+/// `(m, q)`：`m = max(|re|, |im|)`、`|D| = m·q`（`q ∈ [1, √2]`）—— 幅值的**缩放**表示，乘/除不溢出。
+fn mag_scaled((re, im): (f32, f32)) -> (f32, f32) {
+    let m = re.abs().max(im.abs());
+    if m <= 0.0 {
+        (0.0, 0.0)
+    } else {
+        let (nr, ni) = (re / m, im / m);
+        (m, (nr * nr + ni * ni).sqrt())
+    }
+}
+
+/// KP **软边界**（声压释放）绕射系数 `D`（实部 / 虚部）；全 `f32`。
+///
+/// `D = −e^{−jπ/4}/(2n√(2πk))·[T(β⁻) − T(β⁺)]`，
+/// `T(β) = cot((π+β)/(2n))·F(kL·a⁺(β)) + cot((π−β)/(2n))·F(kL·a⁻(β))`，
+/// `β⁻ = φ − φ'`、`β⁺ = φ + φ'`；`a±`、`F` 见 [`apm`]、[`transition`]。
+fn utd_soft(n: f32, phi: f32, phip: f32, k: f32, l: f32) -> (f32, f32) {
+    let pre = 1.0 / (2.0 * n * (2.0 * PI * k).max(1e-12).sqrt());
+    let (pr, pim) = (-FRAC_PI_4.cos() * pre, FRAC_PI_4.sin() * pre);
+    let (ar, ai) = term(phi - phip, n, k, l);
+    let (br, bi) = term(phi + phip, n, k, l);
+    let (tr, ti) = (ar - br, ai - bi);
+    (pr * tr - pim * ti, pr * ti + pim * tr)
+}
+
+/// `T(β) = cot((π+β)/(2n))·F(kL·a⁺) + cot((π−β)/(2n))·F(kL·a⁻)`（复式两项和）。
+fn term(beta: f32, n: f32, k: f32, l: f32) -> (f32, f32) {
+    let (ar, ai) = transition(k * l * apm(beta, n, true));
+    let (br, bi) = transition(k * l * apm(beta, n, false));
+    let c1 = cot((PI + beta) / (2.0 * n));
+    let c2 = cot((PI - beta) / (2.0 * n));
+    (c1 * ar + c2 * br, c1 * ai + c2 * bi)
+}
+
+/// 过渡函数 `F(χ) = 2j√χ·e^{jχ}·∫_{√χ}^∞ e^{−jt²}dt`（`χ ≤ 0 ⇒ 0`），用 `C/S` 闭环求值。
+fn transition(chi: f32) -> (f32, f32) {
+    if chi <= 0.0 {
+        return (0.0, 0.0);
+    }
+    let u = (2.0 * chi / PI).sqrt();
+    let (c, sn) = fresnel_cs(u);
+    let q = (0.5 * PI).sqrt();
+    let (ire, iim) = (q * (0.5 - c), -q * (0.5 - sn));
+    let (ex, ey) = (chi.cos(), chi.sin());
+    let r = chi.sqrt();
+    let re = 2.0 * r * (ex * ire - ey * iim);
+    let im = 2.0 * r * (ex * iim + ey * ire);
+    (-im, re) // ×j
+}
+
+/// `a±(β) = 2·cos²((2πn·N∓ − β)/2)`，`N∓ = round((β ∓ π)/(2πn))`（`plus` ⇒ 取 `(β+π)` 那支）。
+fn apm(beta: f32, n: f32, plus: bool) -> f32 {
+    let num = if plus { beta + PI } else { beta - PI };
+    let nn = (num / (2.0 * n * PI)).round();
+    let t = (2.0 * n * PI * nn - beta) / 2.0;
+    2.0 * t * t
+}
+
+/// `cot`；`sin → 0` 时给**有限大数**（`±1e12`）而非 `±∞`，避免与过渡函数的 `0` 相乘得 `NaN`。
+fn cot(x: f32) -> f32 {
+    let s = x.sin();
+    if s.abs() < 1e-12 {
+        if x.cos() >= 0.0 {
+            1e12
+        } else {
+            -1e12
+        }
+    } else {
+        x.cos() / s
+    }
 }

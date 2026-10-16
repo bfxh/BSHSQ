@@ -29,8 +29,9 @@
 //!   逐阶段预算、三角索引序 ⇒ 确定性。判据 `tests/a8_bounces.rs`。
 //! - **A9a**：**刀刃真 Fresnel 绕射**（[`utd`]）—— 逐带**显式声明频率**（[`AcousticConfig::band_hz`]）
 //!   时绕射「方向因子」换成真系数（Fresnel 积分 `C/S`、`ν = 2√(Δ/λ)`、`Δ` = Fermat 折线多余路程）；
-//!   默认 `[0;3]`（不给绝对频率）⇒ 退回 A4 旧口径、**逐位不变**。**一般楔角 `n` 的 UTD 系数仍未做（A9b）**。
-//!   判据 `tests/a9_utd.rs`。
+//!   默认 `[0;3]`（不给绝对频率）⇒ 退回 A4 旧口径、**逐位不变**。判据 `tests/a9_utd.rs`。
+//! - **A9b**：**一般楔角 UTD 修正**（[`Wedge`]）—— `Edge::wedge = Some(Ω)` 时按 KP 式算楔角系数，
+//!   以刀刃修正因子 `fac` 乘到 A9a（`n = 2` ⇒ `1`，**逐位回到 A9a**；`n → 1` ⇒ `0`）。判据 `tests/a9b_wedge.rs`。
 //! - **A10**：**体素空洞自动识别**（[`portal`]）—— 从**占据位图**（[`VoxelOccupancy`]）里用
 //!   「腐蚀断颈 → 多源 BFS 分房 → 标签相接处取开口」认出**房间**与**开口**，产出 [`Portal`]
 //!   （填 `regions`）。是开口那半的兜底路线（显式标仍是首选）。判据 `tests/a10_portals.rs`。
@@ -98,6 +99,7 @@ mod scatter;
 pub use auto_edge::EdgeDetect;
 pub use medium::{AcousticMedium, LayeredMedium, Medium, Slab};
 pub use portal::{Portal, PortalDetect, VoxelOccupancy};
+pub use utd::Wedge;
 
 use bounce::push_second_order;
 use diffract::push_diffraction;
@@ -143,6 +145,9 @@ pub struct Edge {
     pub b: Vec3,
     /// 逐带绕射系数（能量口径：`coeff_b · D(θ) · 介质衰减 / (d1·d2)`）；`0` = 该带不绕。
     pub coeff: [f32; BANDS],
+    /// **一般楔角**（A9b）：`None` = 按刀口（`n = 2`）算 ⇒ **逐位回到 A9a**；`Some(Ω)` = 按楔角
+    /// 内角 `Ω` 做系数修正（见 [`utd::Wedge`](crate::utd::Wedge)）。
+    pub wedge: Option<crate::utd::Wedge>,
 }
 
 /// 听者（A1 只有一个点 + 半径：进入该球即可闻）。

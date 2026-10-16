@@ -603,12 +603,13 @@ capabilities:
           （`record/replay` 的旧基线会 FAIL 并指到第一个观测点 —— 这是设计内的 loud failure）。
       - id: acoustic_not_done
         note: >-
-          **仍未做（如实登记）**：UTD 的**一般楔角系数**（A9b）与漫反射口径仍是工程近似
-          （**刀刃 Fresnel 积分已由 A9a 补上（2026-10-16），见 `a9a_fresnel_utd_landed`**）、
+          **仍未做（如实登记）**：UTD 的**一般楔角系数**已由 A9b 补上（2026-10-16，见
+          `a9b_wedge_landed`；**刀刃 Fresnel 积分**由 A9a 补上，见 `a9a_fresnel_utd_landed`），
+          漫反射口径仍是工程近似、
           **GPU 档五条腿全落（M1–M5：直达 / 一次反射 / 绕射 / 散射 / 介质积分）**（见
           `a5_gpu_direct_kernel` / `a5_gpu_reflect_kernel` / `a5_gpu_diffract_kernel` /
           `a5_gpu_scatter_kernel` / `a5_gpu_medium_kernel`；本层已落批处理入口与逐位等价契约，
-          见 `a5_gpu_base`）。卡上仍没有的是**多次反射**（混响尾巴）与**绕射的 Fresnel 积分**（CPU 侧已落 A9a）。
+          见 `a5_gpu_base`）。卡上仍没有的是**多次反射**（混响尾巴）与**绕射的 Fresnel 积分 / 一般楔角系数**（CPU 侧已落 A9a+A9b）。
           portal 与衍射棱都按文档 §8 的取舍先落"显式图元"；**两半的兜底都已落** —— 衍射棱的
           自动认边见 `a4_auto_edges`，portal 的**体素空洞自动识别**见 `a10_portal_autodetect_landed`
           （2026-10-16）。低频不承诺 / **不做双耳渲染**见文档 §7
@@ -624,7 +625,7 @@ capabilities:
           （严格单调）且出阴影后直达接管、棱的半截（端点解）也对、绕射腿被挡死则无路径、逐带系数
           ⇒ 带比等于系数比 + `max_edges` 预算 + 逐字确定性 + `state_hash` 不变。
           ⚠️ 当时**不做** Fresnel 积分与楔角 UTD 系数（散射那一半见下条 `a4_scatter_landed`）；
-          **刀刃 Fresnel 已由 A9a 补上（2026-10-16）**，楔角 UTD 系数仍不做（A9b）。
+          **刀刃 Fresnel 已由 A9a 补上（2026-10-16）**，**一般楔角 UTD 系数已由 A9b 补上（2026-10-16，见 `a9b_wedge_landed`）**。
       - id: a4_scatter_landed
         note: >-
           **A4「散射」已落地（2026-10-11）**：逐面 `scattering: [[f32; BANDS]]`（**外部表**，缺了按
@@ -636,7 +637,7 @@ capabilities:
           判据 `tests/a4_scatter.rs` 5 条：能量分工（`s=0.6` ⇒ 镜面恰好是原来的 0.4、且多出散射路径）、
           散射增益与**闭式口径**对拍且对系数**线性**、**Lambertian**（同距离下绕离法向 60° 恰好弱一半）、
           腿被挡则无路径、逐带系数 ⇒ 带比等于系数比 + 预算 + 逐字确定性 + `state_hash` 不变。
-          ⚠️ 仍**不做**楔角 UTD 系数（Lambertian 仍是工程近似）；`D(θ)` 的 Fresnel 积分已由 A9a 补上（2026-10-16）。
+          ⚠️ 散射这一半仍是工程近似（Lambertian，不做真辐射度）；`D(θ)` 的 Fresnel 积分已由 A9a 补上（2026-10-16），一般楔角系数已由 A9b 补上（2026-10-16）。
       - id: a5_landed
         note: >-
           **A5 已落地（2026-10-11）**：动态源/听者本来就成立（声源逐 tick 取 `World::impacts()`、
@@ -861,7 +862,21 @@ capabilities:
           奇对称 `C(−x)=−C(x)` 逐位 / 阴影边界 −6.02 dB 且严格单调 / `ν` 与经典刀口
           `ν = h√(2(s+s')/(λ·s·s'))` 等价 / 默认无频率 = 旧口径 / 显式频率切真 Fresnel 对独立积分 /
           逐字确定性 + `state_hash`。
-          ⚠️ **仍未做（A9b）**：**一般楔角 UTD 系数** `D(n,…)`（需给 `Edge` 引 `wedge`）。
+          ⚠️ **一般楔角 UTD 系数**已由 A9b 补上（2026-10-16，见 `a9b_wedge_landed`）。
+      - id: a9b_wedge_landed
+        note: >-
+          **A9b「一般楔角 UTD 修正」已落地（2026-10-16）**：`crates/vxl-phys-acoustics/src/utd.rs`
+          —— `Edge::wedge: Option<Wedge>`（`Wedge { interior_angle, face0: Vec3 }`；**默认 `None` = 刀口
+          ⇒ A9a/A4 逐位不变**）。`Some(Ω)` 时按 **Kouyoumjian–Pathak 软边界系数** `D_soft`
+          （`cot(·)·F(·)` 两项、过渡函数 `F(χ)` 由 `C/S` 闭环求值；**全 f32**）算**楔角修正因子**
+          `fac = min(|D_n|²/|D_2|², WEDGE_FACTOR_MAX=4)`（`n = 2 − Ω/π`）——
+          口径 = **分母地板 + 钳位**（实测 `|D_n|²/|D_2|²` 中位 ~1、长尾到 1e6；比值在参考刀刃系数
+          趋零处发散，故钳到 4），乘到 A9a 的刀刃口径上：`df = knife_gain(ν) · fac`。
+          **`n = 2`（`Ω = 0`，刀口）⇒ `fac` 恰 `1`（逐位回到 A9a）；`n = 1`（`Ω = π`，平壁）⇒ `0`**。
+          口径备注：`β⁻ = φ − φ'` 无需参考向、`β⁺ = φ + φ'` 需 `face0` 定向；源/听者应在楔**外场区**。
+          判据 `tests/a9b_wedge.rs` 10 条：`n=2` 恰 `1` / 平壁恰 `0`（内角越界钳）/ **有界 `[0,4]` 且非 `NaN`**
+          + 方向性 / **互易**逐位 / 对**独立 KP（Python `f64`）**数值一致 / 端到端 `Ω=0` 与 `None` **逐位相同**
+          （含 `Ω=π` 把路径能量**清零**）/ 默认（不给频率）忽略楔角 / 有界 / 只读 + `state_hash`。
       - id: a10_portal_autodetect_landed
         note: >-
           **A10「体素空洞自动识别」已落地（2026-10-16）**：`crates/vxl-phys-acoustics/src/portal.rs` ——
@@ -891,10 +906,10 @@ capabilities:
     owner: maintainer
     notes: >-
       落点 = 新 crate `vxl-phys-acoustics`（门面之上、纯只读，API 走扩展 trait）。
-      **A1–A9a + A10 已落**（直达/一次反射/遮挡、portal 穿孔 + 透射泄漏、频带、介质、折射、衍射、
-      散射、自动认边、音频渲染、混响尾巴、多次反射、刀刃真 Fresnel、体素空洞自动识别）——
-      低频波动效应**不承诺**（几何声学的边界，写进文档 §7）；**仍未做**：A9b 一般楔角 UTD 系数、
-      卡上（GPU 档）的多次反射与 Fresnel 积分。
+      **A1–A9b + A10 已落**（直达/一次反射/遮挡、portal 穿孔 + 透射泄漏、频带、介质、折射、衍射、
+      散射、自动认边、音频渲染、混响尾巴、多次反射、刀刃真 Fresnel、一般楔角 UTD 修正、体素空洞自动识别）——
+      低频波动效应**不承诺**（几何声学的边界，写进文档 §7）；**仍未做**：卡上（GPU 档）的
+      多次反射与 Fresnel 积分 / 一般楔角系数。
 
   - id: PHY-SCOPE-HULL
     title: 多边形（凸体外壳）作为刚体形状

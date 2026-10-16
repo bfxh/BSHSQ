@@ -332,6 +332,7 @@ impl Room {
                 a: Vec3::new(-1.0, 1.0, 1.0),
                 b: Vec3::new(1.0, 1.0, 1.0),
                 coeff: [1.0f32; BANDS],
+                wedge: None,
             }],
         }
     }

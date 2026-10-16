@@ -92,6 +92,7 @@ impl AcousticGeometry<'_> {
                     a,
                     b,
                     coeff: cfg.coeff,
+                    wedge: None,
                 });
             } else if group.len() == 2 {
                 let (f1, f2) = (group[0].1 as usize, group[1].1 as usize);
@@ -109,6 +110,7 @@ impl AcousticGeometry<'_> {
                         a,
                         b,
                         coeff: cfg.coeff,
+                        wedge: None,
                     });
                 }
             }

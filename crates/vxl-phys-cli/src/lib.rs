@@ -345,6 +345,7 @@ fn room() -> Room {
             a: Vec3::new(1.0, 0.0, 1.5),
             b: Vec3::new(1.0, 2.5, 1.5),
             coeff: [0.5, 0.35, 0.2],
+            wedge: None,
         }],
     }
 }
