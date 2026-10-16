@@ -17,6 +17,12 @@ use wgpu::util::DeviceExt;
 
 use crate::pipeline::{dispatch, ent, f32_bytes, mk_layout, mk_pipe, Kind};
 
+/// **M6 二阶反射**的宿主入口：单独一个子模块 —— 这个文件已经贴着本仓 god 门（单文件 ≤ 800 行）
+/// 的边，新腿就落在子模块里（顺手把"改到就减"落一步）。
+mod reflect2;
+
+pub use reflect2::{reflected2_on_adapter, Reflect2Out};
+
 /// 一个 `(声源, 听者)` 对的读数（与 WGSL 输出缓冲同序：`src_i * n_lst + lst_i`）。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PairOut {

@@ -15,14 +15,18 @@
 //   输出行是 `(用时, 衰减低, 衰减中, 衰减高)`（**这一条没有 hit 位**，行首就是用时）。
 //   ⚠️ **折线（折射）由宿主逐段调用后组合**：时延**可加**、衰减**可乘** ⇒ 与"一次算完折线"
 //   等价（判据里钉了这条组合性）。层表按 y 升序、不重叠；取**第一命中**，没命中就是空气。
+// - `reflect2`（M6）：**二阶镜面反射**（两跳镜像展开）—— 逐对面 `(A,B)` 展开，两个反射点都要落在
+//   各自三角内、三段腿都不许被**链外的面**挡（链上两张面跳过），取**最强那条**（平局按 `(A,B)`
+//   序号取小）；增益 `(1-a_A)(1-a_B)/(总程长)²`、时延 `总程长/speed`。⚠️ 卡上**不做预算截断**
+//   ⇒ 与 CPU `reflection_order = 2`（A8）同解的**前提**是 CPU 侧 `max_reflections ≥ n_tris`。
 //
 // 与 CPU 端 `vxl-phys-acoustics` 的对应那几条**同口径**：
 //   ① 遮挡：Möller–Trumbore，端点共面不计（±1e-6 的边界容差，与 CPU 同款）；
 //   ② 时延 = `dist / speed`、增益 = `1 / dist²`（球面扩散）；
 //   ③ 逐轴展开、不用内建 `dot`/`cross`（归约序未规定 —— 与 `body_integrate.wgsl` 同一纪律）。
 //
-// **量纲/边界**：卡上就到这五条。绕射里的 Fresnel 积分、以及多次反射仍在 CPU 侧；这里要钉的是
-// "同一批输入 ⇒ 与 CPU 参考**逐对一致**（浮点容差、拓扑逐位）"。
+// **量纲/边界**：卡上到 M1–M6。仍留在 CPU 侧的：统计混响尾巴（A7）与穿孔传声（portal）；
+// 这里要钉的是"同一批输入 ⇒ 与 CPU 参考**逐对一致**（浮点容差、拓扑逐位）"。
 //
 // ⚠️ **两条刻意的独立口径**（别当成 bug）：① `reflect` 只按 `(1-a)` 打折，**不做** CPU 侧
 // "开散射时镜面那条再乘 `(1-s)`"的分工（能量守恒式分工要等两条腿在卡上合流的那一片）；
@@ -101,10 +105,13 @@ fn inside(a: vec3<f32>, b: vec3<f32>, c: vec3<f32>, p: vec3<f32>) -> bool {
     return u >= -1e-5 && v >= -1e-5 && u + v <= 1.0 + 1e-5;
 }
 
-/// 顺序扫全表：线段 `p→q` 是否被**除 `skip` 之外**的任何三角挡住。
-fn blocked(p: vec3<f32>, q: vec3<f32>, skip: u32) -> bool {
+/// 顺序扫全表：线段 `p→q` 是否被**除 `skip_a` / `skip_b` 这两张面之外**的任何三角挡住。
+///
+/// `skip_b = 0xffffffffu` 表示"没有第二张要跳过的面"（它越出 `n_tris` ⇒ 永不命中）——
+/// 于是 [`blocked`] 就是它的单面退化。二阶（M6）的两跳链要求**两张链上面的子段**都不算挡。
+fn blocked2(p: vec3<f32>, q: vec3<f32>, skip_a: u32, skip_b: u32) -> bool {
     for (var t = 0u; t < P.n_tris; t = t + 1u) {
-        if (t == skip) {
+        if (t == skip_a || t == skip_b) {
             continue;
         }
         let a = tris[t * 3u].xyz;
@@ -115,6 +122,11 @@ fn blocked(p: vec3<f32>, q: vec3<f32>, skip: u32) -> bool {
         }
     }
     return false;
+}
+
+/// 单面退化（M1–M4 共用）。**逐位与重构前等价**：多出来的那次 `t == skip_b` 恒为假。
+fn blocked(p: vec3<f32>, q: vec3<f32>, skip: u32) -> bool {
+    return blocked2(p, q, skip, 0xffffffffu);
 }
 
 /// 线段 `p→q` 是否被三角 `(a,b,c)` 挡住（Möller–Trumbore；端点共面不计）。
@@ -228,6 +240,100 @@ fn reflect(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
     }
     out[i] = vec4<f32>(select(0.0, 1.0, best_gain > 0.0), best_delay, best_gain, best_tri);
+}
+
+/// **M6：二阶镜面反射**（两跳镜像展开）—— 逐对取**最强那条**两跳路径。
+///
+/// 链 = `(面 A, 面 B)`、`A ≠ B`（同一面连打两次 = 原路返回，退化 ⇒ 跳过）；听者先按 `B`、再按 `A`
+/// 逐面镜像 ⇒ 第一跳点 `pA` 落在 `A` 内、第二跳点 `pB` 落在 `B` 内（两个点都用重心内点判）；
+/// 三段腿（`s→pA`、`pA→pB`、`pB→l`）都不得被**除 A、B 之外**的面挡（[`blocked2`]）；
+/// 增益 = `(1-a_A)(1-a_B)/(总程长²)`、时延 = `总程长/speed`。平局按 `(A,B)` 序号取小 ⇒ 确定。
+///
+/// ⚠️ **卡上不做预算截断**（与 M1–M5 同口径：卡只负责"给定场景逐对取最强"，预算/阶数归宿主）
+/// ⇒ 与 CPU `reflection_order = 2`（A8）逐对一致的**前提**是 CPU 侧 `max_reflections ≥ n_tris`
+/// （不截断才同解）；CPU 的 `dropped_budget` 在卡上没有对应信号。代价是每对 `O(n_tris³)`
+/// （两跳枚举 × 每段遮挡扫全表）⇒ 只对"离线、小场景"有意义。
+///
+/// `out.w` 报的是**第一跳**的面序号（诊断用；CPU 侧路径本来不带面序号）。
+@compute @workgroup_size(64)
+fn reflect2(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x;
+    if (i >= P.n_src * P.n_lst) {
+        return;
+    }
+    let s = srcs[i / P.n_lst].xyz;
+    let l = dsts[i % P.n_lst].xyz;
+    var best_gain = 0.0;
+    var best_delay = 0.0;
+    var best_face = -1.0;
+    for (var ta = 0u; ta < P.n_tris; ta = ta + 1u) {
+        let a0 = tris[ta * 3u].xyz;
+        let a1 = tris[ta * 3u + 1u].xyz;
+        let a2 = tris[ta * 3u + 2u].xyz;
+        let na = cross3(a1 - a0, a2 - a0);
+        let lna = len3(na);
+        if (lna <= 1e-9) {
+            continue; // 退化面：不当反射面
+        }
+        let nA = na * (1.0 / lna);
+        for (var tb = 0u; tb < P.n_tris; tb = tb + 1u) {
+            if (tb == ta) {
+                continue; // 同一面连着两次：退化
+            }
+            let b0 = tris[tb * 3u].xyz;
+            let b1 = tris[tb * 3u + 1u].xyz;
+            let b2 = tris[tb * 3u + 2u].xyz;
+            let nb = cross3(b1 - b0, b2 - b0);
+            let lnb = len3(nb);
+            if (lnb <= 1e-9) {
+                continue;
+            }
+            let nB = nb * (1.0 / lnb);
+            // 听者镜像两跳：`mB` = 听者按 B 镜像、`mA` = 再按 A 镜像。
+            let mB = l - nB * (2.0 * dot3(l - b0, nB));
+            let mA = mB - nA * (2.0 * dot3(mB - a0, nA));
+            // 第一跳：`s→mA` 与面 A 求交（越界 / 平行 / 出三角都作废）。
+            let segA = mA - s;
+            let denA = dot3(segA, nA);
+            if (abs(denA) <= 1e-9) {
+                continue;
+            }
+            let tA = dot3(a0 - s, nA) / denA;
+            if (tA < 0.0 || tA > 1.0) {
+                continue;
+            }
+            let pA = s + segA * tA;
+            if (!inside(a0, a1, a2, pA)) {
+                continue;
+            }
+            // 第二跳：`pA→mB` 与面 B 求交。
+            let segB = mB - pA;
+            let denB = dot3(segB, nB);
+            if (abs(denB) <= 1e-9) {
+                continue;
+            }
+            let tB = dot3(b0 - pA, nB) / denB;
+            if (tB < 0.0 || tB > 1.0) {
+                continue;
+            }
+            let pB = pA + segB * tB;
+            if (!inside(b0, b1, b2, pB)) {
+                continue;
+            }
+            // 三段腿都不许被"链外的面"挡（链上的两张面本来就在腿上起落 ⇒ 跳过）。
+            if (blocked2(s, pA, ta, tb) || blocked2(pA, pB, ta, tb) || blocked2(pB, l, ta, tb)) {
+                continue;
+            }
+            let total = len3(pA - s) + len3(pB - pA) + len3(l - pB);
+            let g = (1.0 - absorb[ta]) * (1.0 - absorb[tb]) / max(total * total, 1e-6);
+            if (g > best_gain) {
+                best_gain = g;
+                best_delay = total / P.speed;
+                best_face = f32(ta);
+            }
+        }
+    }
+    out[i] = vec4<f32>(select(0.0, 1.0, best_gain > 0.0), best_delay, best_gain, best_face);
 }
 
 /// 查层表：`y` 落在**第一命中**的层里 ⇒ 返回 `(c, α_低, α_中, α_高)`；没命中 ⇒ 空气（α 全 0）。
