@@ -138,6 +138,14 @@ fn main() {
         ("④ 边中点(x 向)", gx + step * 0.5, gz),
     ];
 
+    drop_scan(&mesh, cases);
+    flat_control();
+}
+
+/// 四个落点 × 三档半径的**静置扫描**：每个组合各建一个独立 `World`，跑满 `TICKS` 后
+/// 用独立仪器量 `clearance = d_min(暴力) − r` 并按**逐字保留**的表头打印一行。
+/// 场景（球心 `h + r + 0.05` 投放、材质、质量）与判据口径全在本函数内，`main` 只传落点表。
+fn drop_scan(mesh: &TriMesh, cases: [(&str, f32, f32); 4]) {
     for (name, x, z) in cases {
         for r in [0.20f32, 0.40, 0.70] {
             let cfg = PhysConfig::default();
@@ -174,7 +182,11 @@ fn main() {
             );
         }
     }
+}
 
+/// **平网格对照**：同一套路径、同一判据 ⇒ 球在 y = 0 的平网格上必须 `clearance ≈ 0`。
+/// 平面 3×3 顶点铺 8 m 见方（−4…4 两侧各 4 m），三档半径各跑满 `TICKS`。
+fn flat_control() {
     // 平面对照：同一套路径、同一判据 ⇒ 球在**平网格**上必须 clearance ≈ 0。
     println!("\n平网格对照（y = 0、3×3 顶点铺 8 m 见方）：");
     let mut v: Vec<Vec3> = Vec::new();

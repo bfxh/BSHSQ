@@ -25,8 +25,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use vxl_phys_core::interop::{InteropContact, ProviderColliders};
-use vxl_phys_core::{Aabb, Quat, Vec3};
+use vxl_phys_core::{Aabb, Vec3};
 
 #[path = "mesh_cross.rs"]
 mod mesh_cross;
@@ -497,6 +496,11 @@ fn closest_on_tri(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // 这两个只被本模块的测试用到：`contacts_point` 是 trait 方法，`Query` 收四元数
+    // ⇒ 随测试一起引入，别在文件作用域留下未用导入（编译警告会红）。
+    use vxl_phys_core::interop::ProviderColliders;
+    use vxl_phys_core::Quat;
 
     /// 水平地面：2×2 的四边形（y = 0，法线 +Y），中心在原点。
     fn ground() -> TriMesh {

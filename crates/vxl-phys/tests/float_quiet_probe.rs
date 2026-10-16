@@ -651,6 +651,62 @@ fn surface_height(couple: bool) -> f32 {
         .fold(0.0f32, f32::max)
 }
 
+/// 窗口统计：**体动 vs 局部水动**（窗口 `win` tick，逐步 `w.step()`）。
+///
+/// 口径：体心 y 起伏、`|v|`/`|ω|` 窗口均值；邻近水 = 水平 `±0.08` m 内的平均/峰 `|v|`
+/// 与**水面高度**（该窗口内邻近水最高点）的起伏。两档共用（2b 双向 / 2a 单向）；
+/// 2a 侧不打印水面起伏，但统计照算（同一次遍历，不额外扫一遍）。
+struct Stats {
+    ylo: f32,
+    yhi: f32,
+    slo: f32,
+    shi: f32,
+    vsum: f64,
+    vmax: f32,
+    n: f64,
+    bvsum: f64,
+    bwsum: f64,
+}
+
+fn window_stats(w: &mut World, b: usize, fid: usize, win: usize) -> Stats {
+    let (mut ylo, mut yhi) = (f32::MAX, f32::MIN);
+    let (mut slo, mut shi) = (f32::MAX, f32::MIN);
+    let (mut vsum, mut vmax, mut n) = (0.0f64, 0.0f32, 0.0f64);
+    let (mut bvsum, mut bwsum) = (0.0f64, 0.0f64);
+    for _ in 0..win {
+        w.step();
+        let p = w.bodies.position[b];
+        ylo = ylo.min(p.y);
+        yhi = yhi.max(p.y);
+        bvsum += w.bodies.linvel[b].length() as f64;
+        bwsum += w.bodies.angvel(b).length() as f64;
+        let f = &w.fluids()[fid].0;
+        let mut sh = 0.0f32;
+        for (q, vv) in f.positions().iter().zip(f.velocities().iter()) {
+            if (q.x - p.x).abs() < 0.08 && (q.z - p.z).abs() < 0.08 {
+                let sp = vv.length();
+                vsum += sp as f64;
+                vmax = vmax.max(sp);
+                n += 1.0;
+                sh = sh.max(q.y);
+            }
+        }
+        slo = slo.min(sh);
+        shi = shi.max(sh);
+    }
+    Stats {
+        ylo,
+        yhi,
+        slo,
+        shi,
+        vsum,
+        vmax,
+        n,
+        bvsum,
+        bwsum,
+    }
+}
+
 #[test]
 #[ignore = "P10 续：漂浮体不静止的归因（随波 vs 数值）；见上注"]
 fn float_motion_vs_local_water_motion() {
@@ -673,52 +729,28 @@ fn float_motion_vs_local_water_motion() {
         w.step();
     }
     // 窗口统计：体动 vs 局部水动
-    let (mut ylo, mut yhi) = (f32::MAX, f32::MIN);
-    let (mut slo, mut shi) = (f32::MAX, f32::MIN);
-    let (mut vsum, mut vmax, mut n) = (0.0f64, 0.0f32, 0.0f64);
-    let (mut bvsum, mut bwsum) = (0.0f64, 0.0f64);
     let win = 480usize;
-    for _ in 0..win {
-        w.step();
-        let p = w.bodies.position[b];
-        ylo = ylo.min(p.y);
-        yhi = yhi.max(p.y);
-        bvsum += w.bodies.linvel[b].length() as f64;
-        bwsum += w.bodies.angvel(b).length() as f64;
-        let f = &w.fluids()[fid].0;
-        let mut sh = 0.0f32;
-        for (q, vv) in f.positions().iter().zip(f.velocities().iter()) {
-            if (q.x - p.x).abs() < 0.08 && (q.z - p.z).abs() < 0.08 {
-                let sp = vv.length();
-                vsum += sp as f64;
-                vmax = vmax.max(sp);
-                n += 1.0;
-                sh = sh.max(q.y);
-            }
-        }
-        slo = slo.min(sh);
-        shi = shi.max(sh);
-    }
+    let s = window_stats(&mut w, b, fid, win);
     println!("漂浮体运动 vs 局部水动（窗口 {win} tick；盒 0°、300 kg/m³、2b 开）");
     println!(
         "  体：y 起伏 {:.1} mm | 平均 |v| {:.4} | 平均 |ω| {:.4}",
-        (yhi - ylo) * 1e3,
-        bvsum / win as f64,
-        bwsum / win as f64
+        (s.yhi - s.ylo) * 1e3,
+        s.bvsum / win as f64,
+        s.bwsum / win as f64
     );
     println!(
         "  邻近水（水平 ±0.08 m）：平均 |v| {:.4} | 峰 |v| {:.4} | 水面高度起伏 {:.1} mm",
-        vsum / n.max(1.0),
-        vmax,
-        (shi - slo) * 1e3
+        s.vsum / s.n.max(1.0),
+        s.vmax,
+        (s.shi - s.slo) * 1e3
     );
     println!("  ⇒ 若『体平均 |v| ≈ 水平均 |v|』且『体 y 起伏 ≈ 水面起伏』⇒ **随波（非缺陷）**；");
     println!("     若体 |v| 远大于水 |v| 或体起伏 ≫ 水面起伏 ⇒ **数值抖动（缺陷）**。");
     // —— 对照：**2a 单向**（`add_fluid`，无边界粒子反作用）——判定"水为什么一直不静" ——
     let mut w2 = World::new(PhysConfig::default());
     let v2 = tank(&mut w2);
-    let s2 = water(2);
-    let fid2 = w2.add_fluid(s2, &[v2]); // 2a：无边界粒子
+    let s2sys = water(2);
+    let fid2 = w2.add_fluid(s2sys, &[v2]); // 2a：无边界粒子
     let surface2 = surface_height(false);
     let b2 = w2.add_dynamic(
         Shape::Box {
@@ -731,39 +763,16 @@ fn float_motion_vs_local_water_motion() {
     for _ in 0..900 {
         w2.step();
     }
-    let (mut vsum2, mut vmax2, mut n2) = (0.0f64, 0.0f32, 0.0f64);
-    let (mut bv2, mut bw2) = (0.0f64, 0.0f64);
-    let (mut ylo2, mut yhi2) = (f32::MAX, f32::MIN);
-    for _ in 0..win {
-        w2.step();
-        let p = w2.bodies.position[b2];
-        ylo2 = ylo2.min(p.y);
-        yhi2 = yhi2.max(p.y);
-        bv2 += w2.bodies.linvel[b2].length() as f64;
-        bw2 += w2.bodies.angvel(b2).length() as f64;
-        for (q, vv) in w2.fluids()[fid2]
-            .0
-            .positions()
-            .iter()
-            .zip(w2.fluids()[fid2].0.velocities().iter())
-        {
-            if (q.x - p.x).abs() < 0.08 && (q.z - p.z).abs() < 0.08 {
-                let sp = vv.length();
-                vsum2 += sp as f64;
-                vmax2 = vmax2.max(sp);
-                n2 += 1.0;
-            }
-        }
-    }
+    let s2 = window_stats(&mut w2, b2, fid2, win);
     println!(
         "  [对照 2a 单向（无边界粒子）] 体：y 起伏 {:.1} mm | 平均 |v| {:.4} | 平均 |ω| {:.4}",
-        (yhi2 - ylo2) * 1e3,
-        bv2 / win as f64,
-        bw2 / win as f64
+        (s2.yhi - s2.ylo) * 1e3,
+        s2.bvsum / win as f64,
+        s2.bwsum / win as f64
     );
     println!(
         "                             邻近水：平均 |v| {:.4} | 峰 |v| {:.4}",
-        vsum2 / n2.max(1.0),
-        vmax2
+        s2.vsum / s2.n.max(1.0),
+        s2.vmax
     );
 }

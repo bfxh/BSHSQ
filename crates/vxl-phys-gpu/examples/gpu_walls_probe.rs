@@ -172,36 +172,9 @@ fn main() {
     let Some(gpu_without) = dens_on_gpu(&init, cfg, None, adapter) else {
         return;
     };
-    let dev = |a: &[f32], b: &[f32]| -> (f32, f32) {
-        let mut mx = 0.0f32;
-        let mut mean = 0.0f32;
-        for (x, y) in a.iter().zip(b.iter()) {
-            let d = (x - y).abs();
-            mx = mx.max(d);
-            mean += d;
-        }
-        (mx, mean / a.len() as f32)
-    };
-    let (mx_w, mn_w) = dev(&cpu_dens, &gpu_with);
-    let (mx_wo, mn_wo) = dev(&cpu_dens, &gpu_without);
-    println!("== 提供者壁面的镜像鬼影（GPU 侧）vs CPU 档：同一状态比密度场 ==");
-    println!(
-        "  体素水槽 + 8³@0.05 水块（{n} 粒）| 近壁粒子（有条目）{} / {} 面 | 零步长 ⇒ 位置不动",
-        i2.len(),
-        pl.len()
-    );
-    println!(
-        "  ① 带鬼影：max |Δρ| = {mx_w:.3e} kg/m³（{:.2e} ρ0）/ mean {mn_w:.3e}",
-        mx_w / rho0
-    );
-    println!(
-        "  ② **金丝雀**（不带鬼影）：max |Δρ| = {mx_wo:.3e}（{:.2e} ρ0）/ mean {mn_wo:.3e} ⇒ 鬼影补的质量就是这一块",
-        mx_wo / rho0
-    );
-    println!(
-        "  ③ 鬼影把最大偏差压小了 **{:.1}×**",
-        (mx_wo / mx_w.max(1e-30)).max(1.0)
-    );
+
+    ghost_report(&cpu_dens, &gpu_with, &gpu_without, rho0, n, &(i2, st, pl));
+
     // ── ② 静置仿真（真刀真枪）：同一初值三条链 ──
     // A CPU 档（自带镜像 + 逐子步投影）；B 卡上（鬼影 + **投影**）；C 卡上（**只鬼影** = 金丝雀）。
     let ticks = 150usize;
@@ -247,4 +220,48 @@ fn main() {
     push_sawtooth(&[v], prov, n, 60);
     // ── ③ facade 路径：provider 壁面 + 卡上步进（壁面档经 `FluidStepper` 接线）──
     facade_path(adapter);
+}
+
+/// **同状态密度对拍报表**（① 带鬼影 / ② 金丝雀 / ③ 压制倍率）：把 CPU 档密度与卡上两份
+/// 读回逐粒求 `max`/`mean` 偏差后按**逐字保留**的格式打印。`main` 只负责把三份读数和
+/// 场景计数与稀疏平面表（`n` / `planes`）交进来。
+fn ghost_report(
+    cpu_dens: &[f32],
+    gpu_with: &[f32],
+    gpu_without: &[f32],
+    rho0: f32,
+    n: usize,
+    planes: &PlaneTable,
+) {
+    let (i2, pl) = (&planes.0, &planes.2);
+    let dev = |a: &[f32], b: &[f32]| -> (f32, f32) {
+        let mut mx = 0.0f32;
+        let mut mean = 0.0f32;
+        for (x, y) in a.iter().zip(b.iter()) {
+            let d = (x - y).abs();
+            mx = mx.max(d);
+            mean += d;
+        }
+        (mx, mean / a.len() as f32)
+    };
+    let (mx_w, mn_w) = dev(&cpu_dens, &gpu_with);
+    let (mx_wo, mn_wo) = dev(&cpu_dens, &gpu_without);
+    println!("== 提供者壁面的镜像鬼影（GPU 侧）vs CPU 档：同一状态比密度场 ==");
+    println!(
+        "  体素水槽 + 8³@0.05 水块（{n} 粒）| 近壁粒子（有条目）{} / {} 面 | 零步长 ⇒ 位置不动",
+        i2.len(),
+        pl.len()
+    );
+    println!(
+        "  ① 带鬼影：max |Δρ| = {mx_w:.3e} kg/m³（{:.2e} ρ0）/ mean {mn_w:.3e}",
+        mx_w / rho0
+    );
+    println!(
+        "  ② **金丝雀**（不带鬼影）：max |Δρ| = {mx_wo:.3e}（{:.2e} ρ0）/ mean {mn_wo:.3e} ⇒ 鬼影补的质量就是这一块",
+        mx_wo / rho0
+    );
+    println!(
+        "  ③ 鬼影把最大偏差压小了 **{:.1}×**",
+        (mx_wo / mx_w.max(1e-30)).max(1.0)
+    );
 }

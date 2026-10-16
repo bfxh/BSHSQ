@@ -125,40 +125,9 @@ impl FluidSystem {
                 }
             });
         }
-        // 2b 反作用（逐粒 bforce）：**串行补趟**（只有边界粒子存在时才走）——
-        // 与串行路径同一算式、同一遍历序 ⇒ 逐位一致。缓冲用 `take` 借出以便闭包内写。
+        // 2b 反作用：**串行补趟**（只有边界粒子存在时才走）⇒ 单独成相位（见文件尾）。
         if nt > nf {
-            let mut bforce = std::mem::take(&mut self.bforce);
-            for i in 0..nf {
-                let vi = self.vel[i];
-                let rho_i = self.dens[i];
-                let ci2 = self.press[i] / (rho_i * rho_i);
-                let mi = self.pmass[i];
-                self.for_neighbors(i, |j, d, r2| {
-                    if j < nf {
-                        return;
-                    }
-                    let rho_j = self.dens[j];
-                    let cj2 = self.press[j] / (rho_j * rho_j);
-                    let r = r2.sqrt();
-                    let t = self.h - r;
-                    let mj = self.pmass[j];
-                    let coef = mj * (self.ks * t * t) * (ci2 + cj2);
-                    let denom = r.max(1e-9);
-                    let cv = {
-                        let vij = vi - self.vel[j];
-                        let vdn = -vij.dot(d);
-                        if vdn > 0.0 {
-                            let mu = vdn * self.h / (r2 + 0.01 * self.h2);
-                            mj * (alpha_c * mu / (0.5 * (rho_i + rho_j))) * (self.ks * t * t)
-                        } else {
-                            0.0
-                        }
-                    };
-                    bforce[j] -= d * (mi * (coef + cv) / denom);
-                });
-            }
-            self.bforce = bforce;
+            boundary_reaction_serial(self, nf, alpha_c);
         }
         self.aggregate_reactions();
     }
@@ -217,4 +186,42 @@ impl FluidSystem {
         self.bforce = bforce;
         self.aggregate_reactions();
     }
+}
+
+/// **2b 反作用·串行补趟**（从 `force_pass_parallel` 按相位拆出；纯搬移，语义未改）：
+/// 逐粒 `bforce`（只有边界粒子存在时才走）——与串行路径同一算式、同一遍历序 ⇒ 逐位一致。
+/// 缓冲用 `take` 借出以便闭包内写。**自由函数**：`FluidSystem` 的方法数是 god 门的
+/// 登记债务（只准减），相位拆出不占方法位（同 `laminar::pass` / `fluid_medium::scan` 先例）。
+fn boundary_reaction_serial(sys: &mut FluidSystem, nf: usize, alpha_c: f32) {
+    let mut bforce = std::mem::take(&mut sys.bforce);
+    for i in 0..nf {
+        let vi = sys.vel[i];
+        let rho_i = sys.dens[i];
+        let ci2 = sys.press[i] / (rho_i * rho_i);
+        let mi = sys.pmass[i];
+        sys.for_neighbors(i, |j, d, r2| {
+            if j < nf {
+                return;
+            }
+            let rho_j = sys.dens[j];
+            let cj2 = sys.press[j] / (rho_j * rho_j);
+            let r = r2.sqrt();
+            let t = sys.h - r;
+            let mj = sys.pmass[j];
+            let coef = mj * (sys.ks * t * t) * (ci2 + cj2);
+            let denom = r.max(1e-9);
+            let cv = {
+                let vij = vi - sys.vel[j];
+                let vdn = -vij.dot(d);
+                if vdn > 0.0 {
+                    let mu = vdn * sys.h / (r2 + 0.01 * sys.h2);
+                    mj * (alpha_c * mu / (0.5 * (rho_i + rho_j))) * (sys.ks * t * t)
+                } else {
+                    0.0
+                }
+            };
+            bforce[j] -= d * (mi * (coef + cv) / denom);
+        });
+    }
+    sys.bforce = bforce;
 }

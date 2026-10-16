@@ -23,6 +23,10 @@
 
 use vxl_phys_core::Vec3;
 
+/// x86_64 基线 ISA 内建（SSE2，无需运行时特性探测）；非 x86_64 不编译本导入。
+#[cfg(target_arch = "x86_64")]
+use core::arch::x86_64::*;
+
 /// 标量参考实现（语义基准）：非 x86_64 走它；x86_64 上由测试用它和 SIMD 逐位对照
 /// （故 x86_64 的发布构建里它「未使用」，非死代码）。
 #[cfg_attr(target_arch = "x86_64", allow(dead_code))]
@@ -118,7 +122,6 @@ fn sat_scan_sse2(
     pb: Vec3,
     skin: f32,
 ) -> Option<(f32, Vec3, usize)> {
-    use core::arch::x86_64::*;
     let mut best = f32::MIN;
     let mut best_n = Vec3::ZERO;
     let mut best_idx = usize::MAX;
@@ -136,65 +139,15 @@ fn sat_scan_sse2(
             cy[k] = a.y;
             cz[k] = a.z;
         }
-        let mut sep_arr = [0f32; 4];
-        let flags: i32; // bit k: 1 = 该 lane 用 −n（sep2 更大；下面 unsafe 块内赋值）
+        let sep_arr: [f32; 4];
+        let flags: i32; // bit k: 1 = 该 lane 用 -n（sep2 更大；由 `sep4` 赋值）
         let degen: i32; // bit k: 1 = 该 lane 退化（标量侧 continue）
                         // SAFETY: 本块（含内部 `dot_lane`）只调用 x86_64 基线 SSE2 内建——函数在
                         // `#[cfg(target_arch = "x86_64")]` 下编译，故无需运行时特性探测；指针入参只有两处：
                         // `_mm_loadu_ps` 读 `cx/cy/cz`、`_mm_storeu_ps` 写 `sep_arr`，都是长度 4 的本地
                         // `f32` 数组（16 字节未对齐访问仍在界内），其余内建只消费 `__m128` 寄存器值：
                         // 无裸指针运算、无生命周期擦除、无别名假设。
-        unsafe {
-            let nx = _mm_loadu_ps(cx.as_ptr());
-            let ny = _mm_loadu_ps(cy.as_ptr());
-            let nz = _mm_loadu_ps(cz.as_ptr());
-            let signmask = _mm_set1_ps(-0.0);
-            // 退化判定：length_squared < 0.5（结合序同 Vec3::dot）
-            let ls = _mm_add_ps(
-                _mm_add_ps(_mm_mul_ps(nx, nx), _mm_mul_ps(ny, ny)),
-                _mm_mul_ps(nz, nz),
-            );
-            degen = _mm_movemask_ps(_mm_cmplt_ps(ls, _mm_set1_ps(0.5)));
-            // lane 版「标量向量 · 4 条轴」：v.x·nx + v.y·ny + v.z·nz（同左结合序）
-            #[inline(always)]
-            unsafe fn dot_lane(v: Vec3, nx: __m128, ny: __m128, nz: __m128) -> __m128 {
-                _mm_add_ps(
-                    _mm_add_ps(
-                        _mm_mul_ps(_mm_set1_ps(v.x), nx),
-                        _mm_mul_ps(_mm_set1_ps(v.y), ny),
-                    ),
-                    _mm_mul_ps(_mm_set1_ps(v.z), nz),
-                )
-            }
-            let absf = |v: __m128| _mm_andnot_ps(signmask, v);
-            let ra = _mm_add_ps(
-                _mm_add_ps(
-                    _mm_mul_ps(_mm_set1_ps(ha.x), absf(dot_lane(aa[0], nx, ny, nz))),
-                    _mm_mul_ps(_mm_set1_ps(ha.y), absf(dot_lane(aa[1], nx, ny, nz))),
-                ),
-                _mm_mul_ps(_mm_set1_ps(ha.z), absf(dot_lane(aa[2], nx, ny, nz))),
-            );
-            let rb = _mm_add_ps(
-                _mm_add_ps(
-                    _mm_mul_ps(_mm_set1_ps(hb.x), absf(dot_lane(ab[0], nx, ny, nz))),
-                    _mm_mul_ps(_mm_set1_ps(hb.y), absf(dot_lane(ab[1], nx, ny, nz))),
-                ),
-                _mm_mul_ps(_mm_set1_ps(hb.z), absf(dot_lane(ab[2], nx, ny, nz))),
-            );
-            let ca = dot_lane(pa, nx, ny, nz);
-            let cb = dot_lane(pb, nx, ny, nz);
-            let sep1 = _mm_sub_ps(_mm_sub_ps(cb, rb), _mm_add_ps(ca, ra)); // min_b − max_a
-            let sep2 = _mm_sub_ps(_mm_sub_ps(ca, ra), _mm_add_ps(cb, rb)); // min_a − max_b
-                                                                           // **同一谓词 + 位选择**（审计 F-12）：标量是 `sep1 >= sep2 ? sep1 : sep2`，
-                                                                           // 这里让**同一个** `ge` 既定 `flags`（法线方向）又定 `sep`（值）。旧写法
-                                                                           // `_mm_max_ps(sep2, sep1)` 在 NaN 时按 Intel 语义返回第二操作数，而标量的 `>=`
-                                                                           // 对 NaN 判假会取 `sep2` ⇒ 两条路径各有各的算术 ⇒ 分类可分叉。平局（含带符号零）由
-                                                                           // 同一个 `>=` 定夺 ⇒ 与标量逐位同；回归判据见模块头注（差分族），平局与极值两条是扩覆盖。
-            let ge = _mm_cmpge_ps(sep1, sep2);
-            flags = _mm_movemask_ps(ge) ^ 0b1111;
-            let sep = _mm_or_ps(_mm_and_ps(ge, sep1), _mm_andnot_ps(ge, sep2));
-            _mm_storeu_ps(sep_arr.as_mut_ptr(), sep);
-        }
+        (sep_arr, flags, degen) = sep4((cx, cy, cz), ha, aa, pa, hb, ab, pb);
         // 标量侧：按轴序复刻三条规则（退化跳过 / 早退 / 严格择优）。
         for k in 0..m {
             if degen & (1 << k) != 0 {
@@ -222,3 +175,74 @@ fn sat_scan_sse2(
 
 #[cfg(all(test, target_arch = "x86_64"))]
 mod tests;
+
+/// SSE2 段（4 lane）：算 `ra/rb/ca/cb/sep1/sep2`，以**同一谓词 + 位选择**定 `sep` 与法线方向，
+/// 写回 4 lane 的 `sep_arr`；返回标量侧需要的 `(sep_arr, flags, degen)`。纯搬移，语义未改。
+///
+/// SAFETY：只调用 x86_64 基线 SSE2 内建，入参均为长度 4 的本地数组（详见调用点的 SAFETY 注释）。
+fn sep4(
+    lanes: ([f32; 4], [f32; 4], [f32; 4]),
+    ha: Vec3,
+    aa: &[Vec3; 3],
+    pa: Vec3,
+    hb: Vec3,
+    ab: &[Vec3; 3],
+    pb: Vec3,
+) -> ([f32; 4], i32, i32) {
+    let (cx, cy, cz) = lanes;
+    let mut sep_arr = [0f32; 4];
+    let flags: i32;
+    let degen: i32;
+    unsafe {
+        let nx = _mm_loadu_ps(cx.as_ptr());
+        let ny = _mm_loadu_ps(cy.as_ptr());
+        let nz = _mm_loadu_ps(cz.as_ptr());
+        let signmask = _mm_set1_ps(-0.0);
+        // 退化判定：length_squared < 0.5（结合序同 Vec3::dot）
+        let ls = _mm_add_ps(
+            _mm_add_ps(_mm_mul_ps(nx, nx), _mm_mul_ps(ny, ny)),
+            _mm_mul_ps(nz, nz),
+        );
+        degen = _mm_movemask_ps(_mm_cmplt_ps(ls, _mm_set1_ps(0.5)));
+        // lane 版「标量向量 · 4 条轴」：v.x·nx + v.y·ny + v.z·nz（同左结合序）
+        #[inline(always)]
+        unsafe fn dot_lane(v: Vec3, nx: __m128, ny: __m128, nz: __m128) -> __m128 {
+            _mm_add_ps(
+                _mm_add_ps(
+                    _mm_mul_ps(_mm_set1_ps(v.x), nx),
+                    _mm_mul_ps(_mm_set1_ps(v.y), ny),
+                ),
+                _mm_mul_ps(_mm_set1_ps(v.z), nz),
+            )
+        }
+        let absf = |v: __m128| _mm_andnot_ps(signmask, v);
+        let ra = _mm_add_ps(
+            _mm_add_ps(
+                _mm_mul_ps(_mm_set1_ps(ha.x), absf(dot_lane(aa[0], nx, ny, nz))),
+                _mm_mul_ps(_mm_set1_ps(ha.y), absf(dot_lane(aa[1], nx, ny, nz))),
+            ),
+            _mm_mul_ps(_mm_set1_ps(ha.z), absf(dot_lane(aa[2], nx, ny, nz))),
+        );
+        let rb = _mm_add_ps(
+            _mm_add_ps(
+                _mm_mul_ps(_mm_set1_ps(hb.x), absf(dot_lane(ab[0], nx, ny, nz))),
+                _mm_mul_ps(_mm_set1_ps(hb.y), absf(dot_lane(ab[1], nx, ny, nz))),
+            ),
+            _mm_mul_ps(_mm_set1_ps(hb.z), absf(dot_lane(ab[2], nx, ny, nz))),
+        );
+        let ca = dot_lane(pa, nx, ny, nz);
+        let cb = dot_lane(pb, nx, ny, nz);
+        let sep1 = _mm_sub_ps(_mm_sub_ps(cb, rb), _mm_add_ps(ca, ra)); // min_b − max_a
+        let sep2 = _mm_sub_ps(_mm_sub_ps(ca, ra), _mm_add_ps(cb, rb)); // min_a − max_b
+                                                                       // **同一谓词 + 位选择**（审计 F-12）：标量是 `sep1 >= sep2 ? sep1 : sep2`，
+                                                                       // 这里让**同一个** `ge` 既定 `flags`（法线方向）又定 `sep`（值）。旧写法
+                                                                       // `_mm_max_ps(sep2, sep1)` 在 NaN 时按 Intel 语义返回第二操作数，而标量的 `>=`
+                                                                       // 对 NaN 判假会取 `sep2` ⇒ 两条路径各有各的算术 ⇒ 分类可分叉。平局（含带符号零）由
+                                                                       // 同一个 `>=` 定夺 ⇒ 与标量逐位同；回归判据见模块头注（差分族），平局与极值两条是扩覆盖。
+        let ge = _mm_cmpge_ps(sep1, sep2);
+        flags = _mm_movemask_ps(ge) ^ 0b1111;
+        let sep = _mm_or_ps(_mm_and_ps(ge, sep1), _mm_andnot_ps(ge, sep2));
+        _mm_storeu_ps(sep_arr.as_mut_ptr(), sep);
+    }
+    (sep_arr, flags, degen)
+}
