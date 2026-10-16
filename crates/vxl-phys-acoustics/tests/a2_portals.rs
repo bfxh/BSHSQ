@@ -82,6 +82,7 @@ fn scene(open: f32, transmission: f32) -> Geo {
                 Vec3::new(-1.0, 2.5, 1.0),
             ],
             open,
+            regions: None,
         }],
     }
 }

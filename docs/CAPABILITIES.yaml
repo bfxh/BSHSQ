@@ -609,8 +609,9 @@ capabilities:
           `a5_gpu_direct_kernel` / `a5_gpu_reflect_kernel` / `a5_gpu_diffract_kernel` /
           `a5_gpu_scatter_kernel` / `a5_gpu_medium_kernel`；本层已落批处理入口与逐位等价契约，
           见 `a5_gpu_base`）。卡上仍没有的是**多次反射**（混响尾巴）与**绕射的 Fresnel 积分**（CPU 侧已落 A9a）。
-          portal 与衍射棱都按文档 §8 的取舍先落"显式图元"（衍射棱另有兜底，见下条）；
-          **"体素空洞自动识别"**（从占据位找连通孔）仍未做。低频不承诺 / **不做双耳渲染**见文档 §7
+          portal 与衍射棱都按文档 §8 的取舍先落"显式图元"；**两半的兜底都已落** —— 衍射棱的
+          自动认边见 `a4_auto_edges`，portal 的**体素空洞自动识别**见 `a10_portal_autodetect_landed`
+          （2026-10-16）。低频不承诺 / **不做双耳渲染**见文档 §7
           （2026-10-12 起有**单声道**离线渲染供试听与对表，见 `a6_audio_render`；HRTF/双耳仍归宿主）。
       - id: a4_diffraction_landed
         note: >-
@@ -861,6 +862,22 @@ capabilities:
           `ν = h√(2(s+s')/(λ·s·s'))` 等价 / 默认无频率 = 旧口径 / 显式频率切真 Fresnel 对独立积分 /
           逐字确定性 + `state_hash`。
           ⚠️ **仍未做（A9b）**：**一般楔角 UTD 系数** `D(n,…)`（需给 `Edge` 引 `wedge`）。
+      - id: a10_portal_autodetect_landed
+        note: >-
+          **A10「体素空洞自动识别」已落地（2026-10-16）**：`crates/vxl-phys-acoustics/src/portal.rs` ——
+          **从占据位找连通孔**（设计文档 §8 待裁项①、"显式图元优先、自动兜底"里的兜底那一半）。
+          口径：**空 = `!占据`**（`VoxelOccupancy { origin, step, dims, occupied }`，行主序
+          `ix + nx·(iy + ny·iz)`、越界/短表按实心）；先按**切比雪夫半径 `neck_cells`**（默认 1）
+          **腐蚀**空域断掉窄颈，再按 **6 连通**把剩下的空域标成**房间**，多源 BFS 把标签**填回**
+          （每格取最近房间），两房标签**相接**的那层空格就是**开口**，按法向分组、
+          给每扇 `Portal { quad, open = 1, regions: Some([小,大]) }`（`regions` = 两侧房间 id，升序）。
+          顺序按格索引 ⇒ 逐位可复现；`Portal` 从 `lib.rs` 挪进本模块并加 `regions: Option<[u32;2]>`
+          （作者手标的默认 `None` ⇒ A2 既有口径逐位不变）。
+          判据 `tests/a10_portals.rs` 6 条：一格窄门在墙上 ⇒ 恰好两房 + 1 扇 portal（`regions = [0,1]`、
+          法向轴居中）/ 墙封死 ⇒ 0 / 宽于 `2·neck` 的开口把两房并成一房 ⇒ 0 / `neck_cells = 0` 永不分裂 ⇒ 0 /
+          两跑逐位一致 / **识别出的 portal 直接驱动 A2 的穿孔路径**（同平面墙挡住直线、门心在墙上 ⇒
+          `portals ≥ 1`；撤掉 portal ⇒ 0）。⚠️ 边界：只吃**占据位**（不读 `World`、不看碰撞体），
+          `neck_cells` 是唯一旋钮（宽/窄语义由它定）。
       - id: cli_wired
         note: >-
           **工具链已接（2026-10-11）**：`vxl-phys-cli acoustic <voxel> [ticks]` 打声学路径流（JSONL，
@@ -874,8 +891,10 @@ capabilities:
     owner: maintainer
     notes: >-
       落点 = 新 crate `vxl-phys-acoustics`（门面之上、纯只读，API 走扩展 trait）。
-      A1（静态直达 + 一次反射 + 遮挡）与 A2（portal 穿孔 + 透射泄漏）已落 —— 低频波动效应
-      **不承诺**（几何声学的边界，写进文档 §7）；A3–A5 未做。
+      **A1–A9a + A10 已落**（直达/一次反射/遮挡、portal 穿孔 + 透射泄漏、频带、介质、折射、衍射、
+      散射、自动认边、音频渲染、混响尾巴、多次反射、刀刃真 Fresnel、体素空洞自动识别）——
+      低频波动效应**不承诺**（几何声学的边界，写进文档 §7）；**仍未做**：A9b 一般楔角 UTD 系数、
+      卡上（GPU 档）的多次反射与 Fresnel 积分。
 
   - id: PHY-SCOPE-HULL
     title: 多边形（凸体外壳）作为刚体形状

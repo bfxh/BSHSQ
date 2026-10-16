@@ -31,6 +31,9 @@
 //!   时绕射「方向因子」换成真系数（Fresnel 积分 `C/S`、`ν = 2√(Δ/λ)`、`Δ` = Fermat 折线多余路程）；
 //!   默认 `[0;3]`（不给绝对频率）⇒ 退回 A4 旧口径、**逐位不变**。**一般楔角 `n` 的 UTD 系数仍未做（A9b）**。
 //!   判据 `tests/a9_utd.rs`。
+//! - **A10**：**体素空洞自动识别**（[`portal`]）—— 从**占据位图**（[`VoxelOccupancy`]）里用
+//!   「腐蚀断颈 → 多源 BFS 分房 → 标签相接处取开口」认出**房间**与**开口**，产出 [`Portal`]
+//!   （填 `regions`）。是开口那半的兜底路线（显式标仍是首选）。判据 `tests/a10_portals.rs`。
 //!
 //! ## 三条设计原则（文档 §4 的落实）
 //!
@@ -82,6 +85,7 @@
 #![forbid(unsafe_code)]
 
 pub mod audio;
+pub mod portal;
 pub mod reverb;
 pub mod utd;
 
@@ -93,6 +97,7 @@ mod scatter;
 
 pub use auto_edge::EdgeDetect;
 pub use medium::{AcousticMedium, LayeredMedium, Medium, Slab};
+pub use portal::{Portal, PortalDetect, VoxelOccupancy};
 
 use bounce::push_second_order;
 use diffract::push_diffraction;
@@ -126,16 +131,6 @@ pub struct AcousticGeometry<'a> {
     /// **介质体积场**（A3）：`None` = 均匀空气（用 [`AcousticConfig::speed_of_sound`]、无吸收，
     /// 数值与 A1 / A2 逐位相同）。
     pub medium: Option<&'a dyn AcousticMedium>,
-}
-
-/// 一个**开口**（A2）：四边形（四个角，顶点顺序无要求）+ **开启比例**。
-///
-/// `open ∈ [0,1]`：`0` = 关死（这条开口不传声，只剩墙的透射泄漏）、`1` = 全开；中间值就是
-/// "开了一条缝"——增益按 `open` 线性衰减 ⇒ **缝宽 → 衰减单调**（文档 §5 的 A2 判据）。
-/// 开口推荐**叠在实心建模面上声明**（几何照常封闭，开口由本表给出）；几何里真挖了空洞也能用。
-pub struct Portal {
-    pub quad: [Vec3; 4],
-    pub open: f32,
 }
 
 /// 一条**衍射棱**（A4）：两个端点 + 逐带**绕射系数**。

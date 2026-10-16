@@ -81,6 +81,7 @@ fn portal() -> Portal {
             Vec3::new(-1.0, 2.5, 1.5),
         ],
         open: 1.0,
+        regions: None,
     }
 }
 
