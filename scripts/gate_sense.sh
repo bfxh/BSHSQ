@@ -6,11 +6,13 @@
 #   · 这边判**工具链产物**——`sense_dump` 两跑逐字一致 + 预算上界 + 与基线文件对拍 + **表→音色组 id 的搬运**。
 # 只有库过而 CLI 漂移，音效师拿到的 cue 流就不可复现 ⇒ 两边都要过。
 #
-# 三个模式各判一遍（同一套判据口径）：
+# 四个模式各判一遍（同一套判据口径）：
 #   · impact（S1 冲击）  → bench/baselines/sense_dump_300x64.json
 #   · slide （S2 持续接触）→ bench/baselines/sense_dump_slide_300x64.json
 #   · table （S3 材质表）  → 无需基线：判"表 → 音色组 id"**逐行**正确 + **缺项显式拒绝**
 #                            （半张表必须退出码 2、点名缺的槽、且**不产出任何 cue 行**）
+#   · haptic（S4 震动包络）→ bench/baselines/sense_dump_haptic_300x64.json + 两条**结构性质**
+#                            （上钳边界闭在 1.0 / 纯释放段逐帧非增且末帧恰 0.0 —— ROUTE §3.2 的 S4 判据）
 #
 # 用法：
 #   scripts/gate_sense.sh [根目录] [--report-only]
@@ -317,8 +319,155 @@ PYEOF
   return 0
 }
 
+# 判 S4（震动设备输出 / 包络）：$1=基线路径。返回 0 通过 / 1 判据红 / 3 无法判定。
+#
+# S4 与前几片的差别：它的输出是**带状态的包络**（设备帧流），所以除"确定性 + 基线对拍"外还要判
+# 两条**结构性质**（`docs/ROUTE.md` §3.2 给 S4 定的判据就是这两条）：
+#   · **上钳边界**：逐帧 `intensity ∈ [0,1]`，且场景真的顶到过 `1.0`（`clamped > 0` / `peak == 1.0`，
+#     否则"边界"根本没被考到 ⇒ 空洞）；
+#   · **包络单调**：`last_cue_tick` 之后的**纯释放段**必须逐帧非增、且末帧**恰好** `0.0`
+#     —— 库侧判据 ② 首次运行就把 4e-45 次正规**不动点**（包络永远到不了 0，器件长期微振）抓红，
+#     故这条不是装饰：它是"释放干净"唯一的守门人。
+#
+# 另判**更新率口径**：帧数 = `ticks × frames_per_tick`，且 `frames_per_tick = round(update_hz × tick_dt)`。
+check_haptic() {
+  local base="$1"
+
+  if ! sense_run 300 64 16 haptic >"$TMP/hp.a.jsonl" 2>"$TMP/hp.a.json"; then
+    echo "❌ gate_sense[haptic]：sense_dump 跑失败"
+    cat "$TMP/hp.a.json"
+    return 1
+  fi
+  if ! sense_run 300 64 16 haptic >"$TMP/hp.b.jsonl" 2>"$TMP/hp.b.json"; then
+    echo "❌ gate_sense[haptic]：sense_dump 第二跑失败"
+    return 1
+  fi
+
+  # ① 确定性（工具链侧）：两跑帧流**逐字节**一致。
+  if ! cmp -s "$TMP/hp.a.jsonl" "$TMP/hp.b.jsonl"; then
+    echo "❌ gate_sense[haptic]：两跑帧流不一致（确定性红）——前 5 处差异："
+    diff "$TMP/hp.a.jsonl" "$TMP/hp.b.jsonl" | head -n 5
+    return 1
+  fi
+
+  # ② 汇总行 + 流摘要 → 单行 JSON（与基线同形）。
+  if ! "$PY" - "$TMP/hp.a.json" "$TMP/hp.a.jsonl" "$TMP/hp.summary.json" <<'PYEOF'
+import hashlib, json, sys
+
+stats_path, jsonl_path, out_path = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(stats_path, encoding="utf-8") as f:
+    stats = json.loads(f.read().strip().splitlines()[-1])
+h = hashlib.sha256()
+lines = 0
+with open(jsonl_path, "rb") as f:
+    for chunk in iter(lambda: f.read(1 << 16), b""):
+        h.update(chunk)
+        lines += chunk.count(b"\n")
+stats["jsonl_lines"] = lines
+stats["sha256_jsonl"] = h.hexdigest()
+with open(out_path, "w", encoding="utf-8", newline="\n") as f:
+    f.write(json.dumps(stats, ensure_ascii=False, sort_keys=True) + "\n")
+PYEOF
+  then
+    echo "❌ gate_sense[haptic]：统计行解析失败（CLI 的 stderr 格式变了？）"
+    cat "$TMP/hp.a.json"
+    return 3
+  fi
+
+  cat "$TMP/hp.summary.json"
+
+  if [ "${WRITE_SENSE_BASELINE:-0}" = "1" ]; then
+    mkdir -p "$(dirname "$base")"
+    cp "$TMP/hp.summary.json" "$base"
+    echo "📝 已写入基线：$base"
+    return 0
+  fi
+
+  # ③ 判据：非空洞 + 上钳边界 + 更新率口径 + 释放段单调 + 基线对拍。
+  if ! "$PY" - "$TMP/hp.summary.json" "$TMP/hp.a.jsonl" "$base" "$REPORT" <<'PYEOF'
+import json, sys
+
+summary_path, jsonl_path, base_path, report = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4] == "1"
+with open(summary_path, encoding="utf-8") as f:
+    got = json.loads(f.read())
+bad = []
+
+# 非空洞：两个源都真的产过 cue（一路电平的两个来源都活），且上钳真的发生过。
+if got["impact_cues"] <= 0 or got["slide_cues"] <= 0:
+    bad.append(f"empty source: impact_cues={got['impact_cues']} slide_cues={got['slide_cues']} (vacuous gate)")
+if got["clamped"] <= 0 or got["peak"] != 1.0:
+    bad.append(f"clamp never happened: clamped={got['clamped']} peak={got['peak']} -> 上钳边界没被考到（空洞）")
+# 上钳的**另一端**：释放必须真的落到 0。这条看**全精度**的 `silent`（Rust 侧逐帧计数），
+# 不能只看帧流——`4e-45` 这种次正规残值按 6 位小数打印出来就是 `0.000000`（实测：注入
+# 次正规不动点后，"末帧 == 0.0" 在流上照样通过，只有 `silent=0` 把它点出来）。
+if got["silent"] <= 0:
+    bad.append("silent=0：包络从没真正静默（次正规数不动点？释放必须真的收敛到 0）")
+
+# 更新率口径：每 tick 恰好 frames_per_tick 帧；帧数 = ticks × 每 tick 帧数。
+fpt = got["frames_per_tick"]
+want_fpt = round(got["update_hz"] * got["tick_dt"])
+if fpt < 1:
+    bad.append(f"frames_per_tick={fpt} < 1（设备会静默）")
+if abs(fpt - want_fpt) > 1e-9:
+    bad.append(f"frames_per_tick {fpt} != round(update_hz × tick_dt) = {want_fpt}")
+if got["frames"] != got["ticks"] * fpt or got["jsonl_lines"] != got["ticks"] * fpt:
+    bad.append(f"frames {got['frames']} / jsonl {got['jsonl_lines']} != ticks × frames_per_tick {got['ticks'] * fpt}")
+
+# 逐帧：帧号由 tick 唯一决定（帧号 = tick 的纯函数 ⇒ 无隐藏补帧/丢帧）；intensity 落在 [0,1]。
+ints = []
+cut = (got["last_cue_tick"] + 1) * fpt
+with open(jsonl_path, encoding="utf-8") as f:
+    for i, line in enumerate(f):
+        rec = json.loads(line)
+        if rec["frame"] != i or not (rec["tick"] * fpt <= i < (rec["tick"] + 1) * fpt):
+            bad.append(f"第 {i + 1} 行：frame={rec['frame']} / tick={rec['tick']} 不自洽（帧号必须是 tick 的纯函数）")
+        x = rec["intensity"]
+        if not (0.0 <= x <= 1.0):
+            bad.append(f"第 {i + 1} 行：intensity={x} 越界（上钳失效）")
+        ints.append(x)
+        if len(bad) >= 8:
+            break
+
+# 包络单调（真实流）：纯释放段逐帧非增，且末帧**恰好** 0.0。
+tail = ints[cut:]
+if not tail:
+    bad.append(f"释放段为空（last_cue_tick={got['last_cue_tick']}：段的划分或帧数口径变了？）")
+else:
+    for i, (a, b) in enumerate(zip(tail, tail[1:])):
+        if b > a:
+            bad.append(f"释放段必须逐帧非增：第 {cut + i + 2} 帧 {a} -> {b}（上升）")
+            break
+    if tail[-1] != 0.0:
+        bad.append(f"释放段末帧必须恰好 0.0，实测 {tail[-1]}（否则器件长期微振）")
+
+# 与基线逐字段对拍（含流摘要 ⇒ 等价于"帧流逐字节一致"）。
+want = None
+try:
+    with open(base_path, encoding="utf-8") as f:
+        want = json.loads(f.read().strip().splitlines()[0])
+except OSError:
+    bad.append(f"基线缺失：{base_path}（用 WRITE_SENSE_BASELINE=1 生成）")
+if want is not None:
+    for k in sorted(set(want) | set(got)):
+        if want.get(k) != got.get(k):
+            bad.append(f"{k}: baseline {want.get(k)} vs got {got.get(k)}")
+
+if bad:
+    for b in bad[:8]:
+        print(f"gate_sense FAIL[haptic]: {b}")
+    sys.exit(0 if report else 1)
+print(f"gate_sense PASS[haptic]: 上钳边界（peak=1.0 / clamped={got['clamped']} 帧）/ "
+      f"释放段单调（{got['ticks'] * fpt - cut} 帧 → 恰好 0.0）/ 更新率 {fpt} 帧/tick / 基线对拍")
+PYEOF
+  then
+    return 1
+  fi
+  return 0
+}
+
 rc=0
 check_mode impact "bench/baselines/sense_dump_300x64.json" || rc=$?
 check_mode slide "bench/baselines/sense_dump_slide_300x64.json" || rc=$?
 check_table "crates/vxl-phys-sense/assets/sound_table.txt" || rc=$?
+check_haptic "bench/baselines/sense_dump_haptic_300x64.json" || rc=$?
 exit "$rc"

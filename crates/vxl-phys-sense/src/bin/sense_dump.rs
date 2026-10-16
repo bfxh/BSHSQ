@@ -3,7 +3,7 @@
 //! 工具链的第一件（`docs/ROUTE.md` §3.2）：音效师拿它对着场景调表，CI 拿它取基线
 //! （`scripts/gate_sense.sh` 跑两遍逐字对拍 + 预算上界核对）。
 //!
-//! 用法：`sense_dump [ticks=300] [bodies=64] [budget=16] [mode=impact|slide|bank] [table=<路径>]`
+//! 用法：`sense_dump [ticks=300] [bodies=64] [budget=16] [mode=impact|slide|bank|haptic] [table=<路径>]`
 //!
 //! - `impact`（默认，**S1**）：体素地板 + 一网格盒雨，落点/初高错开 ⇒ 冲击成串、能同时触发
 //!   预算截断与"轻碰不算响"两条规则。**地板必须是 provider**：冲击记录只对 `Shape::Provider`
@@ -16,10 +16,17 @@
 //!   `<材质槽> -> <音色组 id>` 的外部文本给（示例见 `assets/sound_table.txt`）。**缺项显式拒绝**：
 //!   表里没有的材质槽 ⇒ stderr 报错 + **退出码 2**（不回落默认音）；表读不到 ⇒ 退出码 3。
 //!   不给 `table` 时 `impact`/`slide` 的输出与原样**逐字节相同**（两条基线不受影响）。
+//! - `haptic`（**S4 震动设备输出**）：场景 A（体素盒雨 ⇒ 冲击）与场景 B（平滑地板滑移 ⇒ 持续
+//!   接触）**并行**喂**同一个**驱动器 ⇒ stdout 是**设备帧流**（`tick`/`frame`/`intensity`，
+//!   上钳在 `[0,1]`）。驱动量取两个源的 `max`（不叠加）；`update_hz` 取档位默认值，每 tick
+//!   恰好 `round(update_hz·dt)` 帧 ⇒ **延迟 0 帧**（本 tick 的 cue 在本 tick 首帧就生效）。
+//!   stderr 末行给 `frames_per_tick` 与 `last_cue_tick`：前者判"更新率口径"、后者划出**纯释放段**
+//!   （门在那儿判包络单调与"释放到恰好 0.0"）。
 use vxl_phys::{Material, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_sense::{
-    jsonl, jsonl_banked, map_banks, slide_jsonl, slide_jsonl_banked, Cue, MaterialSlot,
-    SenseConfig, SenseExt, SlideCue, SoundTable,
+    haptic_jsonl, jsonl, jsonl_banked, map_banks, slide_jsonl, slide_jsonl_banked, Cue,
+    HapticConfig, HapticDriver, HapticFrame, MaterialSlot, SenseConfig, SenseExt, SlideCue,
+    SoundTable,
 };
 
 fn arg(i: usize, dflt: &str) -> String {
@@ -257,6 +264,59 @@ fn run_slide(ticks: usize, bodies: usize, budget: usize, table: Option<&SoundTab
     );
 }
 
+/// **S4：震动设备输出**（包络帧流）—— 两个场景**并行**喂**同一个**驱动器：场景 A（体素盒雨）
+/// 给"那一下"（S1 冲击），场景 B（平滑地板滑移）给持续背景（S2 滑移）。
+///
+/// 为什么两条流合成一条：震动器件只有**一路**电平——"落地砰一下"与"贴着墙滑"在同一路上叠加。
+/// 驱动量取 `max`（取最强的那一下；**不与** S2 求和）⇒ 与 cue 顺序无关、与预算无关，CLI 侧要
+/// 把这条口径跑成**逐字可对拍**的基线（`scripts/gate_sense.sh` 的 `check_haptic`）。
+///
+/// stderr 末行是单行 JSON：`frames_per_tick` 供门判"更新率口径"，`last_cue_tick` 划出**纯释放段**
+/// （门在那儿判包络逐帧非增 + 末帧恰 0.0），`clamped` / `peak` 判"上钳真的发生过"（非空洞）。
+fn run_haptic(ticks: usize, bodies: usize, budget: usize) {
+    let cfg = SenseConfig {
+        max_cues_per_tick: budget,
+        max_slides_per_tick: budget,
+        ..SenseConfig::default()
+    };
+    let hp = HapticConfig::default();
+    let dt = PhysConfig::default().dt;
+    let mut wa = scene_impact(bodies);
+    let mut wb = scene_slide(bodies);
+    let mut driver = HapticDriver::new(hp, dt);
+
+    let mut cues: Vec<Cue> = Vec::new();
+    let mut slides: Vec<SlideCue> = Vec::new();
+    let mut frames: Vec<HapticFrame> = Vec::new();
+    let (mut ic, mut sc, mut last) = (0usize, 0usize, 0u64);
+    let (mut clamped, mut silent, mut peak) = (0usize, 0usize, 0.0_f32);
+    for t in 0..ticks {
+        wa.step();
+        wb.step();
+        cues.clear();
+        slides.clear();
+        ic += wa.sense_cues(&cfg, &mut cues).emitted;
+        sc += wb.slide_cues(&cfg, &mut slides).emitted;
+        if !cues.is_empty() || !slides.is_empty() {
+            last = t as u64;
+        }
+        let st = driver.step(t as u64, &cues, &slides, &mut frames);
+        clamped += st.clamped;
+        silent += st.silent;
+        peak = peak.max(st.peak);
+    }
+    print!("{}", haptic_jsonl(&frames));
+    eprintln!(
+        "{{\"ticks\":{ticks},\"bodies\":{bodies},\"budget\":{budget},\"tick_dt\":{dt},\
+         \"update_hz\":{},\"frames_per_tick\":{},\"impact_cues\":{ic},\"slide_cues\":{sc},\
+         \"frames\":{},\"clamped\":{clamped},\"silent\":{silent},\"last_cue_tick\":{last},\
+         \"peak\":{peak}}}",
+        hp.update_hz,
+        driver.frames_per_tick(),
+        frames.len()
+    );
+}
+
 fn main() {
     let ticks: usize = num(1, "300", 300);
     let bodies: usize = num(2, "64", 64);
@@ -264,6 +324,7 @@ fn main() {
     let table = std::env::args().nth(5).map(|p| load_table(&p));
     match arg(4, "impact").as_str() {
         "slide" => run_slide(ticks, bodies, budget, table.as_ref()),
+        "haptic" => run_haptic(ticks, bodies, budget),
         "bank" => {
             match table.as_ref() {
                 Some(t) => run_bank(ticks, bodies, budget, t),

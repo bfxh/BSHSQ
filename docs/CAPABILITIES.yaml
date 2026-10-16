@@ -488,6 +488,42 @@ capabilities:
           第一条"那种实现照样能对上自己的表），并要求**至少两个槽**真的出现、槽 ⊆ {1,2,3}；
           再把流里第一个槽从参考表里删掉造"半张表"，要求退出码 2 + **点名**该槽 + **一行 cue 都
           不产出**。仓库示例表 `assets/sound_table.txt` 另配 `impact`（槽 0）判一遍，防示例资产腐烂。
+      - id: s4_landed
+        note: >-
+          **S4 已落地（2026-10-16）**：`crates/vxl-phys-sense/src/haptic.rs`——`HapticConfig`
+          （`update_hz` / `attack` / `release` / `impact_scale` / `slide_scale` / `slide_full_speed`）、
+          `HapticFrame{tick,frame,intensity}`、`HapticStats{frames,clamped,silent,peak}`、
+          `HapticDriver`（`step(tick, &[Cue], &[SlideCue], &mut Vec<HapticFrame>) -> HapticStats`）。
+          **与 S1–S3 的结构差别**：前几片是**无状态归约**（每 tick 只看本 tick 的事件），S4 是
+          **带状态整形**——唯一 state 是包络 `env`；`target ≥ env` 走 `(env+attack).min(target)`、
+          `target < env` 走 `×release` 且 `.max(target)` ⇒ `env ∈ [0,1]` 是**不变量**（"上钳"是递推
+          本身的性质，不是事后 `clamp`）。`HapticDriver` **连 `&World` 都不收**（只吃
+          `&[Cue]` / `&[SlideCue]`）⇒ 零干扰是**类型级**的，不靠约定。一路电平合成两个源：
+          `drive = max(冲击 gain×impact_scale, 滑移 gain×slide_scale)`——**取 max 不求和** ⇒
+          与 cue 顺序无关、与预算无关。更新率口径：每 tick 恰好
+          `frames_per_tick = round(update_hz × dt)` 帧，`frame = tick × fpt + k` 是 `tick` 的**纯
+          函数** ⇒ **延迟 0 帧**（本 tick 的 cue 在本 tick 首帧生效）。判据两侧：库侧
+          `tests/haptic_contracts.rs`（4 条：上钳边界闭在 1.0 / 包络单调且不超调 / 更新率与延迟
+          口径 / 零干扰且帧流与 cue 顺序无关），工具链侧 `scripts/gate_sense.sh` 的 `haptic` 模式
+          （两跑逐字节 + **上钳边界**与**释放段单调**两条结构性质 + 更新率口径 + 基线
+          `bench/baselines/sense_dump_haptic_300x64.json` 对拍）。
+      - id: s4_measurement
+        note: >-
+          S4 基线（`haptic` 模式：场景 A 体素盒雨 + 场景 B 平滑地板滑移，**并行合成同一路**输出 /
+          300 tick / 预算 16）：`tick_dt = 0.016666668`、`update_hz = 1000`、`frames_per_tick = 17`、
+          帧 5100（= 300×17）、冲击 cue 957、滑移 cue 608（与 S1/S2 各自基线**逐数一致**）、
+          `clamped = 11` 帧（场景最大 drive ≈ 1.044 ⇒ 上钳真的发生过、边距很薄）、`silent = 2973`、
+          `peak = 1`、`last_cue_tick = 86` ⇒ 纯释放段 3621 帧逐帧非增、末帧**恰好** `0.0`。
+      - id: s4_defect_found_by_criterion
+        note: >-
+          **判据首次运行就抓到设计缺陷（值得留档）**：释放分支最初写 `(env × release).max(target)`，
+          包络**永远到不了** `0.0`——f32 最小正数 `4e-45` 乘 `0.86` 按最近舍入又回到 `4e-45`
+          （**次正规数不动点**），"释放干净"退化成常驻微振（器件长期嗡嗡）。修法：下降分支加**形状
+          约束** `decayed < env` 不成立就**落到 `target`**。**门的形状也随之被修正**：帧流固定 6 位
+          小数 ⇒ `4e-45` 打印出来就是 `0.000000`，"末帧 == 0.0"这条**只看流看不见残值**（注入实验
+          证实），故门必须再配全精度判据 `silent > 0`（Rust 侧逐帧数"包络真的是 `0.0` 的帧数"）。
+          三条判据各做过一次注入实验（`drive × 0.9` 使上钳失效 / 次正规不动点 / 释放段再抬电平），
+          **全部当场转红**且为**结构性命中**（不依赖基线），注入后逐次还原、恢复后四模式全绿。
     required_evidence:
       - implementation_path
       - tests
@@ -496,9 +532,9 @@ capabilities:
     notes: >-
       本仓第一条"输出侧"域。它同时是 `ROUTE.md` §7 那条"域侧 API 走扩展 trait"的**第一次实考**：
       若 S1 能在**不碰 `World` 任何既有方法**的前提下落地，那条设计判据就被证实可用。
-      S1 → S2 → S3 三次落地都满足"`World` 一个方法都没加"（`SenseExt` 扩展 trait + 外部表），
-      该判据已被重复证实；S3 还加了第二条：**新增映射**走外部资产表而不是往 `Material`（棘轮管的
-      类型）塞字段。
+      S1 → S2 → S3 → S4 四次落地都满足"`World` 一个方法都没加"（`SenseExt` 扩展 trait + 外部表 +
+      S4 的 `HapticDriver` 连 `&World` 都不收），该判据已被重复证实；S3 还加了第二条：**新增映射**
+      走外部资产表而不是往 `Material`（棘轮管的类型）塞字段。
 
   - id: PHY-SCOPE-ACOUSTIC-PROPAGATION
     title: 声学传播（射线追踪音频：反射/衍射/遮挡 + 孔隙传声 + 介质体积）

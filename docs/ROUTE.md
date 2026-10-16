@@ -58,7 +58,7 @@
 | 车辆 | 射线悬挂 + 刷子轮胎 | SPEC §4.10 | `vxl-phys-wheeled` 骨架 |
 | 机械/关节 | 约束族（铰链/齿轮/绳…） | SPEC §2.5 | `vxl-phys-mech` 骨架 |
 | 海洋 | 高度场/波浪 + 浮力采样 | SPEC §4.10 同族 | `vxl-phys-marine` 骨架 |
-| **声音 / 震动（感官输出）** | **求解事件**（冲击记录 / 接触流形 / 材质） | **只读归约**：事件 → cue（不带任何回写） | **S1 已落地（2026-10-11）**、**S2（2026-10-16）**、**S3（2026-10-16）**：crate `vxl-phys-sense`（`SenseExt` 扩展 trait，`World` 零新方法；S3 材质→音色组 id 走**外部表**）+ 判别器两侧：库侧 `tests/sense_contracts.rs` / `slide_contracts.rs` / `table_contracts.rs`、工具链侧 `scripts/gate_sense.sh`（CI 承重 job `sense-gate`）。见 §3.2 |
+| **声音 / 震动（感官输出）** | **求解事件**（冲击记录 / 接触流形 / 材质） | **只读归约**：事件 → cue（不带任何回写） | **S1 已落地（2026-10-11）**、**S2（2026-10-16）**、**S3（2026-10-16）**、**S4（2026-10-16）**：crate `vxl-phys-sense`（`SenseExt` 扩展 trait，`World` 零新方法；S3 材质→音色组 id 走**外部表**；S4 事件→**设备帧**做带状态包络整形，`HapticDriver` 连 `&World` 都不收）+ 判别器两侧：库侧 `tests/sense_contracts.rs` / `slide_contracts.rs` / `table_contracts.rs` / `haptic_contracts.rs`、工具链侧 `scripts/gate_sense.sh`（CI 承重 job `sense-gate`）。见 §3.2 |
 
 ### 3.1 高斯喷溅进物理的三层用法（新技术选型）
 
@@ -151,7 +151,7 @@
 | **S1** | 冲击 → cue 归约（强度由**法向接近速度**定、位置由接触点定）+ 预算与优先级 + cue 流 dump | 零干扰 / 确定性 / 预算 |
 | S2 | 持续接触（滑/滚）→ 连续量（供循环音与持续震动）**（已落地 2026-10-16）** | 同 S1 + "静止体不产生循环音"（非空洞） |
 | S3 | 材质表与资产映射（外部表 → 音色组 id）**（已落地 2026-10-16）** | 映射表缺项时**显式拒绝**（不静默用默认音）+ **多槽**流上逐行对拍（拿自造参考表，防自指） |
-| S4 | 震动设备输出（包络、上钳到 [0,1]、更新率/延迟口径） | 包络单调性与上钳边界 |
+| S4 | 震动设备输出（包络、上钳到 [0,1]、更新率/延迟口径）**（已落地 2026-10-16）** | 包络单调性与上钳边界 |
 
 **S1 的落点（已落地，2026-10-11）**：新建 crate `vxl-phys-sense`
 （`license = "MIT OR Apache-2.0"`，同各域 crate 惯例），`pub trait SenseExt` +
@@ -218,6 +218,51 @@
 
 **为什么单开 `bank` 例场**：S1/S2 的盒雨没显式挂材质（`mat` 全是默认槽 0），一行表查谁都对 ⇒
 判不出映射选择。`bank` 场景逐体挂槽 1/2/3，一条流里三槽同时出现（实测分布 349/309/299）。
+
+**S4 的落点（已落地，2026-10-16）**：仍然**不碰 `World`**（判据第四次成立），且比前几片更严——
+`HapticDriver` **连 `&World` 都不收**，只吃 `&[Cue]` / `&[SlideCue]`。
+
+| 项 | 位置 |
+|---|---|
+| 整形核心 | `crates/vxl-phys-sense/src/haptic.rs`：`HapticConfig`（`update_hz` / `attack` / `release` / `impact_scale` / `slide_scale` / `slide_full_speed`）/ `HapticFrame{tick,frame,intensity}` / `HapticStats{frames,clamped,silent,peak}` / `HapticDriver` |
+| 与 S1–S3 的**结构差别** | S1–S3 是**无状态归约**（每 tick 只看本 tick 的事件）；S4 是**带状态整形**——唯一的 state 是包络 `env`。包络递推：`target ≥ env` 走 `(env+attack).min(target)`，`target < env` 走 `×release` 且 `.max(target)` ⇒ `env ∈ [0,1]` 是**不变量**（"上钳"不是事后 `clamp` 出来的，是递推本身到不了 1 以上） |
+| 驱动量 | 一路电平合成两个源：`drive = max(冲击 cue 的 gain×impact_scale, 滑移 cue 的 gain×slide_scale)`——取 **max 不求和**（"落地砰一下"与"贴着墙滑"是同一声道的两个来源），⇒ 与 cue 顺序无关、与预算无关（类型级零干扰：不给两个源，只看 `&[...]`） |
+| CLI | `sense_dump` 第 4 参 `mode=haptic`：**并行**跑场景 A（体素盒雨 ⇒ S1 冲击）与场景 B（平滑地板滑移 ⇒ S2 滑移），**合成同一路**输出；帧流 JSONL → stdout，统计单行 JSON → stderr（含 `frames_per_tick` / `last_cue_tick`：门靠它们判"更新率口径"与划**纯释放段**） |
+| 库侧判据（CI 三工具链） | `crates/vxl-phys-sense/tests/haptic_contracts.rs`（4 条：上钳边界闭在 1.0 / 包络单调且不超调 / 更新率与延迟口径 / 零干扰且帧流与 cue 顺序无关） |
+| 工具链侧门 | `scripts/gate_sense.sh` 的 `haptic` 模式（两跑逐字节 + **两条结构性质** + 更新率口径 + 基线对拍） |
+| 基线 | `bench/baselines/sense_dump_haptic_300x64.json`（含帧流 sha256） |
+
+**判据 · 上钳边界（闭在 `1.0`）**：库里钉两处——`drive ≥ 1` ⇒ 帧值**恰好** `1.0`（不是 `0.999…`）、
+`drive = 0.999` ⇒ `0.999`（不许提前饱和）。工具链侧补一条**非空洞**：场景必须**真的顶到过** 1.0
+（`clamped > 0` 且 `peak == 1.0`），否则"边界"根本没被考到。实测 300×64×16 档：`clamped = 11` 帧、
+`peak = 1`（场景最大 drive ≈ 1.044 ⇒ 边距很薄、不是靠大倍数凑出来的）。
+
+**判据 · 更新率 / 延迟口径**：每 tick 恰好 `frames_per_tick = round(update_hz × dt)` 帧
+（`dt = 1/60`、`update_hz = 1000` ⇒ **17 帧/tick**，实测帧流 5100 = 300×17）；帧号
+`frame = tick × fpt + k` 是 `tick` 的**纯函数** ⇒ **延迟 0 帧**：本 tick 的 cue 在本 tick 首帧就生效。
+门逐帧验 `tick × fpt ≤ frame < (tick+1) × fpt`（补帧/丢帧/隐藏一帧延迟都会被钉住）。
+
+**踩坑 ①（库侧判据首次运行就抓到设计缺陷）**：释放分支只写 `(env × release).max(target)` 时，
+包络**永远到不了** `0.0`——f32 最小正数 `4e-45` 乘 `0.86` 按最近舍入又回到 `4e-45`（**次正规数
+不动点**），于是"释放干净"变成常驻微振（器件长期嗡嗡）。修法是给下降分支加一条**形状约束**：
+`decayed < env` 不成立就**落到 `target`**（`release` 取到 `1.0` 附近时同理，不会卡在任意 `env`）。
+⇒ 判据 ②"释放段必须**恰好**收敛到 0.0"不是装饰，是这条缺陷唯一的守门人。
+
+**踩坑 ②（门的形状：帧流精度不够看）**：帧流固定 6 位小数 ⇒ `4e-45` 打印出来就是 `0.000000`，
+**"末帧 == 0.0"这条只看流是看不见次正规残值的**（实测：把上面那条缺陷注入回去，`末帧 == 0.0`
+在流上照样通过）。故门必须再配一条**全精度**判据：`silent > 0`（Rust 侧逐帧数的是"包络真的是
+`0.0` 的帧数"，不是打印值）。这条是"判据要被注入实验验过才算数"的又一例。
+
+**判据怎么被验的（注入实验，三条判据各注入一次，全部当场转红）**：
+① 把 `drive × 0.9` 注进上钳 ⇒ `clamp never happened: clamped=0 peak=0.93992007`；
+② 把释放分支还原成次正规不动点 ⇒ `silent=0：包络从没真正静默`；
+③ 在纯释放段里再抬一次电平（`last_cue_tick` 不变）⇒ `释放段必须逐帧非增：第 3401 帧 0.0 -> 0.15`
+（3401 = 200×17+1，正是注入点所在 tick 的首帧）。注入后逐次还原，恢复后四模式全绿。
+
+**S4 基线读数**（场景 A 盒雨 + 场景 B 滑移 / 300 tick / 预算 16）：`tick_dt = 0.016666668`、
+`update_hz = 1000`、`frames_per_tick = 17`、帧 5100、冲击 cue 957、滑移 cue 608（与 S1/S2 各自基线
+读数**逐数一致**——两路 cue 未被合成过程动过）、`clamped = 11`、`silent = 2973`、`peak = 1`、
+`last_cue_tick = 86` ⇒ 纯释放段 3621 帧单调收到**恰好** `0.0`。
 
 ### 3.3 声学传播（射线追踪音频：反射 / 衍射 / 遮挡 + **孔隙传声** + 介质体积）
 

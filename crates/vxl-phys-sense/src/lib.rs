@@ -18,15 +18,22 @@
 //! **分期**：S1 = 冲击（峰值）→ cue + 预算/优先级 + JSONL dump；**S2 = 持续接触（滑 / 滚）→
 //! 连续量 cue**（[`SlideCue`] / [`SenseExt::slide_cues`]，实现见 `slide.rs`）；**S3 = 材质表 /
 //! 资产映射**（[`SoundTable`] / [`map_banks`]：材质槽 → 音色组 id，**缺项显式拒绝**，实现见
-//! `table.rs`）；震动设备包络（S4）见 `docs/ROUTE.md` §3.2 分期表。
+//! `table.rs`）；**S4 = 震动设备输出（包络 / 上钳 `[0,1]` / 更新率·延迟口径）**（[`HapticDriver`] /
+//! [`HapticFrame`]，实现见 `haptic.rs`）。S1–S3 都是"事件 → cue"的**归约**（无状态），S4 才是
+//! "cue → 设备帧"的**整形**——它带状态，所以另加两条口径（上钳闭在 `1.0`、帧号是 tick 的纯函数
+//! ⇒ 延迟 0 帧）；四条契约的判据在 `tests/haptic_contracts.rs`。
 
 #![forbid(unsafe_code)]
 
+mod haptic;
 mod slide;
 mod table;
 
 use vxl_phys::World;
 
+pub use haptic::{
+    haptic_jsonl, write_haptic_jsonl, HapticConfig, HapticDriver, HapticFrame, HapticStats,
+};
 pub use slide::{
     slide_jsonl, slide_jsonl_banked, write_slide_jsonl, write_slide_jsonl_banked, SlideCue,
 };

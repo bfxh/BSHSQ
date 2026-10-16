@@ -1,0 +1,1 @@
+{"bodies": 64, "budget": 16, "clamped": 11, "frames": 5100, "frames_per_tick": 17, "impact_cues": 957, "jsonl_lines": 5100, "last_cue_tick": 86, "peak": 1, "sha256_jsonl": "53a8c2cfc6498c12e470daca64eca32e91c57c39b155202a7eba115630b348a3", "silent": 2973, "slide_cues": 608, "tick_dt": 0.016666668, "ticks": 300, "update_hz": 1000}
