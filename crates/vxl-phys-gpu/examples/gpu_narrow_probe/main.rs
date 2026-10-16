@@ -31,7 +31,7 @@ use vxl_phys_core::BodySet;
 use vxl_phys_gpu::narrow::{NarrowTier, Slot, BODY_WORDS, KIND_BOX, KIND_SPHERE, NOT_HANDLED};
 use vxl_phys_narrow::ContactPoints;
 
-// ⚠️ 名字不能叫 `CELL`：本仓词汇门把独立单词 `cell` 列为禁词（只豁免 `std::cell`）。
+// ⚠️ 常量名避开本仓词汇门的禁词表（`scripts/vocab_scan.sh`：宿主业务词汇，只豁免 `std::cell`）。
 const CELL_SIZE: f32 = 2.0;
 /// `PhysConfig::default().contact_skin`（默认档 0.02）——宽相与窄相**用同一个 skin**（同规格）。
 const SKIN: f32 = 0.02;

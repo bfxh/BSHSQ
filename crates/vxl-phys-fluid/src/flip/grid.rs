@@ -20,7 +20,7 @@ impl FlipScratch {
     pub(crate) fn new() -> Self {
         Self {
             origin: Vec3::ZERO,
-            cell: 1.0,
+            grid_step: 1.0,
             dims: [0, 0, 0],
             n_cells: 0,
             class: Vec::new(),
@@ -70,11 +70,11 @@ impl FlipScratch {
     /// 单元中心世界坐标。
     #[inline]
     fn center(&self, i: usize, j: usize, k: usize) -> Vec3 {
-        let half = 0.5 * self.cell;
+        let half = 0.5 * self.grid_step;
         Vec3::new(
-            self.origin.x + i as f32 * self.cell + half,
-            self.origin.y + j as f32 * self.cell + half,
-            self.origin.z + k as f32 * self.cell + half,
+            self.origin.x + i as f32 * self.grid_step + half,
+            self.origin.y + j as f32 * self.grid_step + half,
+            self.origin.z + k as f32 * self.grid_step + half,
         )
     }
 
@@ -82,9 +82,9 @@ impl FlipScratch {
     #[inline]
     pub(super) fn coord(&self, x: Vec3) -> Vec3 {
         Vec3::new(
-            (x.x - self.origin.x) / self.cell,
-            (x.y - self.origin.y) / self.cell,
-            (x.z - self.origin.z) / self.cell,
+            (x.x - self.origin.x) / self.grid_step,
+            (x.y - self.origin.y) / self.grid_step,
+            (x.z - self.origin.z) / self.grid_step,
         )
     }
 
@@ -104,38 +104,38 @@ impl FlipScratch {
             mn = Vec3::ZERO;
             mx = Vec3::new(sys.h, sys.h, sys.h);
         }
-        // 单元边长 ≈ 粒子间距（经典 FLIP：cell ≈ 粒径）；间距未设时退回 h/2。
+        // 单元边长 ≈ 粒子间距（经典 FLIP：grid_step ≈ 粒径）；间距未设时退回 h/2。
         let base = if sys.spacing > 0.0 {
             sys.spacing
         } else {
             0.5 * sys.h
         };
-        let mut cell = base.max(1e-6);
+        let mut grid_step = base.max(1e-6);
         let mut dims = [1usize; 3];
-        // 超 `MAX_CELLS` 就整体放大（单元数 ~ cell⁻³ ⇒ 一次放大 1.5 倍通常够）。
+        // 超 `MAX_CELLS` 就整体放大（单元数 ~ grid_step⁻³ ⇒ 一次放大 1.5 倍通常够）。
         for _ in 0..64 {
-            let m = cell * MARGIN_CELLS;
+            let m = grid_step * MARGIN_CELLS;
             let e = Vec3::new(
                 (mx.x - mn.x) + 2.0 * m,
                 (mx.y - mn.y) + 2.0 * m,
                 (mx.z - mn.z) + 2.0 * m,
             );
             dims = [
-                (e.x / cell).ceil() as usize + 1,
-                (e.y / cell).ceil() as usize + 1,
-                (e.z / cell).ceil() as usize + 1,
+                (e.x / grid_step).ceil() as usize + 1,
+                (e.y / grid_step).ceil() as usize + 1,
+                (e.z / grid_step).ceil() as usize + 1,
             ];
             if dims[0] * dims[1] * dims[2] <= MAX_CELLS {
                 break;
             }
-            cell *= 1.5;
+            grid_step *= 1.5;
         }
         self.origin = Vec3::new(
-            mn.x - cell * MARGIN_CELLS,
-            mn.y - cell * MARGIN_CELLS,
-            mn.z - cell * MARGIN_CELLS,
+            mn.x - grid_step * MARGIN_CELLS,
+            mn.y - grid_step * MARGIN_CELLS,
+            mn.z - grid_step * MARGIN_CELLS,
         );
-        self.cell = cell;
+        self.grid_step = grid_step;
         self.dims = dims;
         self.n_cells = dims[0] * dims[1] * dims[2];
         let (nu, nv, nw) = (
@@ -176,7 +176,7 @@ impl FlipScratch {
 
     /// 分类：固体（内点判据）→ 流体（粒子权重和 > 0）；**固优先**。
     fn classify(&mut self, sys: &FluidSystem, providers: &dyn ProviderColliders) {
-        let probe = self.cell * SOLID_PROBE_FRAC;
+        let probe = self.grid_step * SOLID_PROBE_FRAC;
         let mut out: Vec<InteropContact> = Vec::new();
         let (nx, ny, nz) = (self.dims[0], self.dims[1], self.dims[2]);
         // ① 固体：只在"存在边界"时才查（无边界 ⇒ 全空/流，零开销）。

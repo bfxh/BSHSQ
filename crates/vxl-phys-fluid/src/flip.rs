@@ -13,7 +13,7 @@
 //! 1. 邻域网格 + SPH 密度（`density_pass`）：只为层流黏度相位与 `densities()` 口径服务（与 PBF 档同）。
 //! 2. 体外力（重力 + 层流黏度）+ CFL：**只改速度**（`pbf::apply_forces`，与 PBF 档共用一段代码）。
 //! 3. 建 MAC 网格：从**流体粒子 AABB** 外扩 `MARGIN_CELLS` 格；单元边长 ≈ 粒子间距
-//!    （经典 FLIP：cell ≈ 粒径）；单元数超 `MAX_CELLS` 时整体放大边长（防病态 AABB）。
+//!    （经典 FLIP：grid_step ≈ 粒径）；单元数超 `MAX_CELLS` 时整体放大边长（防病态 AABB）。
 //! 4. 分类单元：**空 / 流 / 固**。固 = 体中心落在固体内部（`contacts_point_boundary` 的
 //!    `depth > probe ⇔ sdf < 0`，与 `boundary_pass` 同一提供者口径）；流 = 粒子三线性权重和 > 0；
 //!    **固优先**（穿透进固体的粒子单元仍算固）。
@@ -68,7 +68,7 @@
 //! ## 热启动（压力场跨子步复用）
 //!
 //! `step` 每 **tick** 建一份 `FlipScratch` 并透传（`pbf::substep_of` → `substep`）⇒ 压力场在
-//! **本 tick 的各子步之间**活下来：几何键一致（维度相同、`cell` 相对漂移 ≤ 1e-4、`origin`
+//! **本 tick 的各子步之间**活下来：几何键一致（维度相同、`grid_step` 相对漂移 ≤ 1e-4、`origin`
 //! 漂移 ≤ 半格；判据在 `solve.rs::warm_reusable`）就拿上一子步的解当 CG 的初始猜测，否则退回
 //! 冷启动。**只给 CG 档**：Jacobi 是固定次数的 A/B 对照档，预置初值会把"N 次扫"的历史口径搅浑。
 //!
@@ -183,7 +183,7 @@ use self::grid::{cell_axis, weight_of};
 /// 网格相对流体粒子 AABB 的外扩（单元数）：留出空单元作自由表面 Dirichlet 层，
 /// 同时保证 P2G 的 2×2×2 三线性模板不会越出面数组边界。
 const MARGIN_CELLS: f32 = 2.0;
-/// 固体分类探针半径 = `cell × 本系数`。判据 `depth > probe ⇔ sdf < 0`（内点）；
+/// 固体分类探针半径 = `grid_step × 本系数`。判据 `depth > probe ⇔ sdf < 0`（内点）；
 /// 取 > 1 是为了让"紧贴流体的那层固体"也能判到（截断 SDF 只报近表面邻域）。
 const SOLID_PROBE_FRAC: f32 = 1.5;
 /// 单元数上限：超限则整体放大单元边长（病态/巨大 AABB 不吃穿内存）。
@@ -198,10 +198,10 @@ const CLASS_SOLID: u8 = 2;
 ///
 /// 索引约定：单元 `c = (i*jd + j)*kd + k`（`jd/ky` = dims[1]/dims[2]）；三套**交错面**：
 /// `u` 在 x 面（`(nx+1)×ny×nz`）、`v` 在 y 面、`w` 在 z 面；单元 `(i,j,k)` 占
-/// `[origin + i·cell, origin + (i+1)·cell)`，面 `i` 在单元坐标 `i` 处。
+/// `[origin + i·grid_step, origin + (i+1)·grid_step)`，面 `i` 在单元坐标 `i` 处。
 pub(crate) struct FlipScratch {
     origin: Vec3,
-    cell: f32,
+    grid_step: f32,
     dims: [usize; 3],
     n_cells: usize,
     /// 0 = 空、1 = 流、2 = 固。
@@ -228,7 +228,7 @@ pub(crate) struct FlipScratch {
     cg_q: Vec<f32>,
     /// 上一**子步**解出的压力场：本子步若几何键一致就拿来当 CG 的初始猜测（热启动）。
     p_prev: Vec<f32>,
-    /// `p_prev` 的几何键 `(origin, cell, dims)`；`None` = 这份缓冲还没解过（本 tick 首子步）。
+    /// `p_prev` 的几何键 `(origin, grid_step, dims)`；`None` = 这份缓冲还没解过（本 tick 首子步）。
     warm_key: Option<(Vec3, f32, [usize; 3])>,
     /// 逐粒子 **APIC 仿射矩阵**（行主序 3×3，**世界单位** 1/s）：每子步 P2G 前由
     /// `affine::estimate_from_field` 从**粒子场**现算（`(pos, vel)` 的纯函数 ⇒ 不进粒子状态）。
@@ -265,10 +265,10 @@ impl FlipScratch {
                             continue;
                         }
                         let (ci, cj, ck) = (i0 + di, j0 + dj, k0 + dk);
-                        // 角点偏移（**单元边长**为单位）：`x_角点 − x_p = cell·(di − u, …)`。
+                        // 角点偏移（**单元边长**为单位）：`x_角点 − x_p = grid_step·(di − u, …)`。
                         let off = Vec3::new(di as f32 - ux, dj as f32 - uy, dk as f32 - uz);
                         let va = if apic {
-                            v + affine_apply(&c, off) * self.cell
+                            v + affine_apply(&c, off) * self.grid_step
                         } else {
                             v
                         };
@@ -375,9 +375,9 @@ impl FlipScratch {
         }
     }
 
-    /// 面速度投影：`u ← u − (Δt/ρ)(p_r − p_l)/cell`（只施加在"至少一侧是流体"的非固体面）。
+    /// 面速度投影：`u ← u − (Δt/ρ)(p_r − p_l)/grid_step`（只施加在"至少一侧是流体"的非固体面）。
     fn project_faces(&mut self, sys: &FluidSystem, dt: f32) {
-        let inv = dt / sys.cfg.rest_density / self.cell;
+        let inv = dt / sys.cfg.rest_density / self.grid_step;
         let (nx, ny, nz) = (self.dims[0], self.dims[1], self.dims[2]);
         for i in 1..nx {
             for j in 0..ny {

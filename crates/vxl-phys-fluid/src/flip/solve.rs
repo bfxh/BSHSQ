@@ -16,12 +16,12 @@ const CG_RTOL: f32 = 1e-5;
 
 impl FlipScratch {
     /// 散度 + 压力 Poisson（求解器见 `solve_cg` / `solve_jacobi`）：
-    /// `Σ(p_nb - p_c) = (ρ/Δt)*cell²*div`，空单元 `p = 0`（Dirichlet）、
+    /// `Σ(p_nb - p_c) = (ρ/Δt)*grid_step²*div`，空单元 `p = 0`（Dirichlet）、
     /// 固体面/网格外边界不入模板（Neumann）。默认走 **CG**（`cfg.flip_pressure_cg`），
     /// 几何一致时用上一子步的解热启动（见模块头"热启动"）。
     pub(super) fn solve_pressure(&mut self, sys: &FluidSystem, dt: f32) {
-        let cell = self.cell;
-        let alpha = sys.cfg.rest_density / dt * cell * cell;
+        let grid_step = self.grid_step;
+        let alpha = sys.cfg.rest_density / dt * grid_step * grid_step;
         let (nx, ny, nz) = (self.dims[0], self.dims[1], self.dims[2]);
         for i in 0..nx {
             for j in 0..ny {
@@ -34,7 +34,7 @@ impl FlipScratch {
                     let d = (self.u[self.u_idx(i + 1, j, k)] - self.u[self.u_idx(i, j, k)])
                         + (self.v[self.v_idx(i, j + 1, k)] - self.v[self.v_idx(i, j, k)])
                         + (self.w[self.w_idx(i, j, k + 1)] - self.w[self.w_idx(i, j, k)]);
-                    self.div[c] = d / cell;
+                    self.div[c] = d / grid_step;
                 }
             }
         }
@@ -63,11 +63,11 @@ impl FlipScratch {
         if sys.cfg.flip_pressure_cg {
             self.p_prev.clear();
             self.p_prev.extend_from_slice(&self.p);
-            self.warm_key = Some((self.origin, self.cell, self.dims));
+            self.warm_key = Some((self.origin, self.grid_step, self.dims));
         }
     }
 
-    /// 热启动复用判据：解过（`warm_key` 有值）、维度相同、`cell` 相对漂移 ≤ 1e-4、
+    /// 热启动复用判据：解过（`warm_key` 有值）、维度相同、`grid_step` 相对漂移 ≤ 1e-4、
     /// `origin` 漂移 ≤ 半格。
     ///
     /// 为什么允许漂移而不是要求键逐位相同：网格每子步按**流体 AABB** 重建，粒子哪怕动 1e-7
@@ -75,17 +75,17 @@ impl FlipScratch {
     /// 漂移下 `(i,j,k)` 仍指着**大致同一个**物理单元，旧场仍是个好初值；收敛与否始终由残差
     /// 判据说话，初值只影响迭代数。超限就退回冷启动（慢，但正确）。
     fn warm_reusable(&self) -> bool {
-        let Some((origin, cell, dims)) = self.warm_key else {
+        let Some((origin, grid_step, dims)) = self.warm_key else {
             return false;
         };
         if dims != self.dims || self.p_prev.len() != self.n_cells {
             return false;
         }
-        if (cell - self.cell).abs() > self.cell.abs() * 1e-4 {
+        if (grid_step - self.grid_step).abs() > self.grid_step.abs() * 1e-4 {
             return false;
         }
         let d = origin - self.origin;
-        let lim = 0.5 * self.cell.abs();
+        let lim = 0.5 * self.grid_step.abs();
         d.x.abs() <= lim && d.y.abs() <= lim && d.z.abs() <= lim
     }
 

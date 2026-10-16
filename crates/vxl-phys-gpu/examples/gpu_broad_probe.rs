@@ -97,7 +97,7 @@ fn main() {
     if let Some(k) = rest.iter().position(|x| x == "--adapter") {
         adapter = rest.get(k + 1).and_then(|v| v.parse().ok()).unwrap_or(0);
     }
-    // ⚠️ 名字不能叫 `CELL`：本仓词汇门把独立单词 `cell` 列为禁词（只豁免 `std::cell`）。
+    // ⚠️ 常量名避开本仓词汇门的禁词表（`scripts/vocab_scan.sh`：宿主业务词汇，只豁免 `std::cell`）。
     const CELL_SIZE: f32 = 2.0;
     const SKIN: f32 = 0.01;
     const CAP_PAIRS: u32 = 1 << 20;
