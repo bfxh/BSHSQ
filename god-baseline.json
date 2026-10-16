@@ -211,17 +211,17 @@
       "max_type_members": 0
     },
     "crates/vxl-phys-fluid/src/config.rs": {
-      "file_lines": 116,
-      "max_fn_lines": 23,
-      "max_type_members": 18
+      "file_lines": 136,
+      "max_fn_lines": 26,
+      "max_type_members": 19
     },
     "crates/vxl-phys-fluid/src/flip.rs": {
-      "file_lines": 611,
+      "file_lines": 725,
       "max_fn_lines": 91,
       "max_type_members": 6
     },
     "crates/vxl-phys-fluid/src/flip/grid.rs": {
-      "file_lines": 256,
+      "file_lines": 257,
       "max_fn_lines": 84,
       "max_type_members": 9
     },

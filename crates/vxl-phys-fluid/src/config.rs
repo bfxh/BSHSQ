@@ -81,6 +81,23 @@ pub struct FluidConfig {
     /// 上限**（CG 通常远早于此就满足 `CG_RTOL` 的相对残差 => 上限不常咬住；Jacobi 则永远用满）。
     /// `CpuSph`/`CpuPbf` 档下无影响。
     pub flip_pressure_cg: bool,
+    /// **FLIP 档消费**：P2G 是否走 **APIC 仿射传输**（**默认 `false` = 关**；理由见"实测"）。
+    /// 开时散射到网格角点的是 `v + C·(x_角点 − x_p)`，其中 3×3 的 `C`（= 速度场梯度的三线性
+    /// 最小二乘估计）由**上一子步**的 G2P 从网格速度场重建，落在 tick 级 `FlipScratch` 里
+    /// （与压力场热启动共用那份缓冲）；`C` **不进粒子状态** ⇒ 逐位复现/保存恢复/状态继承
+    /// 三份契约原样成立（每 tick 首子步 `C = 0`）。
+    ///
+    /// **实测（`tests/flip_rotation_probe.rs::diag_apic_rotation` + 静水槽 `flip_incompressibility_probe.rs::diag_apic_hydrostatic`）：这个 **tick 级**
+    /// 的 `C` **拿不到 APIC 的红利**——零重力旋转团台架上 `θ = 0` 的角动量保持率 PIC 0.145 /
+    /// APIC 0.155（≈ 无差别），同台 FLIP 0.866；静水槽 `θ = 0.95` 档 `ke` 17.24 → 15.65
+    /// （`height_keep` 1.0367 → 1.0398，仍是合格档）。
+    ///
+    /// 原因（推导 + 读数，见 `flip.rs` 模块头"APIC"节）：`C` 每 tick 清零 ⇒ 首子步就是纯
+    /// PIC/FLIP 传输，而 PIC 的 `v ← v_网格` 重置会把粒子场在同格 8 节点上**拉平**（等权时
+    /// 一阶矩 `Σ w·v⊗d` 恰好抵消）⇒ 之后从网格估出的 `C` 是"被磨过一次"的梯度 ⇒ 自洽退化回
+    /// PIC。**真 APIC 要求 `C` 活过子步（进粒子状态）**，那是契约换代，登记为下一刀。
+    /// 本开关保留为 A/B 实验档（`false` = 冻结旧口径，与 `dynamic_viscosity = 0` 同一先例）。
+    pub flip_apic: bool,
 }
 
 impl Default for FluidConfig {
@@ -105,6 +122,9 @@ impl Default for FluidConfig {
             flip_ratio: 0.95,
             flip_pressure_iterations: 80,
             flip_pressure_cg: true,
+            // APIC 仿射传输：实测 tick 级 `C` 拿不到红利（见字段 doc 的"实测"节 + 旋转团读数）⇒ 默认关，
+            // 开关保留为 A/B 实验档。
+            flip_apic: false,
         }
     }
 }

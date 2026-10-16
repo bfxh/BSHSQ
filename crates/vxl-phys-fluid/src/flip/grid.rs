@@ -42,6 +42,7 @@ impl FlipScratch {
             cg_q: Vec::new(),
             p_prev: Vec::new(),
             warm_key: None,
+            affine: Vec::new(),
         }
     }
 

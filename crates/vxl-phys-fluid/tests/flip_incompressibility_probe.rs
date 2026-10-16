@@ -142,6 +142,10 @@ fn digest(f: &FluidSystem) -> u64 {
 
 /// 读一份场景（族 + 压力迭代 + FLIP 混合比），几何/种子/dt 与 PBF 档**逐字相同**。
 /// `diag` = 打印末态过密**空间分布**（只给 `#[ignore]` 诊断用；正常判据不动）。
+///
+/// **APIC 取 `FluidConfig::default()` 的档**（不写死）：默认一旦改动，本表跟着走 ⇒ 既有判据
+/// 永远裁在"当前默认配置"上，不会留一个跟默认脱节的影子档。APIC 开的 A/B 对照显式走
+/// `run_cfg`（旋钮见 `Knobs`，`apic = true`；见 `diag_apic_hydrostatic`）。
 fn run(
     family: FluidFamily,
     pressure_iters: u32,
@@ -150,15 +154,37 @@ fn run(
     ticks: usize,
     diag: bool,
 ) -> Metrics {
+    let knobs = Knobs {
+        pressure_iters,
+        flip_ratio,
+        cg,
+        apic: FluidConfig::default().flip_apic,
+    };
+    run_cfg(family, knobs, ticks, diag)
+}
+
+/// 探针档旋钮：把四个**并列标量**收进具名结构。`run_cfg(…, cg, apic, …)` 那种相邻两个
+/// `bool` 的参数表能被顺序写反而编译器不吭声（`args-gate` 记的就是这条）。
+#[derive(Clone, Copy)]
+struct Knobs {
+    pressure_iters: u32,
+    flip_ratio: f32,
+    cg: bool,
+    apic: bool,
+}
+
+/// 同上，但显式给出 **APIC 开关**（A/B 实验档：`true` = APIC 仿射传输，`false` = 旧口径）。
+fn run_cfg(family: FluidFamily, k: Knobs, ticks: usize, diag: bool) -> Metrics {
     let h = 0.1f32;
     let s = h / 2.0;
     let (cav, wall) = (0.35f32, 0.9f32);
     let cfg = FluidConfig {
         family,
         smoothing_radius: h,
-        flip_pressure_iterations: pressure_iters,
-        flip_pressure_cg: cg,
-        flip_ratio,
+        flip_pressure_iterations: k.pressure_iters,
+        flip_pressure_cg: k.cg,
+        flip_ratio: k.flip_ratio,
+        flip_apic: k.apic,
         ..FluidConfig::default()
     };
     let rho0 = cfg.rest_density;
@@ -452,6 +478,38 @@ fn flip_warm_start_improves_fixed_budget_accuracy() {
         "热启动把收敛档带偏了：cap=80 height_keep {}",
         warm80.height_keep
     );
+}
+
+/// `#[ignore]` 诊断（不进 CI）：APIC 开关对**静水槽主表**的影响（读数，只打印不断言）；
+/// 旋转团四档见 `flip_rotation_probe.rs::diag_apic_rotation`；结论见 `src/config.rs` 的
+/// `flip_apic` doc。
+#[test]
+#[ignore]
+fn diag_apic_hydrostatic() {
+    eprintln!("== 静水槽（60 tick，80 次 CG）：APIC 开/关 × θ ==");
+    eprintln!(
+        "{:8} {:6} {:11} {:11} {:11} {:11} {:10.3}",
+        "档位", "apic", "over", "over_in", "sink", "height_keep", "ke"
+    );
+    for apic in [false, true] {
+        for ratio in [0.0f32, 0.95] {
+            let m = run_cfg(
+                FluidFamily::CpuFlip,
+                Knobs {
+                    pressure_iters: 80,
+                    flip_ratio: ratio,
+                    cg: true,
+                    apic,
+                },
+                60,
+                false,
+            );
+            eprintln!(
+                "θ={ratio:4} {apic:6} {:11.3e} {:11.3e} {:11.3e} {:11.4} {:10.3e}",
+                m.over, m.over_in, m.sink, m.height_keep, m.ke
+            );
+        }
+    }
 }
 
 /// `#[ignore]` 诊断（不进 CI）：打印 FLIP/WCSPH 末态过密的**空间分布**，用来分辨
