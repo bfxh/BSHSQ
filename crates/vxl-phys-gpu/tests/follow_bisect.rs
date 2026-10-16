@@ -170,7 +170,7 @@ fn follow_repro_1tick_full_chain() {
     let mut pk = Packet::new(0, pc, &pos, &vel, &pmass).expect("建包失败");
     println!("--- tick 1（4 子步全链，follow）提交…");
     std::io::Write::flush(&mut std::io::stdout()).ok();
-    pk.run(&pc, 1, 4, false);
+    pk.submission().run(&pc, 1, 4, false);
     let (p, _) = pk.read_state();
     let finite = p.iter().all(|x| x.is_finite());
     println!("✅ tick 1 活着（finite = {finite}）");
@@ -201,7 +201,7 @@ fn follow_box_drift_stays_bounded() {
     );
     let (pos, _vel, _pmass) = flatten_all(&f);
     let mut pk = Packet::new(0, pc, &pos, &_vel, &_pmass).expect("建包失败");
-    pk.run(&pc, 2, 4, false);
+    pk.submission().run(&pc, 2, 4, false);
     let (gp, _) = pk.snapshot();
     // 对照 = **CPU 同源**：同一场景独立再建一份、CPU 推 2 tick，与 GPU 末态逐粒比位置。
     // ⚠️ 常驻判据用 **n=40**（110k 粒 ≈8 s）——别学第一版直接复用 n=162 的场景（25 分钟！）。
@@ -245,7 +245,7 @@ fn follow_bisect_which_substep() {
     for s in 1..=32 {
         println!("--- 子步 {s}（全链）…");
         std::io::Write::flush(&mut std::io::stdout()).ok();
-        pk.run_substep(&pc, dt, 0b111_1111, None);
+        pk.submission().run_substep(&pc, dt, 0b111_1111, None);
         let (p, _) = pk.read_state();
         let finite = p.iter().all(|x| x.is_finite());
         println!("    poll 过了（finite = {finite}）");

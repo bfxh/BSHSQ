@@ -120,8 +120,8 @@ fn mixed_2b_sorted_and_flat_are_bitwise_identical() {
         sorted_active(&sorted) && !sorted_active(&flat),
         "格序档读点必须**分辨得出**两档：`new_sorted` 建了、`new` 没建（否则判据 1 是空过）"
     );
-    flat.run(&pc, TICKS, SUB, false);
-    sorted.run(&pc, TICKS, SUB, false);
+    flat.submission().run(&pc, TICKS, SUB, false);
+    sorted.submission().run(&pc, TICKS, SUB, false);
     let (fp, fv) = flat.snapshot();
     let (sp, sv) = sorted.snapshot();
     let (pn, pt) = bits_same(&fp, &sp);

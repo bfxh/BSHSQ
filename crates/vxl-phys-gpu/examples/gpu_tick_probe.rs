@@ -306,7 +306,7 @@ fn run_drift(
     };
     for t in 1..=ticks {
         f.step(dt_tick, &vxl_phys_core::interop::NoProviders);
-        pk.run(pc, 1, substeps, false);
+        pk.submission().run(pc, 1, substeps, false);
         let (pg, vg) = pk.read_state();
         let (bad, mx, mean, dv, ker) = cmp(f.positions(), f.velocities(), &pg, &vg);
         nan_cnt = nan_cnt.max(bad);
@@ -319,7 +319,7 @@ fn run_drift(
 
 /// ④ CPU 引擎的相位计时（**放在漂移表之后**：它会把状态推进，放在前面会让对照组错位一个 tick
 ///    ——踩过：那样 GPU 全程滞后一 tick，漂移表里表现为"刚性平移 + 精确 g·Δt"的假信号；
-///    同一类坑还有一次：`Packet::run` 内部曾自带"预热一个 tick" ⇒ 每次调用都多推一 tick）。
+///    同一类坑还有一次：`Submission::run` 内部曾自带"预热一个 tick" ⇒ 每次调用都多推一 tick）。
 fn time_cpu(f: &mut FluidSystem, ticks: usize, dt_tick: f32) -> (f64, f64) {
     f.reset_phase_us();
     let t_cpu = Instant::now();
@@ -356,15 +356,14 @@ fn time_gpu(
     substeps: usize,
     pipe: bool,
 ) -> GpuTiming {
-    let _ = pk.run(pc, 2, substeps, false);
+    let _ = pk.submission().run(pc, 2, substeps, false);
     // 下限按规模让路（见函数注①）：大档 20 趟，小档维持 100 趟（口径按实际趟数打印）。
     let gpu_ticks = ticks.max(if pc.n > 2_000_000 { 20 } else { 100 });
     let (snap_pos, snap_vel) = pk.snapshot();
-    let mut reps = [0.0f32; 3];
-    let mut box_ms = 0.0f32;
+    let (mut reps, mut box_ms) = ([0.0f32; 3], 0.0f32);
     for r in reps.iter_mut() {
         pk.restore(&snap_pos, &snap_vel);
-        let t = pk.run(pc, gpu_ticks, substeps, false);
+        let t = pk.submission().run(pc, gpu_ticks, substeps, false);
         *r = t.per_tick;
         // 记最后一次的"每子步箱子"累计（读数含在 `per_tick` 里，这里只把它单列出来）。
         box_ms = t.box_ms / gpu_ticks.max(1) as f32;
@@ -385,6 +384,7 @@ fn time_gpu(
         for _ in 0..2 {
             pk.restore(&snap_pos, &snap_vel);
             let ms = pk
+                .submission()
                 .run_stages(pc, mask, gpu_ticks, substeps, false, false)
                 .per_tick;
             best = best.min(ms);
@@ -392,10 +392,10 @@ fn time_gpu(
         stage_ms.push((name, best));
     }
     pk.restore(&snap_pos, &snap_vel);
-    let rb_ms = pk.measure_readback_ms(u64::MAX);
+    let rb_ms = pk.submission().measure_readback_ms(u64::MAX);
     // §19.1 ① 判别：**同一次全量拷贝**、只映射 1 MB ⇒ 与全量映射比。线性降 ⇒ 驱动按映射区间拷贝
     // （生产上可只映射需要的部分）；不降 ⇒ 整块 flush（驱动行为，只能换回读路径）。直接打印、不进 Report。
-    let rb_1m_ms = pk.measure_readback_ms(1 << 20);
+    let rb_1m_ms = pk.submission().measure_readback_ms(1 << 20);
     println!(
         "  回读口径判别（PLAN-gpu §19.1①）：全量映射 {rb_ms:.2} ms vs 只映射 1 MB {rb_1m_ms:.2} ms ⇒ {}",
         if rb_1m_ms < rb_ms * 0.5 {
@@ -409,7 +409,7 @@ fn time_gpu(
     if pipe {
         let t = std::time::Instant::now();
         for i in 0..gpu_ticks {
-            pk.run_deferred(pc, 1, substeps);
+            pk.submission().run_deferred(pc, 1, substeps);
             if i > 0 {
                 // 真消费方那一步：等 + 映射 + 拷出（不是"只等"——只等会低报）。
                 let _pos = pk.take_deferred_state();

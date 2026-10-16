@@ -123,10 +123,10 @@ fn rerun_diff(floor: bool) -> (usize, usize, usize) {
     let pc = cfg_for(&f);
     let (pos, vel, pmass) = flatten_all(&f);
     let mut pk = Packet::new(0, pc, &pos, &vel, &pmass).expect("建包失败");
-    pk.run(&pc, TICKS, SUB, false);
+    pk.submission().run(&pc, TICKS, SUB, false);
     let (_, v1) = pk.snapshot();
     pk.restore(&pos, &vel);
-    pk.run(&pc, TICKS, SUB, false);
+    pk.submission().run(&pc, TICKS, SUB, false);
     let (_, v2) = pk.snapshot();
     let nf = pc.n_fluid as usize;
     let (mut df, mut db) = (0usize, 0usize);

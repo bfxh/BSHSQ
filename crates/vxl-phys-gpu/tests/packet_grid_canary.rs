@@ -127,7 +127,7 @@ fn packet_sph_holds_the_fluid_on_the_floor() {
     }
     let y0 = fluid_y_min(&pos, n_fluid);
     let mut pk = Packet::new(0, pc, &pos, &vel, apmass).expect("建包失败");
-    pk.run(&pc, TICKS, SUB, false);
+    pk.submission().run(&pc, TICKS, SUB, false);
     let (pos1, vel1) = pk.snapshot();
     let h = state_hash(&pos1, &vel1);
     let y1 = fluid_y_min(&pos1, n_fluid);

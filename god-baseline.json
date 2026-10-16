@@ -396,7 +396,7 @@
       "max_type_members": 10
     },
     "crates/vxl-phys-gpu/examples/gpu_tick_probe.rs": {
-      "file_lines": 619,
+      "file_lines": 620,
       "max_fn_lines": 85,
       "max_type_members": 12
     },
@@ -406,12 +406,12 @@
       "max_type_members": 0
     },
     "crates/vxl-phys-gpu/examples/gpu_walls_probe.rs": {
-      "file_lines": 250,
+      "file_lines": 251,
       "max_fn_lines": 114,
       "max_type_members": 0
     },
     "crates/vxl-phys-gpu/examples/gpu_walls_probe/diag.rs": {
-      "file_lines": 196,
+      "file_lines": 197,
       "max_fn_lines": 79,
       "max_type_members": 9
     },
@@ -451,7 +451,7 @@
       "max_type_members": 12
     },
     "crates/vxl-phys-gpu/src/pipeline.rs": {
-      "file_lines": 489,
+      "file_lines": 324,
       "max_fn_lines": 85,
       "max_type_members": 16
     },
@@ -571,7 +571,7 @@
       "max_type_members": 0
     },
     "crates/vxl-phys-gpu/tests/sorted_seed_localize.rs": {
-      "file_lines": 206,
+      "file_lines": 207,
       "max_fn_lines": 43,
       "max_type_members": 0
     },

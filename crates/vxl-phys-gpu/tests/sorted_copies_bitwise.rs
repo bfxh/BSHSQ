@@ -131,8 +131,8 @@ fn sorted_copies_are_bitwise_identical_to_flat() {
     let mut flat = mk(false).expect("平铺档建包失败");
     let mut sorted = mk(true).expect("格序档建包失败");
     // 推同样多 tick 再比末态：一子步只能验"接线没接反"，多 tick 才能让"枚举序被改"累积出来。
-    flat.run(&pc, TICKS, SUB, false);
-    sorted.run(&pc, TICKS, SUB, false);
+    flat.submission().run(&pc, TICKS, SUB, false);
+    sorted.submission().run(&pc, TICKS, SUB, false);
     let (fp, fv) = flat.snapshot();
     let (sp, sv) = sorted.snapshot();
     let (pn, pt) = bits_same(&fp, &sp);

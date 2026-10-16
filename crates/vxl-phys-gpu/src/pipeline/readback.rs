@@ -218,9 +218,9 @@ impl Packet {
         (pos, vel)
     }
 
-    /// **取走"管线档"回读的数据**（配套 `Packet::run_deferred`，`PLAN-gpu` §19.5）：等完待完成的
+    /// **取走"管线档"回读的数据**（配套 `Submission::run_deferred`，`PLAN-gpu` §19.5）：等完待完成的
     /// GPU 工作 → 映射 `readback_b` → 拷出 `pos`（n×3 f32）→ 解除映射。宿主典型用法：
-    /// `pk.run_deferred(cfg, 1, substeps); /* 帧内其它工作 */; let pos = pk.take_deferred_state();`
+    /// `pk.submission().run_deferred(cfg, 1, substeps); /* 帧内其它工作 */; let pos = pk.take_deferred_state();`
     /// ⇒ 回读的等待被中间那段工作遮住。与 `read_state` 的区别：**不再新起一趟拷贝**（用
     /// `run_deferred` 已发起的那趟），且只回 `pos`（管线档的消费方只需要位置）。
     /// ⚠️ 拿到的就是**上一 tick** 的状态（见 `run_deferred` 注）——耦合解算要"本 tick"就别用本方法。

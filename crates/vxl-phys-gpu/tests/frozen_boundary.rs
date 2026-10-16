@@ -141,7 +141,7 @@ fn boundary_particles_are_bitwise_frozen() {
     let (pos, vel, pmass) = flatten_all(&f);
     let nf = (pc.n_fluid as usize) * 3;
     let mut pk = Packet::new(0, pc, &pos, &vel, &pmass).expect("建包失败");
-    pk.run(&pc, TICKS, SUB, false);
+    pk.submission().run(&pc, TICKS, SUB, false);
     let (gp, gv) = pk.snapshot();
     let mut dp = 0usize;
     let mut dv = 0usize;
