@@ -31,6 +31,7 @@ use vxl_phys_core::{Quat, Shape, Vec3};
 // ── 按域拆出的子模块（子目录 src/）
 mod carve;
 mod config;
+mod flip;
 pub mod fluid_access;
 mod fluid_boundary;
 mod fluid_density;
@@ -40,7 +41,6 @@ mod fluid_step;
 mod grid;
 mod laminar;
 mod pbf;
-mod flip;
 mod system;
 mod types;
 pub use self::{carve::*, config::*, grid::*, system::*, types::*};

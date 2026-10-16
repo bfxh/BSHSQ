@@ -107,7 +107,7 @@ use bounce::push_second_order;
 use diffract::push_diffraction;
 use scatter::push_scatter;
 use vxl_phys::World;
-// 拆出去的两块在根上 re-export：子模块按 `crate::xxx` 引用，外部按 `crate::Type` 引用。
+// 拆出去的两块在根上 re-export：子模块照旧按 crate 根路径引用，外部按 `crate::Type` 引用。
 pub(crate) use paths::{
     blocker, blocker_skip, inside_tri, mid_band, occluded, push_direct, push_portals,
     push_reflections, push_refraction, tri_of, Ctx,

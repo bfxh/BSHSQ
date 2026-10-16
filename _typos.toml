@@ -20,6 +20,9 @@ iy = "iy"
 iz = "iz"
 # 二次惯性矩记号（面积惯性积/转动惯量，工程力学习用）。
 Iy = "Iy"
+# 帧数缩写（感官/震动档）：fpt = frames per tick（`haptic.rs` 的 `frames_per_tick()`，
+# 文档里写 `frame = tick × fpt + k`）。typos 想改成 ftp（文件传输协议）——语义不同。
+fpt = "fpt"
 
 # 词级豁免（注释与文档正文里出现同形词时一并放行）。
 [default.extend-words]
@@ -50,3 +53,5 @@ Fle = "Fle"
 # preCICE = 耦合库名（分区耦合/子迭代的工程参考，PLAN-COUPLING §7 引用其文档）。
 # typos 想改成 precise —— 专有名词，按术语豁免。
 precice = "precice"
+# fpt = frames per tick（同 extend-identifiers）：文档正文里也大量出现，词级也要放行。
+fpt = "fpt"
