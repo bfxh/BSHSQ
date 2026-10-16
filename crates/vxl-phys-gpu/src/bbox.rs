@@ -16,7 +16,6 @@
 //! `gpu_reduce_covers_all_particles` 逐位钉住）。等管线接线时若发现每子步回读 24 字节吃不消，
 //! 再回头做卡上 setup（届时先用"写哨兵看它落不落"的方式定位那一遍 pass）。
 
-use crate::pipeline::ent;
 use vxl_phys_core::grid::grid_box;
 use vxl_phys_core::Vec3;
 use wgpu::util::DeviceExt;
@@ -91,175 +90,15 @@ pub fn host_box(pos_flat: &[f32], h: f32, max_bins: usize) -> ([f32; 3], [f32; 3
     (lo, hi, bin, dims)
 }
 
-/// 归约的一次性建置产物（绑定组 + 管线；`box_on_adapter` 只读引用）。
-struct BboxPipes {
-    bg: wgpu::BindGroup,
-    reduce: wgpu::ComputePipeline,
-    setup: wgpu::ComputePipeline,
-}
-
-/// 一次性建置：着色器 / 绑定布局 / 绑定组 / 两条管线（不进出稳态计时）。
-fn make_bbox_pipes(
-    device: &wgpu::Device,
-    pos_b: &wgpu::Buffer,
-    bb_b: &wgpu::Buffer,
-    rp_b: &wgpu::Buffer,
-    box_out_b: &wgpu::Buffer,
-    sp_b: &wgpu::Buffer,
-) -> BboxPipes {
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("bbox.wgsl"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("bbox.wgsl").into()),
-    });
-    // 5 个槽位：0 pos(read) | 1 bb(rw，原子) | 2 rp(uniform) | 3 box_out(rw) | 4 sp(uniform)
-    let entries: Vec<wgpu::BindGroupLayoutEntry> = (0..5u32)
-        .map(|binding| wgpu::BindGroupLayoutEntry {
-            binding,
-            visibility: wgpu::ShaderStages::COMPUTE,
-            ty: wgpu::BindingType::Buffer {
-                ty: if binding == 2 || binding == 4 {
-                    wgpu::BufferBindingType::Uniform
-                } else {
-                    wgpu::BufferBindingType::Storage {
-                        read_only: binding == 0,
-                    }
-                },
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        })
-        .collect();
-    let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("bbox.bgl"),
-        entries: &entries,
-    });
-    let bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("bbox.bg"),
-        layout: &bgl,
-        entries: &[
-            ent(0, pos_b),
-            ent(1, bb_b),
-            ent(2, rp_b),
-            ent(3, box_out_b),
-            ent(4, sp_b),
-        ],
-    });
-    let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("bbox.pl"),
-        bind_group_layouts: &[Some(&bgl)],
-        immediate_size: 0,
-    });
-    let p_reduce = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("bbox.reduce"),
-        layout: Some(&pl),
-        module: &shader,
-        entry_point: Some("reduce"),
-        compilation_options: Default::default(),
-        cache: None,
-    });
-    let p_setup = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-        label: Some("bbox.setup"),
-        layout: Some(&pl),
-        module: &shader,
-        entry_point: Some("box_setup"),
-        compilation_options: Default::default(),
-        cache: None,
-    });
-
-    BboxPipes {
-        bg,
-        reduce: p_reduce,
-        setup: p_setup,
-    }
-}
-
-fn f32_bytes(v: &[f32]) -> Vec<u8> {
-    let mut b = Vec::with_capacity(v.len() * 4);
-    for x in v {
-        b.extend_from_slice(&x.to_le_bytes());
-    }
-    b
-}
-
-/// `reduce` 的工作组大小（与 `bbox.wgsl` 的 `WG` 一致）。
-const WG: u32 = 64;
-/// `bb` 的中性元：`[+∞, +∞, +∞, −∞, −∞, −∞]` **在有序映射下**的位模式
-/// （⚠️ `+∞` 映射后是 `0xFF800000`：有序映射把正数的符号位翻成 1）。
-const BB_INIT: [u32; 6] = [
-    0xFF80_0000,
-    0xFF80_0000,
-    0xFF80_0000,
-    0x007F_FFFF,
-    0x007F_FFFF,
-    0x007F_FFFF,
-];
-
-/// `bb` 的中性元字节（`BB_INIT` 的 LE 展开）。
-fn bb_init_bytes() -> Vec<u8> {
-    let mut b = Vec::with_capacity(24);
-    for x in BB_INIT {
-        b.extend_from_slice(&x.to_le_bytes());
-    }
-    b
-}
-
-/// 探针的一次性建置（`box_on_adapter` 的第一段）：`pos`/`bb`/`box_out`/`sp`/`rp` 与回读缓冲 + 管线。
-/// 返回 `(bb, box_out, readback, pipes)`——`pos` 与两个 uniform 只被 bind group 持有。
-fn make_probe(
-    device: &wgpu::Device,
-    pos_flat: &[f32],
-    n: u32,
-    ngroups: u32,
-    h: f32,
-    max_bins: usize,
-) -> (wgpu::Buffer, wgpu::Buffer, wgpu::Buffer, BboxPipes) {
-    let pos_b = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("bbox.pos"),
-        contents: &f32_bytes(pos_flat),
-        usage: wgpu::BufferUsages::STORAGE,
-    });
-    let bb_b = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("bbox.bb"),
-        contents: &bb_init_bytes(),
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_SRC
-            | wgpu::BufferUsages::COPY_DST,
-    });
-    let rp_b = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("bbox.rp"),
-        contents: &{
-            let mut b = Vec::with_capacity(16);
-            for x in [n, ngroups, 0, 0] {
-                b.extend_from_slice(&x.to_le_bytes());
-            }
-            b
-        },
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
-    let box_out_b = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("bbox.box_out"),
-        size: 48, // 8 槽（uniform 形）+ 3 槽紧凑 `hi`（近域过滤用的真 AABB，见 `bbox.wgsl` 头注）
-        usage: wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_SRC
-            | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-    let sp_b = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("bbox.sp"),
-        contents: &f32_bytes(&[h, max_bins as f32, 0.0, 0.0]),
-        usage: wgpu::BufferUsages::UNIFORM,
-    });
-    let readback = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("bbox.readback"),
-        size: 72, // bb（24 B）+ box_out（48 B）
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-
-    let pipes = make_bbox_pipes(device, &pos_b, &bb_b, &rp_b, &box_out_b, &sp_b);
-    (bb_b, box_out_b, readback, pipes)
-}
+// ── 设备侧建置与解码 = 子模块 `bbox/pipes.rs`
+// 管线/绑定组"建一次"那两段（`BboxPipes` / `make_bbox_pipes` / `make_probe`）＋字节化与解码工具
+// （`f32_bytes` / `WG` / `BB_INIT` / `bb_init_bytes` / `bb_to_corners` / `decode_bb`），2026-10-16
+// 从本文件**纯搬移**进子模块：那一片是"`wgpu` 资源怎么建"的设备关注点，本文件留对外 API。
+// 子模块里的可见性是 `pub(super)`（只对本文件与 `bbox::pipes` 内可见），`bbox` 的对外面一行没变。
+mod pipes;
+use self::pipes::{
+    bb_init_bytes, bb_to_corners, decode_bb, f32_bytes, make_bbox_pipes, make_probe, WG,
+};
 
 /// 在**指定适配器序号**上跑归约 + setup，读回角点与卡上箱子。
 /// `error` 非空即未测到（无适配器 / 空输入）。
@@ -350,32 +189,6 @@ pub fn box_on_adapter(adapter_index: usize, pos_flat: &[f32], h: f32, max_bins: 
         gpu_dims,
         gpu_total,
     }
-}
-
-/// `bb` 的有序 u32 → 角点 `(min, max)`。
-fn bb_to_corners(bb: [u32; 6]) -> ([f32; 3], [f32; 3]) {
-    (
-        [
-            ordered_to_f32(bb[0]),
-            ordered_to_f32(bb[1]),
-            ordered_to_f32(bb[2]),
-        ],
-        [
-            ordered_to_f32(bb[3]),
-            ordered_to_f32(bb[4]),
-            ordered_to_f32(bb[5]),
-        ],
-    )
-}
-
-/// 回读字节 → `bb`（6 个有序 u32）。
-fn decode_bb(data: &[u8]) -> [u32; 6] {
-    let mut bb = [0u32; 6];
-    for (k, slot) in bb.iter_mut().enumerate() {
-        let o = k * 4;
-        *slot = u32::from_le_bytes([data[o], data[o + 1], data[o + 2], data[o + 3]]);
-    }
-    bb
 }
 
 /// **常驻**包围盒阶段（`Packet` 用）：缓冲/管线只建一次，每子步只"写中性元 + 归约 + setup"。

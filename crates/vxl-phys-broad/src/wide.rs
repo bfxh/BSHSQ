@@ -38,10 +38,10 @@
 use crate::Aabb;
 #[cfg(test)]
 use vxl_phys_core::Vec3;
-
-// ── 按域拆出的子模块（子目录 wide/）
+// ── 按域拆出的子模块（子目录 wide/）：wide_insert = 插入/分裂族，从 wide_impl 拆出
 mod wide_bits;
 mod wide_impl;
+mod wide_insert;
 pub use self::{wide_bits::*, wide_impl::*};
 // ↑ 子模块顶层条目再导出（impl-only 模块不入 glob，避免 unused）
 
