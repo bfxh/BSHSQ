@@ -98,38 +98,56 @@
 //! 散开）。所以 SPH 的 `ρ/ρ0` 对本族**不是判据**（求解器根本不读 `densities()`，它只是 `density_pass`
 //! 出的被动诊断），本档的探针也只把它当**读数**印出来、不做横向断言——拿 `ρ` 去比 WCSPH/PBF
 //! 是在拿别人的量尺量本族。治粒子级重叠要靠**最小距离约束**（朴素版已实测排除：加进投影只会把
-//! 投影搅坏）；**APIC 不治这条**——它换的是传输算子，实测 `θ = 0.95` 档 `over_in` 0.856 → 0.920
-//! （略差），见下"APIC"节与"已知简化 4/5"。
+//! 投影搅坏）；**APIC 不治这条**——它换的是传输算子，治的是传输耗散，不是粒子间排斥。不过它在静水槽上
+//! 顺带把 `over_in` 从 0.856 降到 0.332（代价是 `ke` +18%），见下"APIC"节与"已知简化 4/5"。
 //!
-//! ## APIC（仿射传输）——**已实现，但 tick 级的 `C` 买不到红利（实测负结果）**
+//! ## APIC（仿射传输）——**已实现；`C` 每子步从粒子场现算（实测买到旋转红利，默认仍关）**
 //!
 //! 实现（`cfg.flip_apic` 开；**默认关**）：P2G 散射到网格角点的是 `v + C·(x_角点 − x_p)`，
-//! 3×3 的 `C = M·D⁻¹`（`M = Σ w·v⊗d`、`D = Σ w·d⊗d`，`d` 以**单元边长**为单位，`D` 对称）
-//! 由**上一子步**的 G2P 从网格速度场重建，落在 tick 级 `FlipScratch` 里 ⇒ `C` **不进粒子状态**，
-//! 逐位复现/保存恢复/状态继承三份契约原样成立（每 tick 首子步 `C = 0`）。`D` 退化
-//! （`|det D| ≤ 1e-4`：粒子正落网格角点、权重塌成一点）⇒ 该粒子这子步退回 FLIP/PIC。
+//! 3×3 的 `C`（**世界单位** 1/s）由 `flip/affine.rs::estimate_from_field` **每子步从粒子场
+//! 现算**（`(pos, vel)` 的纯函数：邻居 `|p_j − p_i| ≤ h` 上做加权最小二乘 `C = M·D⁻¹`，
+//! `M = Σ w·(v_j − v_i)⊗(p_j − p_i)`、`D = Σ w·d⊗d`，权重线性衰减 `w = 1 − r/h`；邻居用
+//! `src/grid.rs` 的确定性 27 邻域网格，格内序 = 索引序 ⇒ 求和序是位置的确定函数）。
+//! **`C` 不落任何跨 tick 缓冲** ⇒ 不进粒子状态，逐位复现/保存恢复/状态继承三份契约原样成立。
 //!
-//! **实测**（`tests/flip_rotation_probe.rs::flip_apic_transfer_does_not_buy_rotation`
-//! 与 `#[ignore]` 诊断 `diag_apic_rotation`）。零重力旋转团台架（无边界、无体外力 ⇒ 末态 `L_y`
-//! 只被 P2G/G2P 那一趟三线性传输耗散；`l_keep` = 末态/起步角动量）：
+//! 两处驯服（不驯服时近静场不可用）：
+//! - **岭** `λ·(tr D / 3)`（`λ = 1e-2`）：表面粒子邻域是单侧的 ⇒ `D` 在缺失方向欠定，不压住
+//!   就会把那侧**偏置拟合成假梯度**（实测静水槽 `ke` 17.2 → 80.1、过密 `over` 3.6 → 18.5）；
+//! - **拟合质量收缩** `C ← (⟨C, M⟩ / T)·C`：`T = Σ w·|v_j − v_i|²` 是局部速度总散布、
+//!   `⟨C, M⟩` 是被线性模型解释掉的那部分（LS 性质保证 `⟨C,M⟩ ≤ T`）⇒ 近静场里"信号"几乎
+//!   全是噪声时 `s → 0`、`C` 自动哑火。
+//!
+//! `D` 真退化（`det D ≤ (tr D / 3)³·1e-6`，**相对**判据：`D` 是世界单位、绝对值随 `h` 缩放）
+//! 或非有限 ⇒ 该粒子这一子步退回 FLIP/PIC 传输。
+//!
+//! **实测**（`tests/flip_rotation_probe.rs::flip_apic_derived_c_buys_rotation` 与 `#[ignore]`
+//! 诊断 `diag_apic_rotation`）。零重力旋转团台架（无边界、无体外力 ⇒ 末态 `L_y` 只被 P2G/G2P
+//! 那一趟三线性传输耗散；`l_keep` = 末态/起步角动量；`θ = 0` / `θ = 0.95` 分别是纯 PIC/FLIP）：
 //!
 //! | 台架读数 | PIC | **+APIC** | FLIP | **FLIP+APIC** |
 //! |---|---|---|---|---|
-//! | `l_keep`（`θ = 0` / `θ = 0.95`） | 0.1453 | **0.1545** | 0.8655 | **0.8712** |
-//! | `rot_err`（同上） | 0.864 | **0.856** | 0.452 | **0.454** |
+//! | `l_keep` | 0.1453 | **0.9814** | 0.8655 | **1.0729** |
+//! | `rot_err` | 0.8644 | **0.4291** | 0.4519 | 0.6664 |
+//! | `ke` | 4.77e0 | 1.61e2 | 1.31e2 | 2.41e2 |
 //!
-//! ⇒ `θ = 0` 档开 APIC 只从 0.145 抬到 **0.155**（≈ 无差别），而 FLIP 同台 **0.866** ⇒
-//! **tick 级的 `C` 没有买到 APIC 的抗旋转耗散**（那正是 SPEC §4.8 里要它治的病）。
-//! 静水槽（`θ = 0.95`、80 次 CG）`ke` 17.24 → 15.65、`height_keep` 1.0367 → 1.0398（仍合格）。
+//! ⇒ `θ = 0` 档开 APIC 把 `l_keep` 从 0.145 抬到 **0.981**（≈ 无耗散）、`rot_err` 腰斩
+//! ⇒ **派生 `C` 真的买到了 APIC 的抗旋转耗散**（SPEC §4.8 要它治的病）。`ke` 那列看着大，
+//! 但它是**自洽**的：`ke ≈ L²/(2I)`（把 `C` 写死成解析真值 ω× 的对照是 `l_keep` 1.081、
+//! `rot_err` 0.138）⇒ 这是"少耗散"而不是"能量爆走"。
+//! **上一版"tick 级 `C`"（从网格重建、每 tick 清零）只有 0.155** ⇒ 红利来自把 `C` 的来源
+//! 换成粒子场这一刀，而不是 APIC 口径本身。
 //!
-//! **为什么（推导 + 上面那条读数）**：`C` 每 tick 清零 ⇒ **首子步**就是纯 PIC/FLIP 传输；而
-//! PIC 的 `v ← v_网格` 重置把粒子场在**同一格的 8 个节点**上拉平——粒子越接近格子中心
-//! （等权 `u = ½`）越彻底：此时一阶矩 `Σ w·v⊗d` 的各分量因 `Σ w·d = 0` 与 `v` 逐节点相同而
-//! **抵消** ⇒ 从该网格场估出的 `C` 是"被磨过一次"的梯度 ⇒ **自洽退化回 PIC**（粒子越规则退化
-//! 越彻底；旋转团是理想晶格，退化最狠）。**真 APIC 要求 `C` 活过子步**——它本来就是粒子状态
-//! 的一部分（`C` 在 P2G 用上一子步的值、在 G2P 用本子步的值，`C = 0` 起步本身就是误差源）。
-//! 那是**契约换代**（粒子 SoA 加 9 个 float + 保存恢复/状态继承的桥接面都要动），
-//! 登记为 `docs/OPEN-PROBLEMS.md` **P23**，本档不抢跑。
+//! 静水槽（`θ = 0.95`、80 次 CG；`flip_incompressibility_probe.rs::diag_apic_hydrostatic`）：
+//! `ke` 17.24 → 20.35（+18%）、`sink` 3.21e-2 → 3.50e-2（+9%）；代价集中在**近壁**——全体过密
+//! `over` 3.603 → 4.138（+15%）而**体内部** `over_in` 0.856 → 0.332（−61%）
+//! ⇒ 近静场代价温和但**不为零** ⇒ `flip_apic` 保持**默认关**（A/B 实验档），这笔账记在
+//! `docs/OPEN-PROBLEMS.md` **P23**：要默认开得先让沉降/静水箱这类场景不再付它。
+//!
+//! 〔历史〕上一版由 tick 级 `C` 的负结果推导出"`C` 每 tick 清零 ⇒ 首子步纯 PIC；而 PIC 的
+//! `v ← v_网格` 重置把粒子场在同格 8 节点上拉平 ⇒ 从网格估出的 `C` 是磨过一次的梯度 ⇒
+//! 自洽退化回 PIC"。那条推导本身没错（读数可复现），错的是**结论的范围**：它只说明"从**网格**
+//! 重建 `C` 不行"，不等于"APIC 不行"——改从**粒子场**现算就绕开了那道自洽环（粒子场的跨格差
+//! 分别没被磨过），而且不必动粒子状态 ⇒ **不需要契约换代**。
 //!
 //! ## 已知简化（切片 1，逐条登记）
 //!
@@ -145,8 +163,9 @@
 //! 3. **刚体反作用**：本档沿用 `boundary_pass` 的 2b 边界粒子账（`bforce`/`breact`），
 //!    **没有**把网格的固体面压力积分成对刚体的反作用 ⇒ 网格的固体 BC 是"看不见的静止墙"。
 //!    流体↔刚体的双向力请走 2b 边界粒子档（`set_boundary_particles`），登记为下一刀。
-//! 4. 单元边长固定取粒子间距，不做自适应；**APIC 仿射传输已实现但默认关**（tick 级 `C` 实测买不到
-//!    红利，见上"APIC"节 + `docs/OPEN-PROBLEMS.md` P23）⇒ 本档默认仍是 FLIP/PIC 混合。
+//! 4. 单元边长固定取粒子间距，不做自适应；**APIC 仿射传输已实现、派生 `C` 已买到旋转红利
+//!    （`l_keep` 0.145 → 0.981），但近静场要付 +18% `ke` / +15% 近壁过密 `over`（见上"APIC"
+//!    节 + `docs/OPEN-PROBLEMS.md` P23）⇒ `flip_apic` 默认仍关**，本档默认是 FLIP/PIC 混合。
 //! 5. **粒子级重叠无约束**（见上"⚠️"）⇒ `densities()` 对 FLIP 是被动读数。凡是需要密度场
 //!    自洽的相位（`fluid_force.rs` 的负压钳零、表面张力、`density_pass` 的镜像鬼影边界）在
 //!    本族下都只是"顺带算出来的"，**不被求解器消费**——别在本族上调它们的参数期待效果。
@@ -154,9 +173,11 @@ use crate::{FluidSystem, ProviderColliders, Vec3};
 
 // 网格层（建网格/分类/索引/三线性模板）拆在同名子模块里：`flip.rs` 一度 837 行、超 `god_gate`
 // 的 800 行硬线；拆开后两层各自远在限内，上面那整段口径说明也不必为了行数砍掉。
+mod affine;
 mod grid;
 mod solve;
 
+use self::affine::{affine_apply, estimate_from_field};
 use self::grid::{cell_axis, weight_of};
 
 /// 网格相对流体粒子 AABB 的外扩（单元数）：留出空单元作自由表面 Dirichlet 层，
@@ -209,22 +230,23 @@ pub(crate) struct FlipScratch {
     p_prev: Vec<f32>,
     /// `p_prev` 的几何键 `(origin, cell, dims)`；`None` = 这份缓冲还没解过（本 tick 首子步）。
     warm_key: Option<(Vec3, f32, [usize; 3])>,
-    /// 逐粒子的 **APIC 仿射矩阵**（行主序 3×3，以**单元边长**为单位）：由上一子步的 G2P 从网格
-    /// 速度场重建、供本子步 P2G 用（`cfg.flip_apic`）。与 `p_prev` 同源：每 tick 现建 ⇒ 首子步
-    /// 全零 = 退回 FLIP/PIC（见模块头"APIC"节）。
+    /// 逐粒子 **APIC 仿射矩阵**（行主序 3×3，**世界单位** 1/s）：每子步 P2G 前由
+    /// `affine::estimate_from_field` 从**粒子场**现算（`(pos, vel)` 的纯函数 ⇒ 不进粒子状态）。
+    /// `cfg.flip_apic` 关时留空。
     affine: Vec<[f32; 9]>,
+    /// 估梯度用的**确定性邻域网格**（`src/grid.rs` 的计数排序版，与 SPH 共用 `grid_box` 规则）。
+    ngrid: crate::grid::UniformGrid,
 }
 
 impl FlipScratch {
     /// P2G：逐流体粒子把速度三线性散射到三套面 + 面权重。
     ///
-    /// `cfg.flip_apic` 开时散射的是**角点仿射速度** `v + C·(x_角点 − x_p)`（`C` 由上一子步的
-    /// G2P 重建，见模块头"APIC"节）；`C` 全零（每 tick 首子步）时与纯 FLIP/PIC 传输同值。
+    /// `cfg.flip_apic` 开时先按**粒子场**现算逐粒子仿射矩阵 `C`（`estimate_from_field`），
+    /// 再散射**角点仿射速度** `v + C·(x_角点 − x_p)`；关档时逐字退回纯 FLIP/PIC 传输。
     fn p2g(&mut self, sys: &FluidSystem) {
         let apic = sys.cfg.flip_apic;
-        if apic && self.affine.len() != sys.n_fluid {
-            self.affine.clear();
-            self.affine.resize(sys.n_fluid, [0.0; 9]);
+        if apic {
+            estimate_from_field(sys, &mut self.ngrid, &mut self.affine);
         }
         let (nx, ny, nz) = (self.dims[0], self.dims[1], self.dims[2]);
         for i in 0..sys.n_fluid {
@@ -445,15 +467,9 @@ impl FlipScratch {
 
     /// G2P：三线性采样（投影前/后）→ FLIP 混合 → CFL → 推进位置；回写 `press`。
     ///
-    /// 顺带重建**下一子步**要用的 APIC 仿射矩阵 `C`（`sum w·v⊗d` 与 `sum w·d⊗d` 都在同一趟
-    /// 遍历里累加，见模块头"APIC"节；关档或 `D` 退化时置零 = 退回 FLIP/PIC 传输）。
+    /// 不碰 APIC 的 `C`：那由本档 `p2g` 每子步从粒子场现算（模块头"APIC"节）。
     fn g2p(&mut self, sys: &mut FluidSystem, dt: f32) {
         let theta = sys.cfg.flip_ratio.clamp(0.0, 1.0);
-        let apic = sys.cfg.flip_apic;
-        if apic && self.affine.len() != sys.n_fluid {
-            self.affine.clear();
-            self.affine.resize(sys.n_fluid, [0.0; 9]);
-        }
         let vmax = sys.cfg.max_speed_frac * sys.h / dt;
         let vmax2 = vmax * vmax;
         let (nx, ny, nz) = (self.dims[0], self.dims[1], self.dims[2]);
@@ -464,7 +480,6 @@ impl FlipScratch {
             let (j0, uy) = cell_axis(g.y);
             let (k0, uz) = cell_axis(g.z);
             let mut acc = [0.0f32; 6];
-            let (mut mm, mut dd) = ([0.0f32; 9], [0.0f32; 9]);
             for di in 0..2usize {
                 for dj in 0..2usize {
                     for dk in 0..2usize {
@@ -473,16 +488,6 @@ impl FlipScratch {
                             continue;
                         }
                         let (ci, cj, ck) = (i0 + di, j0 + dj, k0 + dk);
-                        // APIC：只用"三分量都在网格内"的角点（`M`/`D` 必须同一节点集）。
-                        if apic && ci < nx && cj < ny && ck < nz {
-                            let vn = Vec3::new(
-                                self.u[self.u_idx(ci, cj, ck)],
-                                self.v[self.v_idx(ci, cj, ck)],
-                                self.w[self.w_idx(ci, cj, ck)],
-                            );
-                            let off = Vec3::new(di as f32 - ux, dj as f32 - uy, dk as f32 - uz);
-                            apic_accumulate(&mut mm, &mut dd, w, vn, off);
-                        }
                         if ci <= nx && cj < ny && ck < nz {
                             let s = self.u_idx(ci, cj, ck);
                             acc[0] += self.u[s] * w;
@@ -500,9 +505,6 @@ impl FlipScratch {
                         }
                     }
                 }
-            }
-            if apic {
-                self.affine[i] = affine_from_moments(&mm, &dd).unwrap_or([0.0f32; 9]);
             }
             let vg = Vec3::new(acc[0], acc[1], acc[2]);
             let vg0 = Vec3::new(acc[3], acc[4], acc[5]);
@@ -566,67 +568,6 @@ pub(crate) fn substep(
     sc.g2p(sys, dt);
     sys.boundary_pass(providers);
     sys.phase_us[4] += vxl_phys_core::probe::us(t);
-}
-
-/// APIC 仿射项 `C·d`（`C` 行主序 3×3，`d` 以**单元边长**为单位）。返回的位移量也要乘 `cell`。
-#[inline]
-fn affine_apply(c: &[f32; 9], d: Vec3) -> Vec3 {
-    Vec3::new(
-        c[0] * d.x + c[1] * d.y + c[2] * d.z,
-        c[3] * d.x + c[4] * d.y + c[5] * d.z,
-        c[6] * d.x + c[7] * d.y + c[8] * d.z,
-    )
-}
-
-/// 把一个角点累加进 APIC 的两个一阶矩（`M = Σ w·v⊗d`、`D = Σ w·d⊗d`，行主序 3×3 对称）。
-#[inline]
-fn apic_accumulate(m: &mut [f32; 9], d: &mut [f32; 9], w: f32, v: Vec3, off: Vec3) {
-    let (vs, os) = ([v.x, v.y, v.z], [off.x, off.y, off.z]);
-    for a in 0..3 {
-        for b in 0..3 {
-            m[a * 3 + b] += w * vs[a] * os[b];
-            d[a * 3 + b] += w * os[a] * os[b];
-        }
-    }
-}
-
-/// APIC 仿射矩阵 `C = M·D⁻¹`（`D` 对称 3×3，余子式求逆；都用单元单位 ⇒ `C` 也是单元单位）。
-///
-/// `D` 退化（粒子正落角点、三线性权重塌成单点 ⇒ `D = 0`）时返 `None` ⇒ 该粒子这一子步退回
-/// FLIP/PIC 传输（位置级退化，不是错误路径）。阈值取单元单位下的 `1e-4`：典型内部粒子
-/// `|det D| ≈ 5.8e-4`（三方均布 `Σw·d⊗d ≈ (1/12)·I`），差一个量级 ⇒ 逆的放大不过度。
-fn affine_from_moments(m: &[f32; 9], d: &[f32; 9]) -> Option<[f32; 9]> {
-    let (a, b, c) = (d[0], d[1], d[2]);
-    let (dd, e) = (d[4], d[5]);
-    let f = d[8];
-    let det = a * (dd * f - e * e) - b * (b * f - e * c) + c * (b * e - dd * c);
-    // 退化/非有限都走 fallback：`det` 为 NaN（坐标非有限）时 `!(det.abs() > 1e-4)` 也成立，
-    // 这里显式写出来（`<=` 单独用会把 NaN 判成"可逆"，把 NaN 灌进网格）。
-    if det.abs() <= 1e-4 || det.is_nan() {
-        return None;
-    }
-    let inv = [
-        dd * f - e * e,
-        c * e - b * f,
-        b * e - c * dd,
-        c * e - b * f,
-        a * f - c * c,
-        b * c - a * e,
-        b * e - c * dd,
-        b * c - a * e,
-        a * dd - b * b,
-    ];
-    let mut out = [0.0f32; 9];
-    for r in 0..3 {
-        for col in 0..3 {
-            let mut s = 0.0f32;
-            for t in 0..3 {
-                s += m[r * 3 + t] * inv[t * 3 + col];
-            }
-            out[r * 3 + col] = s / det;
-        }
-    }
-    Some(out)
 }
 
 /// 面归一：`w > tiny` 的除权重；未知面（`w ≤ tiny`）先清零，再沿轴两向各扫一趟外推

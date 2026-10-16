@@ -43,6 +43,7 @@ impl FlipScratch {
             p_prev: Vec::new(),
             warm_key: None,
             affine: Vec::new(),
+            ngrid: crate::grid::UniformGrid::default(),
         }
     }
 

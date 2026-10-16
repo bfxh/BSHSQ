@@ -1,8 +1,8 @@
 //! **FLIP 传递耗散判据**（旋转团 + APIC A/B）：立方水团绕竖直轴刚体旋转，零重力/零外力/
 //! 无边界 ⇒ 末态绕 y 角动量 `L_y` 的损失**只可能来自 P2G/G2P 那一趟三线性传输**。
 //!
-//! 主判据 = `flip_apic_transfer_does_not_buy_rotation`（**负结果**：tick 级 `C` 拿不到 APIC
-//! 红利 ⇒ `flip_apic` 默认 `false`）。
+//! 主判据 = `flip_apic_derived_c_buys_rotation`（**正结果**：`C` 每子步从**粒子场**现算
+//! ⇒ APIC 把旋转保住；`flip_apic` 仍是默认 `false` 的 A/B 实验档，理由是近静场代价）。
 //!
 //! 完整推导与读数表**不在此复制**，见 `src/config.rs` 的 `flip_apic` doc 与 `src/flip.rs`
 //! 模块头 `## APIC` 节。
@@ -192,23 +192,30 @@ fn rot_case(ratio: f32, apic: bool, ticks: usize) -> Rot {
     }
 }
 
-/// **APIC A/B 判据（实测的负结果，逐条钉住）**：**tick 级**的 `C` **拿不到 APIC 的红利**。
+/// **APIC A/B 判据（实测的"买到红利"结果，逐条钉住）**：**每子步现算**的 `C`
+/// （`flip/affine.rs::estimate_from_field`：粒子场加权最小二乘 + 岭 + 拟合质量收缩）
+/// **真的买到了 APIC 的旋转红利**。
 ///
 /// 台架见 `rot_case`（零重力/无外力/无边界 ⇒ 末态 `L_y` 只被 P2G/G2P 那一趟三线性传输耗散，
-/// 与压力投影、体外力都无关）。四条判据把"负结果"钉成**可回归的断言**，防止以后有人凭印象
-/// 把 `flip_apic` 当成旋转保真的解：
+/// 与压力投影、体外力都无关）。判据把结论钉成**可回归的断言**：
 /// ① **台架有判别力**：`θ = 0.95`（FLIP）保住旋转，比 PIC 高一个量级 ⇒ 这个台架真的看得见
 ///    传输耗散，②③ 才不是空断言；
-/// ② **负结果**：同 `θ = 0`、只换 `flip_apic`，APIC **没有**显著改善（实测 0.145 → 0.155）。
-///    这正是"`C` 每 tick 清零 ⇒ 首子步就是纯 PIC；而 PIC 的 `v ← v_网格` 重置把粒子场在
-///    同格 8 节点上**拉平**（等权时一阶矩 `Σ w·v⊗d` 抵消）⇒ 之后从网格估出的 `C` 是**磨过
-///    一次**的梯度"这条推导的读数。**真 APIC 要求 `C` 活过子步（进粒子状态）** ⇒ 下一刀；
-///    若哪天 ② 真的红了（APIC 买到了红利），先回来改 `flip_apic` 的文档与这条结论，再谈别的。
-/// ③ **不搅乱**：`θ = 0.95` 开 APIC 不得把角动量搞坏（实测 0.866 → 0.871）；
-/// ④ **A/B 档也逐位复现**：同档跑两遍读数逐位相同（含 `digest`）。
+/// ② **正结果**：同 `θ = 0`、只换 `flip_apic`，APIC 把 `l_keep` 从 PIC 的 0.145 提到 0.981
+///    （≈ 无耗散），且**不得过冲**：`< 1.05`。这条是钉住"岭 `λ·tr D/3` + 收缩
+///    `C ← (⟨C,M⟩/T)·C`"那一刀的——驯服前是 1.033（伪增益）、把 `C` 写死成解析 ω× 是 1.081，
+///    而没有收缩时近静场会炸（见 ⑤ 的 P23 读数）；
+/// ③ **场更接近刚体**：APIC 的 `rot_err` 必须明显低于 PIC（实测 0.429 vs 0.864）；
+/// ④ **不搅乱**：`θ = 0.95` 开 APIC 不得把角动量搞坏（实测反升 0.866 → 1.073）；
+/// ⑤ **默认关**：`flip_apic` 默认 `false`（off 路径逐字节不动；开档是 A/B 实验档——
+///    静水槽代价 `ke` +18%、`sink` +15%、`over_in` −61%，见 `docs/OPEN-PROBLEMS.md` P23）；
+/// ⑥ **A/B 档也逐位复现**：同档跑两遍读数逐位相同（含 `digest`）。
+///
 /// 读数由本测试自己打印（`--nocapture`），同见 `diag_apic_rotation`。
+/// 〔历史〕上一版这条判据断言的是**负结果**（tick 级 `C`：APIC 与 PIC 无差别，0.145 → 0.155）；
+/// `C` 改成每子步从粒子场现算后事实翻转，故按本文件自己的约定（"先回头核文档与实现，再改这条
+/// 断言"）重写成正结果。
 #[test]
-fn flip_apic_transfer_does_not_buy_rotation() {
+fn flip_apic_derived_c_buys_rotation() {
     let ticks = 30;
     let pic = rot_case(0.0, false, ticks);
     let apic = rot_case(0.0, true, ticks);
@@ -234,27 +241,44 @@ fn flip_apic_transfer_does_not_buy_rotation() {
     // ① 台架判别力：FLIP 必须显著优于 PIC（实测 0.866 vs 0.145，≈ 6×）。
     assert!(
         flip.l_keep > 4.0 * pic.l_keep,
-        "旋转团台架看不见传输耗散：flip {} vs pic {} ⇒ 下面两条无从谈起",
+        "旋转团台架看不见传输耗散：flip {} vs pic {} ⇒ 下面几条无从谈起",
         flip.l_keep,
         pic.l_keep
     );
-    // ② 负结果：tick 级 C 在 θ = 0 下与 PIC ≈ 无差别（实测比值 1.06；放到 1.35 只为容忍
-    //    浮点/编译器差异——真红利是 ① 里那个量级差）。
+    // ② 正结果：派生 C 在 θ = 0 下必须买到红利（实测 0.981 vs 0.145，≈ 6.8×；放进 4× 留余量）。
     assert!(
-        apic.l_keep < 1.35 * pic.l_keep,
-        "tick 级 C 竟然买到了旋转红利（apic {} vs pic {}）⇒ 与 `flip_apic` 字段 doc 的结论矛盾，\
-         先回头核文档与实现，再改这条断言",
+        apic.l_keep > 4.0 * pic.l_keep,
+        "派生 C 没买到旋转红利（apic {} vs pic {}）⇒ 先查 `estimate_from_field` 是否真的接了\
+         p2g、以及岭/收缩是否把 `C` 压死",
         apic.l_keep,
         pic.l_keep
     );
-    // ③ 不搅乱：FLIP 档开 APIC 不得把角动量搞坏 > 3%（实测反升 0.6%）。
+    // ②b 不过冲：伪增益必须被压住（驯服后实测 0.981；驯服前 1.033、解析真值 1.081）。
+    assert!(
+        apic.l_keep < 1.05,
+        "派生 C 过冲到 {}（> 1.05）⇒ 岭/拟合质量收缩这两刀失效了（伪增益回来了）",
+        apic.l_keep
+    );
+    // ③ 场更刚体：APIC 的偏离刚体的 RMS 必须明显低于 PIC（实测 0.429 vs 0.864，≈ 0.50×）。
+    assert!(
+        apic.rot_err < 0.6 * pic.rot_err,
+        "APIC 没让场更接近刚体：rot_err {} vs pic {}",
+        apic.rot_err,
+        pic.rot_err
+    );
+    // ④ 不搅乱：FLIP 档开 APIC 不得把角动量搞坏 > 3%（实测反升到 1.073）。
     assert!(
         flip_apic.l_keep >= 0.97 * flip.l_keep,
         "APIC 把 FLIP 档的角动量搞坏了：{} vs {}",
         flip_apic.l_keep,
         flip.l_keep
     );
-    // ④ 表面完整性（阈值同主表）+ A/B 档逐位复现。
+    // ⑤ 默认关：off 路径逐字节不动是本仓的硬不变量（A/B 档要开得显式设 true）。
+    assert!(
+        !FluidConfig::default().flip_apic,
+        "`flip_apic` 默认值被翻成 true 了 ⇒ 所有近静场会付 P23 里记的那笔代价"
+    );
+    // ⑥ 表面完整性（阈值同主表）+ A/B 档逐位复现。
     for (n, r) in [
         ("PIC", &pic),
         ("APIC", &apic),

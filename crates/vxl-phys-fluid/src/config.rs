@@ -82,20 +82,25 @@ pub struct FluidConfig {
     /// `CpuSph`/`CpuPbf` 档下无影响。
     pub flip_pressure_cg: bool,
     /// **FLIP 档消费**：P2G 是否走 **APIC 仿射传输**（**默认 `false` = 关**；理由见"实测"）。
-    /// 开时散射到网格角点的是 `v + C·(x_角点 − x_p)`，其中 3×3 的 `C`（= 速度场梯度的三线性
-    /// 最小二乘估计）由**上一子步**的 G2P 从网格速度场重建，落在 tick 级 `FlipScratch` 里
-    /// （与压力场热启动共用那份缓冲）；`C` **不进粒子状态** ⇒ 逐位复现/保存恢复/状态继承
-    /// 三份契约原样成立（每 tick 首子步 `C = 0`）。
+    /// 开时散射到网格角点的是 `v + C·(x_角点 − x_p)`，其中 3×3 的 `C`（= 速度场梯度）由
+    /// `flip/affine.rs::estimate_from_field` **每子步从粒子场现算**（加权最小二乘 + 岭正则 +
+    /// 拟合质量收缩，`(pos, vel)` 的纯函数）⇒ `C` **不进粒子状态**，逐位复现/保存恢复/状态
+    /// 继承三份契约原样成立。
     ///
-    /// **实测（`tests/flip_rotation_probe.rs::diag_apic_rotation` + 静水槽 `flip_incompressibility_probe.rs::diag_apic_hydrostatic`）：这个 **tick 级**
-    /// 的 `C` **拿不到 APIC 的红利**——零重力旋转团台架上 `θ = 0` 的角动量保持率 PIC 0.145 /
-    /// APIC 0.155（≈ 无差别），同台 FLIP 0.866；静水槽 `θ = 0.95` 档 `ke` 17.24 → 15.65
-    /// （`height_keep` 1.0367 → 1.0398，仍是合格档）。
+    /// **实测**（`tests/flip_rotation_probe.rs::diag_apic_rotation` +
+    /// `flip_incompressibility_probe.rs::diag_apic_hydrostatic`）：
+    /// ① 旋转团（零重力/无边界，30 tick）：`θ = 0` 的角动量保持率 PIC 0.145 → **APIC 0.981**
+    ///    （`rot_err` 0.864 → 0.429；`ke` 4.77 → 1.61e2 —— 按 `ke ≈ L²/(2I)` 与 `l_keep` 自洽，
+    ///    不是能量爆走）。上一版"**tick 级** `C`"（从网格重建、每 tick 清零）只有 0.155 ⇒
+    ///    红利来自 `C` **从粒子场现算**这一刀，而不是 APIC 这个口径本身。
+    /// ② 静水槽（θ = 0.95，80 CG）：`ke` 17.24 → 20.35（+18%）、`sink` 3.21e-2 → 3.50e-2（+9%，
+    ///    自由落体参照 4.91 m ⇒ 两者都可忽略）；代价集中在**近壁**——全体过密 `over` 3.603 → 4.138
+    ///    （+15%）而**体内部** `over_in` 0.856 → 0.332（**−61%**）⇒ 近静场代价温和但**不为零**，
+    ///    故默认仍关。
     ///
-    /// 原因（推导 + 读数，见 `flip.rs` 模块头"APIC"节）：`C` 每 tick 清零 ⇒ 首子步就是纯
-    /// PIC/FLIP 传输，而 PIC 的 `v ← v_网格` 重置会把粒子场在同格 8 节点上**拉平**（等权时
-    /// 一阶矩 `Σ w·v⊗d` 恰好抵消）⇒ 之后从网格估出的 `C` 是"被磨过一次"的梯度 ⇒ 自洽退化回
-    /// PIC。**真 APIC 要求 `C` 活过子步（进粒子状态）**，那是契约换代，登记为下一刀。
+    /// 派生 `C` 的两处驯服（不驯服时静水槽 `ke` 17.2 → 80.1、过密 `over` 3.6 → 18.5，不可用）：
+    /// **岭** `λ·(tr D / 3)`（表面粒子邻域单侧 ⇒ `D` 欠定，不压住会把偏置拟合成假梯度）+
+    /// **拟合质量收缩** `C ← (⟨C, M⟩ / T)·C`（近静场里信号几乎全是噪声 ⇒ `s → 0`，`C` 哑火）。
     /// 本开关保留为 A/B 实验档（`false` = 冻结旧口径，与 `dynamic_viscosity = 0` 同一先例）。
     pub flip_apic: bool,
 }
@@ -122,8 +127,8 @@ impl Default for FluidConfig {
             flip_ratio: 0.95,
             flip_pressure_iterations: 80,
             flip_pressure_cg: true,
-            // APIC 仿射传输：实测 tick 级 `C` 拿不到红利（见字段 doc 的"实测"节 + 旋转团读数）⇒ 默认关，
-            // 开关保留为 A/B 实验档。
+            // APIC 仿射传输：派生 `C` 已买到旋转红利（l_keep 0.145 → 0.981），但近静场要付
+            // +18% ke / +15% 近壁过密 over（见字段 doc 的"实测"节）⇒ 默认仍关，留作 A/B 档。
             flip_apic: false,
         }
     }
