@@ -85,6 +85,7 @@ pub struct SceneIn<'a> {
     /// 衍射棱（每条两个端点；空表 ⇒ 无棱可绕）。
     pub edges: &'a [[Vec3; 2]],
     /// 逐棱绕射系数（**单频带口径**：频带表还没上卡）——与 [`SceneIn::edges`] **一一对应**。
+    /// 波长 / 楔角**不在** `SceneIn` 里：见 [`diffracted_wedge_on_adapter`] 的 `band_hz` / `wedges`。
     pub edge_coeff: &'a [f32],
     /// 声速（m/s）。
     pub speed: f32,
@@ -103,8 +104,10 @@ struct Params {
     n_edges: u32,
     n_slabs: u32,
     medium_steps: u32,
-    /// ⚠️ uniform 结构体必须补到 16 的倍数（少一个 pad 整块错位）。
-    _pad: u32,
+    /// **A9a 波长哨兵**（m）：`≤ 0` ⇒ 绕射退回旧口径 `(1+cosθ)/2`（**逐位不变**）；
+    /// `> 0` ⇒ 真 Fresnel 刀刃系数 + A9b 楔角修正。
+    /// （这一格原为 pad —— 仍是 8 字段 ⇒ 32 B，撞 16 的倍数，对齐不变。）
+    lambda: f32,
 }
 
 /// 序列化成 WGSL uniform 的字节（32 B；顺序 = 字段声明顺序）。
@@ -114,9 +117,10 @@ fn params_bytes(p: &Params) -> Vec<u8> {
         b.extend_from_slice(&v.to_le_bytes());
     }
     b.extend_from_slice(&p.speed.to_le_bytes());
-    for v in [p.n_edges, p.n_slabs, p.medium_steps, p._pad] {
+    for v in [p.n_edges, p.n_slabs, p.medium_steps] {
         b.extend_from_slice(&v.to_le_bytes());
     }
+    b.extend_from_slice(&p.lambda.to_le_bytes());
     b
 }
 
@@ -172,6 +176,32 @@ fn edges_bytes(edges: &[[Vec3; 2]]) -> Vec<u8> {
     f32_bytes(&vals)
 }
 
+/// **A9b 逐棱楔角**（与 [`SceneIn::edges`] **一一对应**）：`interior_angle` = 楔体**内角** Ω（弧度），
+/// `face0` = 楔体**某一面**上**垂直于棱**的方向（定 `φ = 0` 的基准）。
+/// `Ω ≤ 0`（或整表空）⇒ 该棱按**刀口**算（`n = 2`、`fac = 1`）。
+///
+/// 口径与 CPU `vxl-phys-acoustics::utd::Wedge` 相同；GPU 档不引那个 crate ⇒ 这里是**约定镜像**。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WedgeIn {
+    pub interior_angle: f32,
+    pub face0: Vec3,
+}
+
+/// 楔角平铺：每条 1 个 `vec4`（`Ω|face0.x|face0.y|face0.z`）。
+fn wedge_bytes(wedges: &[WedgeIn]) -> Vec<u8> {
+    let mut vals = Vec::with_capacity(wedges.len() * 4);
+    for w in wedges {
+        vals.extend_from_slice(&[w.interior_angle, w.face0.x, w.face0.y, w.face0.z]);
+    }
+    f32_bytes(&vals)
+}
+
+/// 空楔角表时的哑表（`Ω = 0` ⇒ 核内按刀口算；只为让空表也有一张非零长的缓冲）。
+const ZERO_WEDGE: WedgeIn = WedgeIn {
+    interior_angle: 0.0,
+    face0: Vec3::ZERO,
+};
+
 /// 场景缓冲（两个入口共用：只有输出不同）。
 struct Buffers {
     pb: wgpu::Buffer,
@@ -182,13 +212,28 @@ struct Buffers {
     kb: wgpu::Buffer,
     eb: wgpu::Buffer,
     cb: wgpu::Buffer,
+    wb: wgpu::Buffer,
     ob: wgpu::Buffer,
     rb: wgpu::Buffer,
     n_pairs: usize,
 }
 
 /// 上传一批输入（几何/材质表都是平铺切片 ⇒ 直接就是卡的布局）。
-fn upload(device: &wgpu::Device, sc: &SceneIn<'_>) -> (Buffers, u64) {
+///
+/// `wedges` 与 `sc.edges` 一一对应（空表 ⇒ 全按刀口）；`band_hz ≤ 0` ⇒ `lambda = 0`
+/// ⇒ 绕射走**旧口径**（逐位不变）。
+fn upload(
+    device: &wgpu::Device,
+    sc: &SceneIn<'_>,
+    wedges: &[WedgeIn],
+    band_hz: f32,
+) -> (Buffers, u64) {
+    // 与 CPU `utd::wavelength` 同式：`hz ≤ 0 ⇒ 0`，否则 `max(c,1e-3)/hz`。
+    let lambda = if band_hz <= 0.0 {
+        0.0
+    } else {
+        sc.speed.max(1e-3) / band_hz
+    };
     let n_pairs = sc.srcs.len() * sc.dsts.len();
     let mk_storage = |label: &str, bytes: &[u8]| {
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -205,6 +250,7 @@ fn upload(device: &wgpu::Device, sc: &SceneIn<'_>) -> (Buffers, u64) {
             n_tris: sc.tris.len() as u32,
             speed: sc.speed,
             n_edges: sc.edges.len() as u32,
+            lambda,
             ..Params::default()
         }),
         usage: wgpu::BufferUsages::UNIFORM,
@@ -234,6 +280,10 @@ fn upload(device: &wgpu::Device, sc: &SceneIn<'_>) -> (Buffers, u64) {
         "acoustic.edge_coeff",
         &f32_bytes(if_empty(sc.edge_coeff, &[0.0])),
     );
+    let wb = mk_storage(
+        "acoustic.edge_wedge",
+        &wedge_bytes(if_empty(wedges, &[ZERO_WEDGE])),
+    );
     let out_bytes = (n_pairs * 16) as u64;
     let ob = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("acoustic.out"),
@@ -257,6 +307,7 @@ fn upload(device: &wgpu::Device, sc: &SceneIn<'_>) -> (Buffers, u64) {
             kb,
             eb,
             cb,
+            wb,
             ob,
             rb,
             n_pairs,
@@ -298,6 +349,7 @@ fn run_entry(
             (6, Kind::Ro),
             (7, Kind::Ro),
             (8, Kind::Ro),
+            (10, Kind::Ro),
         ],
     );
     // ⚠️ 这个变量必须叫 `shader`（词汇门只豁免这一种写法，见 `scripts/vocab_scan.sh` 头部）。
@@ -319,6 +371,7 @@ fn run_entry(
             ent(6, &b.eb),
             ent(7, &b.cb),
             ent(8, &b.kb),
+            ent(10, &b.wb),
         ],
     });
     let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -387,7 +440,7 @@ pub fn direct_paths_on_adapter(
         edge_coeff: &[],
         speed,
     };
-    let (b, _) = upload(&device, &sc);
+    let (b, _) = upload(&device, &sc, &[], 0.0);
     let mut out = Vec::with_capacity(b.n_pairs);
     for row in run_entry(&device, &queue, &b, "direct") {
         out.push(PairOut {
@@ -432,7 +485,7 @@ pub fn reflected_on_adapter(
         edge_coeff: &[],
         speed,
     };
-    let (b, _) = upload(&device, &sc);
+    let (b, _) = upload(&device, &sc, &[], 0.0);
     let mut out = Vec::with_capacity(b.n_pairs);
     for row in run_entry(&device, &queue, &b, "reflect") {
         out.push(ReflectOut {
@@ -448,14 +501,28 @@ pub fn reflected_on_adapter(
 /// 在指定适配器上跑一趟**绕射核**（M3）：**只在阴影里**产出，逐对取**最强那条**棱
 /// （平局按棱序号取小 ⇒ 确定）。
 ///
-/// 输入口径见 [`SceneIn`]：`edges` 是棱的两个端点、`edge_coeff` 是**单频带**绕射系数
-/// （频带表还没上卡）；介质衰减也不在内（M5 未做）⇒ 增益 = `coeff·D(θ)/(d₁·d₂)`、
-/// 时延 = `(d₁+d₂)/speed`。
+/// 这是 [`diffracted_wedge_on_adapter`] 的**旧口径薄壳**：不给波长 ⇒ `lambda = 0`
+/// ⇒ 增益 = `coeff·(1+cosθ)/2 /(d₁·d₂)`、时延 = `(d₁+d₂)/speed`（既有探针**逐位不变**）。
 pub fn diffracted_on_adapter(
     adapter_index: usize,
     sc: &SceneIn<'_>,
 ) -> Result<(String, Vec<DiffractOut>), String> {
-    // 两张表逐条对应：核内是 `edge_coeff[e]` 直接索引 ⇒ 给短了就是**越界读**（哑表只兜空表）。
+    diffracted_wedge_on_adapter(adapter_index, sc, &[], 0.0)
+}
+
+/// 在指定适配器上跑一趟**绕射核**（M3），并上 **A9a 真刀刃 Fresnel + A9b 楔角修正**。
+///
+/// `wedges` 与 [`SceneIn::edges`] **一一对应**（空表 ⇒ 全按刀口）；`band_hz > 0` ⇒ 卡上取
+/// `lambda = max(speed,1e-3)/band_hz`，增益 = `coeff·|E_d/E₀|²·fac /(d₁·d₂)`
+/// （`fac` = 楔角修正因子，`n = 2` ⇒ `1.0`）；`band_hz ≤ 0` ⇒ 退回旧口径 `(1+cosθ)/2`。
+pub fn diffracted_wedge_on_adapter(
+    adapter_index: usize,
+    sc: &SceneIn<'_>,
+    wedges: &[WedgeIn],
+    band_hz: f32,
+) -> Result<(String, Vec<DiffractOut>), String> {
+    // 三张表逐条对应：核内是 `edge_coeff[e]` / `edge_wedge[e]` 直接索引 ⇒ 给短了就是**越界读**
+    // （哑表只兜空表）。
     if sc.edges.len() != sc.edge_coeff.len() {
         return Err(format!(
             "棱表与逐棱系数必须一一对应（{} vs {}）",
@@ -463,11 +530,18 @@ pub fn diffracted_on_adapter(
             sc.edge_coeff.len()
         ));
     }
+    if !wedges.is_empty() && wedges.len() != sc.edges.len() {
+        return Err(format!(
+            "楔角表与棱表必须一一对应（{} vs {}）",
+            wedges.len(),
+            sc.edges.len()
+        ));
+    }
     let (name, device, queue) = crate::probe::device_for(adapter_index)?;
     if sc.srcs.is_empty() || sc.dsts.is_empty() {
         return Ok((name, Vec::new()));
     }
-    let (b, _) = upload(&device, sc);
+    let (b, _) = upload(&device, sc, wedges, band_hz);
     let mut out = Vec::with_capacity(b.n_pairs);
     for row in run_entry(&device, &queue, &b, "diffract") {
         out.push(DiffractOut {
@@ -501,7 +575,7 @@ pub fn scattered_on_adapter(
     if sc.srcs.is_empty() || sc.dsts.is_empty() {
         return Ok((name, Vec::new()));
     }
-    let (b, _) = upload(&device, sc);
+    let (b, _) = upload(&device, sc, &[], 0.0);
     let mut out = Vec::with_capacity(b.n_pairs);
     for row in run_entry(&device, &queue, &b, "scatter") {
         out.push(ScatterOut {

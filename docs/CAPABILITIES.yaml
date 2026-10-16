@@ -609,7 +609,9 @@ capabilities:
           **GPU 档五条腿全落（M1–M5：直达 / 一次反射 / 绕射 / 散射 / 介质积分）**（见
           `a5_gpu_direct_kernel` / `a5_gpu_reflect_kernel` / `a5_gpu_diffract_kernel` /
           `a5_gpu_scatter_kernel` / `a5_gpu_medium_kernel`；本层已落批处理入口与逐位等价契约，
-          见 `a5_gpu_base`）。卡上仍没有的是**多次反射**（混响尾巴）与**绕射的 Fresnel 积分 / 一般楔角系数**（CPU 侧已落 A9a+A9b）。
+          见 `a5_gpu_base`），且 **M3 的 A9a 刀刃 Fresnel + A9b 一般楔角修正也已上卡**（2026-10-16，
+          见 `a9b_wedge_kernel`；`band_hz ≤ 0` 时退回旧口径、逐位不变）。
+          卡上仍没有的是**多次反射**（混响尾巴）。
           portal 与衍射棱都按文档 §8 的取舍先落"显式图元"；**两半的兜底都已落** —— 衍射棱的
           自动认边见 `a4_auto_edges`，portal 的**体素空洞自动识别**见 `a10_portal_autodetect_landed`
           （2026-10-16）。低频不承诺 / **不做双耳渲染**见文档 §7
@@ -722,7 +724,8 @@ capabilities:
           逐棱取 **Fermat 点**（定次数 **48** 的二分，与 CPU 的 `FERMAT_ITERS` 同值 ⇒ 同样的定次数、
           无早退、逐位可复现）、**只在阴影里**产出（直达通视就整对跳过，不与直达重复计能）、逐对取
           **最强那条**（平局按棱序号取小 ⇒ 确定），输出 `(hit, delay, gain, edge)`；口径
-          `coeff·(1+cosθ)/2/(d₁·d₂)`（**单频带**：频带表与介质衰减还没上卡）。宿主侧把输入收口成
+          `coeff·(1+cosθ)/2/(d₁·d₂)`（**旧口径**；2026-10-16 起按 `band_hz` 可切 A9a/A9b 口径，
+          见 `a9b_wedge_kernel`。仍是**单频带**：频带表与介质衰减还没上卡）。宿主侧把输入收口成
           `acoustic::SceneIn`（`diffract` 这条本来要 7 个形参、撞 args-gate 的软阈值 ⇒ 打成结构体），
           棱表与逐棱系数各一张缓冲（空表补**非零长**的哑缓冲）。
           探针 `crates/vxl-phys-gpu/tests/acoustic_diffract_probe.rs`：一把刀口（屏障的顶棱）——
@@ -877,6 +880,24 @@ capabilities:
           判据 `tests/a9b_wedge.rs` 10 条：`n=2` 恰 `1` / 平壁恰 `0`（内角越界钳）/ **有界 `[0,4]` 且非 `NaN`**
           + 方向性 / **互易**逐位 / 对**独立 KP（Python `f64`）**数值一致 / 端到端 `Ω=0` 与 `None` **逐位相同**
           （含 `Ω=π` 把路径能量**清零**）/ 默认（不给频率）忽略楔角 / 有界 / 只读 + `state_hash`。
+      - id: a9b_wedge_kernel
+        note: >-
+          **A9a/A9b 上卡（2026-10-16）**：`crates/vxl-phys-gpu/src/acoustic.{rs,wgsl}` 的 M3 绕射核
+          从**旧口径** `D(θ) = (1+cosθ)/2` 升到 **A9a 真刀刃 Fresnel × A9b 一般楔角修正**（与 CPU
+          `utd.rs` 同式，**全 f32**）。宿主 `acoustic::upload(.., wedges, band_hz)` 多传一份**逐棱
+          楔角表**（每棱 1 个 `vec4` = `Ω|face0.xyz`；空表补非零长哑缓冲）与**绝对频带**；
+          `λ = max(speed,1e-3)/band_hz` 在宿主算好写进 `Params.lambda`（`Params` 仍是 8 字段 / 32 B：
+          原 `_pad` 换成了 `lambda`）。**两条 lane（按 `band_hz` 切）**：
+          `band_hz ≤ 0` ⇒ `lambda = 0` ⇒ 核内整段不跑 ⇒ **旧口径逐位不变**（`diffracted_on_adapter`
+          保留为薄壳，与 `diffracted_wedge_on_adapter(.., &[], 0.0)` 逐位相同）；`band_hz > 0` ⇒
+          `gain = coeff·knife_gain(ν)·fac/(d₁·d₂)`，`ν = 2√(Δ/λ)`、`fac` = 楔角修正
+          （`Ω ≤ 0` ⇒ `fac = 1` 逐位回刀口；`Ω = π` ⇒ `fac = 0` ⇒ 整对不产出）。
+          探针 `crates/vxl-phys-gpu/tests/acoustic_wedge_probe.rs`（一条测试五段顺序跑，避"一文件两设备"
+          死锁）：参照是**在测试里另写的一份 `f64` + `C/S` 走 Simpson 数值积分**的独立实现
+          （**不能** dev-depend `vxl-phys-acoustics` —— `dag-gate` 禁止后端 crate 依赖领域 crate）——
+          刀刃 `0.0070336973` vs 参照 `0.0070336955`、楔角 `0.02813479` vs `0.028134782`
+          （差 ~`3e-7` = f32 舍入）；另测旧口径**逐位不变**（三处）/ `Ω=π` 不产出 / 楔角表长度不符报错。
+          ⚠️ CI 同样不覆盖（`--exclude vxl-phys-gpu`）。
       - id: a10_portal_autodetect_landed
         note: >-
           **A10「体素空洞自动识别」已落地（2026-10-16）**：`crates/vxl-phys-acoustics/src/portal.rs` ——

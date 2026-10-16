@@ -39,8 +39,10 @@ struct Params {
     n_slabs: u32,
     /// 每段的**定步数**（`0` 按 1 算）—— 定步数、无早退 ⇒ 逐位可复现。
     medium_steps: u32,
-    /// uniform 结构体必须是 16 字节的倍数 ⇒ 补到 32 B（少一个 pad 就是整块错位）。
-    _pad: u32,
+    /// **A9a 波长哨兵**（m）：`≤ 0` ⇒ 绕射退回旧口径 `(1+cosθ)/2`（**逐位不变**）；
+    /// `> 0` ⇒ 用真 Fresnel 刀刃系数 + A9b 楔角修正（宿主按 `c / band_hz` 算好）。
+    /// （这一格原为 pad —— 8 个字段仍是 32 B，uniform 对齐不变。）
+    lambda: f32,
 };
 
 @group(0) @binding(0) var<uniform> P: Params;
@@ -57,6 +59,9 @@ struct Params {
 @group(0) @binding(8) var<storage, read> scatter_coef: array<f32>;
 /// 介质层表：每条 **2 个 `vec4`**（`y_lo|y_hi|c|α_低`、`α_中|α_高|0|0`）。按 `y` 升序、不重叠。
 @group(0) @binding(9) var<storage, read> slabs: array<vec4<f32>>;
+/// **A9b 逐棱楔角**：每条 **1 个 `vec4`**（`Ω|face0.x|face0.y|face0.z`；`Ω` = 楔体内角，弧度）。
+/// 与 `edges` **一一对应**；`Ω ≤ 0`（默认 / `None`）⇒ 该棱按**刀口**算（`fac = 1`）。
+@group(0) @binding(10) var<storage, read> edge_wedge: array<vec4<f32>>;
 
 /// Fermat 二分次数：定次数、无早退 ⇒ 逐位可复现（与 CPU 的 `FERMAT_ITERS` 同值）。
 const FERMAT_ITERS: u32 = 48u;
@@ -311,6 +316,249 @@ fn fermat(a: vec3<f32>, b: vec3<f32>, src: vec3<f32>, dst: vec3<f32>) -> vec3<f3
     return a + dir * (0.5 * (lo + hi));
 }
 
+// ===========================================================================
+// A9a / A9b：真 Fresnel 刀刃系数 + 一般楔角修正（与 CPU `vxl-phys-acoustics::utd` **同口径**）。
+// 全 `f32`；只在 `P.lambda > 0` 时参与（否则退回旧口径 `(1+cosθ)/2`，**逐位不变**）。
+// ===========================================================================
+
+/// 幂级数项数上限（`x < CROSSOVER` 时用不到这么多；防病态入参把循环拉长）。
+const MAX_TERMS: u32 = 4096u;
+/// 渐近级数项数上限（取到最小项为止）。
+const MAX_ASYM: u32 = 64u;
+/// 幂级数 / 渐近的交接点（与 CPU `utd::CROSSOVER` 同值）。
+const CROSSOVER: f32 = 2.5;
+/// A9b 修正因子钳位上界（与 CPU `utd::WEDGE_FACTOR_MAX` 同值）。
+const WEDGE_FACTOR_MAX: f32 = 4.0;
+const PI: f32 = 3.141592653589793;
+const FRAC_PI_4: f32 = 0.7853981633974483;
+
+/// `C/S` 幂级数（`x ≥ 0`；与 CPU `utd::series` 逐项一致）。
+fn fresnel_series(x: f32) -> vec2<f32> {
+    let p = 0.5 * PI;
+    let x2 = x * x;
+    let fac = p * p * x2 * x2;
+    let terms = min(u32(p * x2) + 64u, MAX_TERMS);
+    var base_c = x;
+    var base_s = p * x * x2;
+    var c = 0.0;
+    var s = 0.0;
+    for (var k = 0u; k < terms; k = k + 1u) {
+        let kf = f32(k);
+        c = c + base_c / (4.0 * kf + 1.0);
+        s = s + base_s / (4.0 * kf + 3.0);
+        base_c = base_c * (-fac / ((2.0 * kf + 1.0) * (2.0 * kf + 2.0)));
+        base_s = base_s * (-fac / ((2.0 * kf + 2.0) * (2.0 * kf + 3.0)));
+    }
+    return vec2<f32>(c, s);
+}
+
+/// `C/S` 渐近展开（`x ≥ CROSSOVER`；取到最小项即止）。
+fn fresnel_asym(x: f32) -> vec2<f32> {
+    let u = 1.0 / (PI * x);
+    let t = 1.0 / (PI * x * x);
+    let t2 = t * t;
+    let a2 = 0.5 * PI * x * x;
+    let s2 = sin(a2);
+    let c2 = cos(a2);
+    var a_sum = 0.0;
+    var b_sum = 0.0;
+    var ta = 1.0;
+    var tb = t;
+    var prev = 1e38;
+    var m = 0u;
+    loop {
+        let mag = max(abs(ta), abs(tb));
+        if (mag > prev || m >= MAX_ASYM) {
+            break;
+        }
+        prev = mag;
+        a_sum = a_sum + ta;
+        b_sum = b_sum + tb;
+        let mm = f32(m + 1u);
+        ta = ta * (-(4.0 * mm - 1.0) * (4.0 * mm - 3.0) * t2);
+        tb = tb * (-(4.0 * mm - 1.0) * (4.0 * mm + 1.0) * t2);
+        m = m + 1u;
+    }
+    let a = u * a_sum;
+    let b = u * b_sum;
+    return vec2<f32>(0.5 - (-s2 * a + c2 * b), 0.5 - (c2 * a + s2 * b));
+}
+
+/// Fresnel 积分 `C(x)/S(x)`（奇对称；无递归：取 `|x|` 再按符号翻）。
+fn fresnel_cs(x: f32) -> vec2<f32> {
+    let ax = abs(x);
+    var r = vec2<f32>(0.0, 0.0);
+    if (ax >= CROSSOVER) {
+        r = fresnel_asym(ax);
+    } else if (ax > 0.0) {
+        r = fresnel_series(ax);
+    }
+    return select(-r, r, x >= 0.0);
+}
+
+/// `ν = 2·√(Δ/λ)`（`Δ` = 多余路程）；`λ ≤ 0` 或 `Δ ≤ 0` ⇒ `0`。
+fn fresnel_nu(excess: f32, lambda: f32) -> f32 {
+    if (lambda <= 0.0) {
+        return 0.0;
+    }
+    return 2.0 * sqrt(max(excess, 0.0) / lambda);
+}
+
+/// 刀刃（半平面）绕射的**能量比** `|E_d/E₀|²`（`ν = 0` ⇒ `1/4`，恰好 −6.02 dB）。
+fn knife_gain(nu: f32) -> f32 {
+    let cs = fresnel_cs(nu);
+    let a = 0.5 - cs.x;
+    let b = 0.5 - cs.y;
+    return 0.5 * (a * a + b * b);
+}
+
+/// `cot`；`sin → 0` 时给**有限大数**（`±1e12`）而非 `±∞`（与 CPU 同款）。
+fn wedge_cot(x: f32) -> f32 {
+    let s = sin(x);
+    if (abs(s) < 1e-12) {
+        if (cos(x) >= 0.0) {
+            return 1e12;
+        }
+        return -1e12;
+    }
+    return cos(x) / s;
+}
+
+/// 平面内极角（`v` 相对基准 `ax`、正向 `bx`），落在 `[0, 2π)`。
+fn angle_in_plane(v: vec3<f32>, ax: vec3<f32>, bx: vec3<f32>) -> f32 {
+    let t = atan2(dot3(v, bx), dot3(v, ax));
+    if (t < 0.0) {
+        return t + 2.0 * PI;
+    }
+    return t;
+}
+
+/// `(m, q)`：`m = max(|re|,|im|)`、`|D| = m·q`（缩放幅值，乘/除不溢出）。
+fn mag_scaled(re: f32, im: f32) -> vec2<f32> {
+    let m = max(abs(re), abs(im));
+    if (m <= 0.0) {
+        return vec2<f32>(0.0, 0.0);
+    }
+    let nr = re / m;
+    let ni = im / m;
+    return vec2<f32>(m, sqrt(nr * nr + ni * ni));
+}
+
+/// 过渡函数 `F(χ)`（`χ ≤ 0 ⇒ 0`），用 `C/S` 闭环求值。
+fn transition(chi: f32) -> vec2<f32> {
+    if (chi <= 0.0) {
+        return vec2<f32>(0.0, 0.0);
+    }
+    let u = sqrt(2.0 * chi / PI);
+    let cs = fresnel_cs(u);
+    let q = sqrt(0.5 * PI);
+    let ire = q * (0.5 - cs.x);
+    let iim = -q * (0.5 - cs.y);
+    let ex = cos(chi);
+    let ey = sin(chi);
+    let r = sqrt(chi);
+    let re = 2.0 * r * (ex * ire - ey * iim);
+    let im = 2.0 * r * (ex * iim + ey * ire);
+    return vec2<f32>(-im, re);
+}
+
+/// `a±(β) = 2·cos²((2πn·N∓ − β)/2)`，`N∓ = round((β ∓ π)/(2πn))`（`plus` ⇒ `(β+π)` 那支）。
+fn apm(beta: f32, n: f32, plus: bool) -> f32 {
+    var num = beta - PI;
+    if (plus) {
+        num = beta + PI;
+    }
+    let nn = round(num / (2.0 * n * PI));
+    let t = (2.0 * n * PI * nn - beta) / 2.0;
+    return 2.0 * t * t;
+}
+
+/// `T(β) = cot((π+β)/(2n))·F(kL·a⁺) + cot((π−β)/(2n))·F(kL·a⁻)`（复式两项和）。
+fn utd_term(beta: f32, n: f32, k: f32, l: f32) -> vec2<f32> {
+    let a = transition(k * l * apm(beta, n, true));
+    let b = transition(k * l * apm(beta, n, false));
+    let c1 = wedge_cot((PI + beta) / (2.0 * n));
+    let c2 = wedge_cot((PI - beta) / (2.0 * n));
+    return vec2<f32>(c1 * a.x + c2 * b.x, c1 * a.y + c2 * b.y);
+}
+
+/// KP **软边界**绕射系数 `D`（实部/虚部）。
+fn utd_soft(n: f32, phi: f32, phip: f32, k: f32, l: f32) -> vec2<f32> {
+    let pre = 1.0 / (2.0 * n * sqrt(max(2.0 * PI * k, 1e-12)));
+    let pr = -cos(FRAC_PI_4) * pre;
+    let pim = sin(FRAC_PI_4) * pre;
+    let a = utd_term(phi - phip, n, k, l);
+    let b = utd_term(phi + phip, n, k, l);
+    let tr = a.x - b.x;
+    let ti = a.y - b.y;
+    return vec2<f32>(pr * tr - pim * ti, pr * ti + pim * tr);
+}
+
+/// A9b 楔角修正因子 `fac ∈ [0, WEDGE_FACTOR_MAX]`（`n ≥ 2` ⇒ 恒 `1`；`n ≤ 1` ⇒ `0`）。
+fn wedge_factor(n: f32, phi: f32, phip: f32, k: f32, l: f32) -> f32 {
+    if (n >= 2.0) {
+        return 1.0;
+    }
+    if (n <= 1.0) {
+        return 0.0;
+    }
+    let sn = utd_soft(n, phi, phip, k, l);
+    let s2 = utd_soft(2.0, phi, phip, k, l);
+    let dn = mag_scaled(sn.x, sn.y);
+    let d2 = mag_scaled(s2.x, s2.y);
+    if (d2.x <= 0.0) {
+        if (dn.x > 0.0) {
+            return WEDGE_FACTOR_MAX;
+        }
+        return 0.0;
+    }
+    let tt = (dn.x / d2.x) * (dn.y / d2.y);
+    let fac = min(tt * tt, WEDGE_FACTOR_MAX);
+    if (fac != fac) {
+        return WEDGE_FACTOR_MAX;
+    }
+    return fac;
+}
+
+/// 楔角几何框架（`φ`、`φ'`、`n`、`l`）；退化时 `ok = false`（调用侧退回刀口）。
+struct WedgeFrame {
+    phi: f32,
+    phip: f32,
+    n: f32,
+    l: f32,
+    ok: bool,
+};
+
+/// 从棱点 `apex`、棱方向 `edge_dir`（单位）、声源/听者构造（退化 ⇒ `ok = false`）。
+fn build_frame(omega_in: f32, face0: vec3<f32>, apex: vec3<f32>, edge_dir: vec3<f32>, src: vec3<f32>, dst: vec3<f32>) -> WedgeFrame {
+    var f = WedgeFrame(0.0, 0.0, 0.0, 0.0, false);
+    let proj = face0 - edge_dir * dot3(face0, edge_dir);
+    let ax = proj * (1.0 / len3(proj));
+    if (dot3(ax, ax) < 0.5) {
+        return f;
+    }
+    let bx = cross3(edge_dir, ax);
+    let vi = src - apex;
+    let vr = dst - apex;
+    if (dot3(vi, vi) < 1e-6 || dot3(vr, vr) < 1e-6) {
+        return f;
+    }
+    let ui = vi - edge_dir * dot3(vi, edge_dir);
+    let ur = vr - edge_dir * dot3(vr, edge_dir);
+    if (dot3(ui, ui) < 1e-6 || dot3(ur, ur) < 1e-6) {
+        return f;
+    }
+    let d1 = len3(vi);
+    let d2 = len3(vr);
+    let omega = clamp(omega_in, 0.0, PI);
+    f.phi = angle_in_plane(ur, ax, bx);
+    f.phip = angle_in_plane(ui, ax, bx);
+    f.n = 2.0 - omega / PI;
+    f.l = d1 * d2 / (d1 + d2);
+    f.ok = true;
+    return f;
+}
+
 @compute @workgroup_size(64)
 fn diffract(@builtin(global_invocation_id) gid: vec3<u32>) {
     let i = gid.x;
@@ -342,7 +590,24 @@ fn diffract(@builtin(global_invocation_id) gid: vec3<u32>) {
             continue;
         }
         let cos_t = clamp(dot3(v1, v2) / (d1 * d2), -1.0, 1.0);
-        let dir_factor = 0.5 * (1.0 + cos_t);
+        var dir_factor = 0.5 * (1.0 + cos_t);
+        if (P.lambda > 0.0) {
+            // 旧口径是**工程近似** `(1+cosθ)/2`；给了波长就换真刀刃 Fresnel 系数，
+            // 再乘逐棱楔角修正（`Ω ≤ 0` / 退化 ⇒ `fac = 1` ⇒ 退回纯刀口）。
+            let excess = (d1 + d2) - len3(l - s);
+            var fac = 1.0;
+            let om = edge_wedge[e].x;
+            let seg = b - a;
+            let elen = len3(seg);
+            if (om > 0.0 && elen > 1e-6) {
+                let k = 2.0 * PI / P.lambda;
+                let fr = build_frame(om, edge_wedge[e].yzw, p, seg * (1.0 / elen), s, l);
+                if (fr.ok) {
+                    fac = wedge_factor(fr.n, fr.phi, fr.phip, k, fr.l);
+                }
+            }
+            dir_factor = knife_gain(fresnel_nu(excess, P.lambda)) * fac;
+        }
         let g = edge_coeff[e] * dir_factor / (d1 * d2);
         if (g > best_gain) {
             best_gain = g;
