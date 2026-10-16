@@ -159,14 +159,17 @@ e ∈ [0,1] 每材质对（组合律可配，默认 max），附**恢复速度�
   自由表面上再叠一层排斥（本仓单位下照抄会炸），故默认关（`k = 0`）。
   判据 = `tests/pbf_incompressibility_probe.rs`（与 WCSPH 同场对拍内部过密）；
 - **CPU FLIP**（P2G/压力投影/G2P，Müller 2009 式混合）：与 CPU PBF 同接口的"网格腿"
-  （`FluidFamily::CpuFlip`）——粒子→网格三线性散射（P2G）→ **交错面**散度 + Jacobi 压力
-  Poisson（`flip_pressure_iterations`，默认 **80**）→ 面速度投影 → 网格→粒子（G2P）
+  （`FluidFamily::CpuFlip`）——粒子→网格三线性散射（P2G）→ **交错面**散度 + 压力 Poisson
+  （默认 **CG** 共轭梯度 + 对角预处理，`flip_pressure_cg`/`flip_pressure_iterations`；A/B 档
+  是固定次数 Jacobi，全部在 `flip/solve.rs`）→ 面速度投影 → 网格→粒子（G2P）
   `u = θ·u_FLIP + (1−θ)·u_PIC`（`flip_ratio` 默认 **0.95**；θ=0 即纯 PIC）。网格 = 与
   CPU 档同一个 AABB + `MARGIN_CELLS` 空层（自由表面 Dirichlet）+ 固体 SDF 探针（无通量面
-  置 0）；Jacobi 全量读旧写新 ⇒ 逐位可复现。⚠️ 口径：`densities()` 对本族**只是被动读数**
-  （求解器不消费 ρ，过密读数结构性高于 WCSPH，与迭代数无关）；静水支撑受 Jacobi 预算限制
-  而**收敛单调**（实测 `height_keep`：×20 0.48 → ×80 0.85 → ×160 0.93）；粒子级重叠
-  目前无约束（下一个改法 = APIC 仿射矩阵或最小距离约束）。判据 =
+  置 0）；两种求解器的向量运算全走固定索引序 ⇒ 逐位可复现。⚠️ 口径：`densities()` 对本族
+  **只是被动读数**（求解器不消费 ρ，过密读数结构性高于 WCSPH，与迭代数无关）；静水支撑实测
+  `height_keep` Jacobi 0.30/0.48/0.71/0.85/0.93/1.02（×10…×320）vs **CG 20 次即 1.037 并停手**
+  （20/40/80/160/320 逐位相同）⇒ 换 CG 后"预算限制解"这一半已结；粒子级重叠仍无约束
+  （下一个改法 = APIC 仿射矩阵；**朴素最小距离约束已实测排除**：位置级 κ 扫描把过密越推越大、
+  速度回填直接炸到 `ke ~2e4`）。判据 =
   `tests/flip_incompressibility_probe.rs`（静水柱高度保持 + 净沉降 + FLIP≫PIC 低耗散 +
   逐位可复现）；
 - **GPU PBF**（同上算法，1000 万粒目标档）：张力抑制同上一口径（一边倒 `λ ≤ 0`）；

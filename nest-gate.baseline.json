@@ -3,6 +3,7 @@
   "crates/vxl-phys-broad/src/grid_phase.rs": 1,
   "crates/vxl-phys-fluid/src/flip.rs": 1,
   "crates/vxl-phys-fluid/src/flip/grid.rs": 1,
+  "crates/vxl-phys-fluid/src/flip/solve.rs": 1,
   "crates/vxl-phys-fluid/src/fluid_density.rs": 2,
   "crates/vxl-phys-fluid/src/fluid_force.rs": 1,
   "crates/vxl-phys-gpu/examples/gpu_density_probe.rs": 1,

@@ -144,6 +144,7 @@ fn run(
     family: FluidFamily,
     pressure_iters: u32,
     flip_ratio: f32,
+    cg: bool,
     ticks: usize,
     diag: bool,
 ) -> Metrics {
@@ -154,6 +155,7 @@ fn run(
         family,
         smoothing_radius: h,
         flip_pressure_iterations: pressure_iters,
+        flip_pressure_cg: cg,
         flip_ratio,
         ..FluidConfig::default()
     };
@@ -259,18 +261,22 @@ fn print_table(ff: f32, rows: &[(&str, &Metrics)]) {
 
 #[test]
 fn flip_holds_hydrostatic_column_and_low_dissipation() {
-    let sph = run(FluidFamily::CpuSph, 0, 0.0, 60, false);
-    let coarse = run(FluidFamily::CpuFlip, 20, 0.95, 60, false);
-    let base = run(FluidFamily::CpuFlip, 80, 0.95, 60, false);
-    let fine = run(FluidFamily::CpuFlip, 160, 0.95, 60, false);
-    let pic = run(FluidFamily::CpuFlip, 80, 0.0, 60, false);
+    let sph = run(FluidFamily::CpuSph, 0, 0.0, false, 60, false);
+    let coarse = run(FluidFamily::CpuFlip, 20, 0.95, false, 60, false);
+    let base = run(FluidFamily::CpuFlip, 80, 0.95, false, 60, false);
+    let fine = run(FluidFamily::CpuFlip, 160, 0.95, false, 60, false);
+    let pic = run(FluidFamily::CpuFlip, 80, 0.0, false, 60, false);
+    let cg20 = run(FluidFamily::CpuFlip, 20, 0.95, true, 60, false);
+    let cg80 = run(FluidFamily::CpuFlip, 80, 0.95, true, 60, false);
     let ff = free_fall(1.0);
-    let rows: [(&str, &Metrics); 5] = [
+    let rows: [(&str, &Metrics); 7] = [
         ("wcsph(读)", &sph),
         ("flip×20", &coarse),
         ("flip×80", &base),
         ("flip×160", &fine),
         ("flipPIC×80", &pic),
+        ("flipCG×20", &cg20),
+        ("flipCG×80", &cg80),
     ];
     print_table(ff, &rows);
     // 非空样本守卫：`over_in` 以 `f32::MIN` 起步（哨兵恒小于真值）⇒ 样本为 0 时
@@ -346,13 +352,67 @@ fn flip_holds_hydrostatic_column_and_low_dissipation() {
         base.ke,
         pic.ke
     );
+    assert_cg_solver_wins(&cg20, &cg80, &base, &fine, &pic);
+}
+
+/// CG 档的求解器面判据（从主测试里拆出来，避免主测试函数撞 120 行阈值）。
+/// 四条：①静水柱被解到 1 附近（0.98~1.10）；②20 次 CG ≥ 160 次 Jacobi
+/// （`diag_pressure_iteration_convergence` 有整张收敛表）；③同预算下净沉降更小；
+/// ④解得更准 ⇒ 数值耗散更小：动能不低于 Jacobi、且 ≫ PIC。
+fn assert_cg_solver_wins(
+    cg20: &Metrics,
+    cg80: &Metrics,
+    base: &Metrics,
+    fine: &Metrics,
+    pic: &Metrics,
+) {
+    // 判据 ① 的**求解器**面（默认档现在走 CG，见 `config.flip_pressure_cg`）：静水柱的离散解
+    // `p = ρg(H−y)` 必须被真解出来 ⇒ `height_keep` 贴 1（实测 1.0367；上界留给"自由面单元中心
+    // 口径"的那点抬升，实测 3.7%）。这一条同时钉住"投影不再只是部分抵消重力"。
+    assert!(
+        (0.98..=1.10).contains(&cg80.height_keep),
+        "CG 档没把静水柱解到 1 附近：height_keep {}（期望 0.98~1.10）",
+        cg80.height_keep
+    );
+    // 判据 ① 的**预算**面：CG 的迭代数按 √κ 走、Jacobi 按 N² 走 ⇒ 20 次 CG 必须已经超过
+    // 160 次 Jacobi（实测 1.0380 vs 0.9295；`diag_pressure_iteration_convergence` 里有整张
+    // 收敛表：Jacobi 要到 ~320 次才追平 20 次 CG）。这条把"换求解器"的收益钉成活断言。
+    assert!(
+        cg20.height_keep >= fine.height_keep,
+        "CG×20 没超过 Jacobi×160（{} vs {}）⇒ 求解器没吃到收敛率红利",
+        cg20.height_keep,
+        fine.height_keep
+    );
+    // 判据 ② 的求解器面：同预算（80）下 CG 的净沉降必须优于 Jacobi（实测 0.0321 vs 0.0592）。
+    assert!(
+        cg80.sink < base.sink,
+        "同预算下 CG 没比 Jacobi 沉降更小（{} vs {}）",
+        cg80.sink,
+        base.sink
+    );
+    // 判据 ③ 的求解器面：CG 解得更准 ⇒ 数值耗散更小 ⇒ 末态动能不许比 Jacobi 低
+    // （实测 17.2 vs 15.5；这条钉住"CG 不是拿来抹平运动的"）。
+    assert!(
+        cg80.ke > base.ke,
+        "CG 档末态动能低于 Jacobi（{} vs {}）⇒ 求解器换错了或 CG 在过阻尼",
+        cg80.ke,
+        base.ke
+    );
+    // 低耗散判据在**默认档（CG）**下也要成立（同 PIC 比，实测 17.2 vs 0.85）。
+    assert!(
+        cg80.ke > pic.ke,
+        "CG 档的末态动能未高于 PIC（{} vs {}）",
+        cg80.ke,
+        pic.ke
+    );
 }
 
 #[test]
 fn flip_is_bitwise_reproducible() {
-    // 确定性契约（`adr/0004`）：Jacobi（全量读旧、写新）+ 固定遍历序 ⇒ 同输入两跑逐位一致。
-    let a = run(FluidFamily::CpuFlip, 80, 0.95, 12, false);
-    let b = run(FluidFamily::CpuFlip, 80, 0.95, 12, false);
+    // 确定性契约（`adr/0004`）：默认档 = **CG**（定序点积/逐元素归约，无重排、无原子）+ 固定
+    // 遍历序 ⇒ 同输入两跑逐位一致（A/B 档的 Jacobi 是"全量读旧、写新"，同样定序）。
+    let a = run(FluidFamily::CpuFlip, 80, 0.95, true, 12, false);
+    let b = run(FluidFamily::CpuFlip, 80, 0.95, true, 12, false);
     assert_eq!(a.digest, b.digest, "FLIP 两跑不逐位一致");
     assert!(
         a.reach > 0.0 && a.vmax > 0.0,
@@ -369,11 +429,11 @@ fn flip_is_bitwise_reproducible() {
 #[ignore]
 fn diag_over_density_layout() {
     eprintln!("== wcsph ==");
-    let _ = run(FluidFamily::CpuSph, 0, 0.0, 60, true);
+    let _ = run(FluidFamily::CpuSph, 0, 0.0, false, 60, true);
     eprintln!("== flip×40 θ=0.95 ==");
-    let _ = run(FluidFamily::CpuFlip, 40, 0.95, 60, true);
+    let _ = run(FluidFamily::CpuFlip, 40, 0.95, false, 60, true);
     eprintln!("== flip×80 θ=0.95 ==");
-    let _ = run(FluidFamily::CpuFlip, 80, 0.95, 60, true);
+    let _ = run(FluidFamily::CpuFlip, 80, 0.95, false, 60, true);
 }
 
 /// `#[ignore]` 诊断（不进 CI）：FLIP 的**压力迭代收敛趋势**——静水支撑到底是受限于求解器
@@ -381,13 +441,20 @@ fn diag_over_density_layout() {
 #[test]
 #[ignore]
 fn diag_pressure_iteration_convergence() {
-    eprintln!("迭代数  over       over_in    sink       height_keep  ke");
+    eprintln!("求解器  迭代数  over       over_in    sink       height_keep  ke");
     for it in [10u32, 20, 40, 80, 160, 320] {
-        let m = run(FluidFamily::CpuFlip, it, 0.95, 60, false);
-        eprintln!(
-            "{it:6}  {:10.3e} {:10.3e} {:10.3e} {:11.4} {:10.3e}",
-            m.over, m.over_in, m.sink, m.height_keep, m.ke
-        );
+        for cg in [false, true] {
+            let m = run(FluidFamily::CpuFlip, it, 0.95, cg, 60, false);
+            eprintln!(
+                "{} {it:6}  {:10.3e} {:10.3e} {:10.3e} {:11.4} {:10.3e}",
+                if cg { "cg    " } else { "jacobi" },
+                m.over,
+                m.over_in,
+                m.sink,
+                m.height_keep,
+                m.ke
+            );
+        }
     }
 }
 

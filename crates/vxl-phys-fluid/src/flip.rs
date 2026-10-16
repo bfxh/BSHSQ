@@ -19,8 +19,9 @@
 //!    **固优先**（穿透进固体的粒子单元仍算固）。
 //! 5. P2G：粒子速度按三线性散射到三套交错面（u/v/w），逐面权重归一；无权重面沿轴外推
 //!    （自由表面外侧）；**固体面与网格外边界置无通量（0）**——网格外边界当闭合箱（§BC）。
-//! 6. 散度 + **Jacobi** 压力 Poisson（`cfg.flip_pressure_iterations` 次）：空单元 `p = 0`
-//!    （Dirichlet）、固体面 Neumann（不入模板）、固体单元不参与。
+//! 6. 散度 + 压力 Poisson（求解器在 `flip/solve.rs`）：默认 **CG**（共轭梯度 + 对角预处理，
+//!    `cfg.flip_pressure_cg`）、A/B 档是固定次数 **Jacobi**；`cfg.flip_pressure_iterations`
+//!    是迭代上限。空单元 `p = 0`（Dirichlet）、固体面 Neumann（不入模板）、固体单元不参与。
 //! 7. 面速度 `u ← u − (Δt/ρ)·∇p`（只施加在"至少一侧是流体"的非固体面上）。
 //! 8. G2P：三线性采样投影后的面速度，FLIP 混合 `θ = cfg.flip_ratio`（θ = 1 纯 FLIP、
 //!    θ = 0 纯 PIC）；CFL 限速后推进位置；末了 `boundary_pass`（复用统一提供者通道 ⇒
@@ -37,17 +38,26 @@
 //!
 //! ## 确定性（§5 契约）
 //!
-//! 遍历序 = 单元索引序（i,j,k 固定）与粒子索引序；压力求解用 **Jacobi**（全量读旧、写新，
-//! 与遍历序无关）而非 Gauss-Seidel；无原子、无浮点归约重排 ⇒ 同输入两跑**逐位一致**
-//! （判据 `tests/flip_incompressibility_probe.rs`）。
+//! 遍历序 = 单元索引序（i,j,k 固定）与粒子索引序；压力求解默认 **CG**（点积/逐元素更新全走
+//! 固定索引序，无重排、无原子；A/B 档的 Jacobi 是全量读旧写新，也与遍历序无关），不用
+//! Gauss-Seidel；无浮点归约重排 ⇒ 同输入两跑**逐位一致**（判据 `tests/flip_incompressibility_probe.rs`
+//! 的 `flip_is_bitwise_reproducible`，跑的就是默认档）。
 //!
 //! ## 验证（`tests/flip_incompressibility_probe.rs`，水槽静水池 60 tick × 4 子步）
 //!
 //! ① **静水支撑**：判别量 = 末态柱高 / 起步柱高（`height_keep`）。投影若形同虚设，柱子会被
-//! 自身重力压成饼 ⇒ 该比值先塌。实测按迭代数 10/20/40/**80**/160/320 ⇒
-//! `0.30 / 0.48 / 0.71 / 0.85 / 0.93 / 1.02` ⇒ **单调收敛、无平台、320 次回到 1.0**：
-//! 这同时说明**离散公式本身是对的**（`p = ρg(H−y)` 是该 Poisson 系统在"顶面 Dirichlet、
-//! 底面 Neumann"下的精确解），只是 Jacobi 的迭代预算限制了它。
+//! 自身重力压成饼 ⇒ 该比值先塌。实测（同场 60 tick，**两种求解器**）：
+//!
+//! | 迭代数 | 10 | 20 | 40 | 80 | 160 | 320 |
+//! |---|---|---|---|---|---|---|
+//! | Jacobi | 0.299 | 0.482 | 0.712 | 0.854 | 0.930 | 1.016 |
+//! | **CG（默认）** | 0.894 | **1.038** | 1.037 | 1.037 | 1.037 | 1.037 |
+//!
+//! ⇒ 三件事：**(a)** 静水柱的离散解确实存在（`p = ρg(H−y)` 是"顶面 Dirichlet、底面 Neumann"
+//! 下该 Poisson 系统的精确解）；**(b)** Jacobi 单调逼近但按 ~`N²` 次爬（320 次才追到 CG 的
+//! 20 次）；**(c)** CG 在 **20 次就满足相对残差判据并自行停手**——20/40/80/160/320 五档的
+//! 五个读数**逐位相同**，所以迭代上限对它不再是成本项。`height_keep` 略高于 1（1.037）是
+//! 自由面单元中心口径的 3.7% 抬升，不是守恒性问题。
 //! ② 同判据下的**净沉降**（池内质心 y 对比自由落体 `½gT² = 4.91 m`）：80 次档 ≈ 0.059 m（1.2%）。
 //! ③ **低耗散**（本族立身之本）：同场景同迭代，θ = 0.95 的末态 `Σ|v|²` ≈ 17.4 vs 纯 PIC（θ = 0）
 //! 的 2.1 ⇒ 混合比确实在起作用（若桥接项误写成 PIC，这条先红）。
@@ -66,10 +76,11 @@
 //!    `PbfScratch` 是同一笔登记债务；本档先要正确性与可测性。把压力场跨子步**热启动**能
 //!    一次解决"简化 2"的迭代预算问题（稳态下 `p` 几乎不变），但那需要一份**活过子步**的缓冲；
 //!    现在每子步现建 ⇒ 只能从零起算。**下一刀首选**。
-//! 2. **压力求解是固定次数的 Jacobi**，不是多重网格/预条件 ⇒ 静水柱只**部分**抵消重力
-//!    （Jacobi 在 N 格高柱上要 ~N² 次才收敛；见上"验证①"的实测收敛表）。默认
-//!    `flip_pressure_iterations = 80` 是"水线掉幅 ≤ 15%"与"求解成本线性"的折中。
-//!    换 **CG / 竖直方向线隐式（Thomas）/ 多重网格**是下一刀（`height_keep` 已可直接当验收量）。
+//! 2. **压力求解**：默认已是 **CG**（对角预处理，`flip/solve.rs`）⇒ 静水柱被**真解出来**
+//!    （验证①：20 次即 1.037 并停手），固定次数 Jacobi 只作为 A/B 档保留
+//!    （`flip_pressure_cg = false`；它按 ~`N²` 次爬，是"预算限制解"的历史读数）。
+//!    **收敛率这一半已结**：剩下的只是更细的预条件/多重网格（当前 20 次到顶 ⇒ 优先级低）
+//!    与把压力场跨子步**热启动**（= 简化 1 的那份"活过子步"的缓冲，能省掉每子步从零收敛）。
 //! 3. **刚体反作用**：本档沿用 `boundary_pass` 的 2b 边界粒子账（`bforce`/`breact`），
 //!    **没有**把网格的固体面压力积分成对刚体的反作用 ⇒ 网格的固体 BC 是"看不见的静止墙"。
 //!    流体↔刚体的双向力请走 2b 边界粒子档（`set_boundary_particles`），登记为下一刀。
@@ -83,6 +94,7 @@ use crate::{FluidSystem, ProviderColliders, Vec3};
 // 网格层（建网格/分类/索引/三线性模板）拆在同名子模块里：`flip.rs` 一度 837 行、超 `god_gate`
 // 的 800 行硬线；拆开后两层各自远在限内，上面那整段口径说明也不必为了行数砍掉。
 mod grid;
+mod solve;
 
 use self::grid::{cell_axis, weight_of};
 
@@ -125,8 +137,13 @@ pub(crate) struct FlipScratch {
     v0: Vec<f32>,
     w0: Vec<f32>,
     p: Vec<f32>,
+    /// Jacobi 的写新缓冲 / CG 的 `z = M^-1 r`（两个求解器互斥 => 复用一个）。
     p_tmp: Vec<f32>,
     div: Vec<f32>,
+    /// CG 工作向量（解 `x` 就是 `p`）：残差 / 方向 / `A*d`。
+    cg_r: Vec<f32>,
+    cg_d: Vec<f32>,
+    cg_q: Vec<f32>,
 }
 
 impl FlipScratch {
@@ -246,84 +263,6 @@ impl FlipScratch {
                     if l == CLASS_SOLID || r == CLASS_SOLID {
                         self.w[idx] = 0.0;
                     }
-                }
-            }
-        }
-    }
-
-    /// 散度 + Jacobi 压力 Poisson：`Σ(p_nb − p_c) = (ρ/Δt)·cell²·div`，
-    /// 空单元 `p = 0`（Dirichlet）、固体面不入模板（Neumann）。
-    fn solve_pressure(&mut self, sys: &FluidSystem, dt: f32) {
-        let cell = self.cell;
-        let alpha = sys.cfg.rest_density / dt * cell * cell;
-        let (nx, ny, nz) = (self.dims[0], self.dims[1], self.dims[2]);
-        for i in 0..nx {
-            for j in 0..ny {
-                for k in 0..nz {
-                    let c = self.cell_idx(i, j, k);
-                    if self.class[c] != CLASS_FLUID {
-                        self.div[c] = 0.0;
-                        continue;
-                    }
-                    let d = (self.u[self.u_idx(i + 1, j, k)] - self.u[self.u_idx(i, j, k)])
-                        + (self.v[self.v_idx(i, j + 1, k)] - self.v[self.v_idx(i, j, k)])
-                        + (self.w[self.w_idx(i, j, k + 1)] - self.w[self.w_idx(i, j, k)]);
-                    self.div[c] = d / cell;
-                }
-            }
-        }
-        self.p.clear();
-        self.p.resize(self.n_cells, 0.0);
-        let iters = sys.cfg.flip_pressure_iterations;
-        for _ in 0..iters {
-            for i in 0..nx {
-                for j in 0..ny {
-                    for k in 0..nz {
-                        let c = self.cell_idx(i, j, k);
-                        if self.class[c] != CLASS_FLUID {
-                            continue;
-                        }
-                        // 六个邻居；越界（网格外边界）与固体同 ⇒ 无通量（不入模板）。
-                        let mut ap = 0.0f32;
-                        let mut sum = 0.0f32;
-                        let nbs = [
-                            (i.checked_sub(1).unwrap_or(usize::MAX), j, k),
-                            (i + 1, j, k),
-                            (i, j.checked_sub(1).unwrap_or(usize::MAX), k),
-                            (i, j + 1, k),
-                            (i, j, k.checked_sub(1).unwrap_or(usize::MAX)),
-                            (i, j, k + 1),
-                        ];
-                        for &(ni, nj, nk) in &nbs {
-                            if ni >= nx || nj >= ny || nk >= nz {
-                                continue;
-                            }
-                            let cn = self.cell_idx(ni, nj, nk);
-                            match self.class[cn] {
-                                // 固体：Neumann（不入模板）。
-                                CLASS_SOLID => {}
-                                // 流体：Dirichlet（读旧压力）。
-                                CLASS_FLUID => {
-                                    ap += 1.0;
-                                    sum += self.p[cn];
-                                }
-                                // 空：Dirichlet 0（不进 sum）。
-                                _ => {
-                                    ap += 1.0;
-                                }
-                            }
-                        }
-                        self.p_tmp[c] = if ap > 0.0 {
-                            (sum - alpha * self.div[c]) / ap
-                        } else {
-                            0.0
-                        };
-                    }
-                }
-            }
-            for c in 0..self.n_cells {
-                if self.class[c] == CLASS_FLUID {
-                    self.p[c] = self.p_tmp[c];
                 }
             }
         }
@@ -503,7 +442,7 @@ pub(crate) fn substep(sys: &mut FluidSystem, dt: f32, providers: &dyn ProviderCo
     sc.p2g(sys);
     sc.normalize_and_bc();
     sys.phase_us[3] += vxl_phys_core::probe::us(t);
-    // ⑥⑦ 散度 + Jacobi 压力 + 面投影。
+    // ⑥⑦ 散度 + 压力（默认 CG，`cfg.flip_pressure_cg`）+ 面投影。
     let t = vxl_phys_core::probe::start();
     sc.solve_pressure(sys, dt);
     sc.project_faces(sys, dt);

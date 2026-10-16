@@ -62,14 +62,25 @@ pub struct FluidConfig {
     /// **FLIP 档消费**：FLIP/PIC 混合比 θ（θ = 1 纯 FLIP、θ = 0 纯 PIC；见 `flip` 模块）。
     /// `CpuSph`/`CpuPbf` 档下本字段不影响任何结果。
     pub flip_ratio: f32,
-    /// **FLIP 档消费**：压力 Poisson 的 **Jacobi** 迭代次数（固定次数、无预条件 ⇒ 静水柱只
-    /// **部分**抵消重力，见 `flip` 模块头"已知简化 2"）。`CpuSph`/`CpuPbf` 档下无影响。
+    /// **FLIP 档消费**：压力 Poisson 的迭代**上限**。默认 **80**（`solve_cg` 与 `solve_jacobi`
+    /// 共用这一上限，见 `flip` 模块头"已知简化 2"）。`CpuSph`/`CpuPbf` 档下无影响。
     ///
-    /// 默认 **80** 是实测折中（`tests/flip_incompressibility_probe.rs`，水槽静水池 60 tick，
-    /// 判别量 = 末态柱高 / 起步柱高 `height_keep`）：迭代 10/20/40/80/160/320 ⇒
-    /// `0.30/0.48/0.71/0.85/0.93/1.02`。40 档水线要掉 29%（肉眼可见），80 档 15% 以内；
-    /// 求解成本与次数**线性**，故不取 160。换 CG/线隐式/多重网格是本条的下一刀。
+    /// 默认 80 是实测折中（`tests/flip_incompressibility_probe.rs`，水槽静水池 60 tick，判别量
+    /// = 末态柱高 / 起步柱高 `height_keep`）。**关键差别**在谁在用这个预算：
+    /// - **CG（默认）**：20 次就满足 `CG_RTOL` 并**自行停手** —— 实测 20/40/80/160/320 档逐位
+    ///   相同（`height_keep` 1.0367、净沉降 3.21e-2）⇒ 上限对它是"保险丝"而非成本。
+    /// - **Jacobi（A/B）**：永远用满，且 N 格高柱上要 ~N² 次才收敛 ⇒ 迭代 10/20/40/80/160/320
+    ///   ⇒ `0.30/0.48/0.71/0.85/0.93/1.02`（40 档水线掉 29%、80 档 15% 以内）。
+    ///
+    /// 更细的预条件/多重网格仍是下一刀（当前收敛率已不是瓶颈，见 `flip/solve.rs` 的 CG 头注）。
     pub flip_pressure_iterations: u32,
+    /// **FLIP 档消费**：压力 Poisson 的**求解器**选择——`true`（默认）= **CG**（共轭梯度 +
+    /// 对角预处理，见 `flip::solve_cg`）、`false` = 固定次数 **Jacobi** 扫（A/B 与复现实验用）。
+    ///
+    /// 两个开关是**乘法**关系：`flip_pressure_cg` 选方法，`flip_pressure_iterations` 是**迭代
+    /// 上限**（CG 通常远早于此就满足 `CG_RTOL` 的相对残差 => 上限不常咬住；Jacobi 则永远用满）。
+    /// `CpuSph`/`CpuPbf` 档下无影响。
+    pub flip_pressure_cg: bool,
 }
 
 impl Default for FluidConfig {
@@ -93,6 +104,7 @@ impl Default for FluidConfig {
             dynamic_viscosity: 0.0,
             flip_ratio: 0.95,
             flip_pressure_iterations: 80,
+            flip_pressure_cg: true,
         }
     }
 }

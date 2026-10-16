@@ -35,6 +35,9 @@ impl FlipScratch {
             p: Vec::new(),
             p_tmp: Vec::new(),
             div: Vec::new(),
+            cg_r: Vec::new(),
+            cg_d: Vec::new(),
+            cg_q: Vec::new(),
         }
     }
 
