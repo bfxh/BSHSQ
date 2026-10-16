@@ -15,7 +15,9 @@ use crate::{FluidSystem, ProviderColliders, Vec3};
 use vxl_phys_core::interop::InteropContact;
 
 impl FlipScratch {
-    pub(super) fn new() -> Self {
+    /// 建一份空缓冲。FLIP 档由 `step` 每 **tick** 建一份（活过本 tick 的各子步 => 压力场
+    /// 热启动；见 `flip.rs` 模块头"热启动"与 `fluid_step.rs`），故这里也要能被那一层看见。
+    pub(crate) fn new() -> Self {
         Self {
             origin: Vec3::ZERO,
             cell: 1.0,
@@ -38,6 +40,8 @@ impl FlipScratch {
             cg_r: Vec::new(),
             cg_d: Vec::new(),
             cg_q: Vec::new(),
+            p_prev: Vec::new(),
+            warm_key: None,
         }
     }
 

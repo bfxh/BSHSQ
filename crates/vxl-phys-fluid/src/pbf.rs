@@ -100,10 +100,18 @@ pub(crate) struct PbfScratch {
 /// 其余 ⇒ WCSPH 子步。
 ///
 /// GPU 族在 `assemble` 就被显式拒绝（不静默跑 CPU）⇒ 这里只需分辨三族。
-pub(crate) fn substep_of(sys: &mut FluidSystem, dt: f32, providers: &dyn ProviderColliders) {
+///
+/// `flip_sc` 由 `step` 每 **tick** 建一份并透传（只有 FLIP 族用；PBF/WCSPH 子步自带缓冲），
+/// 用来让压力场跨本 tick 的各子步热启动（见 `flip.rs` 模块头"热启动"）。
+pub(crate) fn substep_of(
+    sys: &mut FluidSystem,
+    dt: f32,
+    providers: &dyn ProviderColliders,
+    flip_sc: &mut crate::flip::FlipScratch,
+) {
     match sys.cfg.family {
         FluidFamily::CpuPbf => substep(sys, dt, providers),
-        FluidFamily::CpuFlip => crate::flip::substep(sys, dt, providers),
+        FluidFamily::CpuFlip => crate::flip::substep(sys, dt, providers, flip_sc),
         _ => sys.substep(dt, providers),
     }
 }

@@ -72,12 +72,17 @@ impl FluidSystem {
     /// **C2（2026-10-01，`PLAN-COUPLING.md` §5 / D1(b)）**：`breact` 是 **tick 级累加器**——
     /// 此处清零、每子步力相末尾累加、末尾 ÷ 子步数 ⇒ `boundary_reactions()` = **dt_sub
     /// 时间加权的 tick 平均力**（替代"末子步快照"）。**子步 = 1 不做除法** ⇒ 单子步档逐位不变。
+    ///
+    /// FLIP 档的相位缓冲提到 **tick 级**（`flip_sc`）：活过本 tick 的各子步 ⇒ 压力场热启动
+    /// （稳态下第 2..N 子步几乎不再迭代），分配也从每子步一次降到每 tick 一次。每 tick 现建
+    /// ⇒ 结果只依赖 tick 起点状态，不继承上一 tick 的历史（契约见 `flip.rs` 模块头"热启动"）。
     pub fn step(&mut self, dt_tick: f32, providers: &dyn ProviderColliders) {
         let sub = self.cfg.substeps.max(1);
         let dt = dt_tick / sub as f32;
         self.breact.clear();
+        let mut flip_sc = crate::flip::FlipScratch::new();
         for _ in 0..sub {
-            crate::pbf::substep_of(self, dt, providers);
+            crate::pbf::substep_of(self, dt, providers, &mut flip_sc);
         }
         if sub > 1 {
             let inv = 1.0 / sub as f32; // 等分子步 ⇒ 即 dt_sub/dt_tick

@@ -17,7 +17,8 @@ const CG_RTOL: f32 = 1e-5;
 impl FlipScratch {
     /// 散度 + 压力 Poisson（求解器见 `solve_cg` / `solve_jacobi`）：
     /// `Σ(p_nb - p_c) = (ρ/Δt)*cell²*div`，空单元 `p = 0`（Dirichlet）、
-    /// 固体面/网格外边界不入模板（Neumann）。默认走 **CG**（`cfg.flip_pressure_cg`）。
+    /// 固体面/网格外边界不入模板（Neumann）。默认走 **CG**（`cfg.flip_pressure_cg`），
+    /// 几何一致时用上一子步的解热启动（见模块头"热启动"）。
     pub(super) fn solve_pressure(&mut self, sys: &FluidSystem, dt: f32) {
         let cell = self.cell;
         let alpha = sys.cfg.rest_density / dt * cell * cell;
@@ -37,14 +38,55 @@ impl FlipScratch {
                 }
             }
         }
+        // 热启动（只给 CG 档，见模块头"热启动"）：几何键与上一子步一致时，用那份解当初始
+        // 猜测 —— 只填**当前是流体**的单元（现在不是流体的单元在解里恒为 0，别把旧值带进
+        // `pressures()`）。Jacobi 档保持从零起：它是固定次数的 A/B 对照档，预置初值会把
+        // "N 次扫"的历史口径搅浑。
+        let warm = sys.cfg.flip_pressure_cg && self.warm_reusable();
         self.p.clear();
         self.p.resize(self.n_cells, 0.0);
+        if warm {
+            self.p.copy_from_slice(&self.p_prev);
+            for c in 0..self.n_cells {
+                if self.class[c] != CLASS_FLUID {
+                    self.p[c] = 0.0;
+                }
+            }
+        }
         let iters = sys.cfg.flip_pressure_iterations;
         if sys.cfg.flip_pressure_cg {
-            self.solve_cg(alpha, iters);
+            self.solve_cg(alpha, iters, warm);
         } else {
             self.solve_jacobi(alpha, iters);
         }
+        // 记账：把这次解出的场连几何键留下（下一子步若几何一致 => 热启动）。
+        if sys.cfg.flip_pressure_cg {
+            self.p_prev.clear();
+            self.p_prev.extend_from_slice(&self.p);
+            self.warm_key = Some((self.origin, self.cell, self.dims));
+        }
+    }
+
+    /// 热启动复用判据：解过（`warm_key` 有值）、维度相同、`cell` 相对漂移 ≤ 1e-4、
+    /// `origin` 漂移 ≤ 半格。
+    ///
+    /// 为什么允许漂移而不是要求键逐位相同：网格每子步按**流体 AABB** 重建，粒子哪怕动 1e-7
+    /// 也会把 `origin` 的位模式改掉 —— 判据一严，热启动在真实场景里就等于没做。半格以内的
+    /// 漂移下 `(i,j,k)` 仍指着**大致同一个**物理单元，旧场仍是个好初值；收敛与否始终由残差
+    /// 判据说话，初值只影响迭代数。超限就退回冷启动（慢，但正确）。
+    fn warm_reusable(&self) -> bool {
+        let Some((origin, cell, dims)) = self.warm_key else {
+            return false;
+        };
+        if dims != self.dims || self.p_prev.len() != self.n_cells {
+            return false;
+        }
+        if (cell - self.cell).abs() > self.cell.abs() * 1e-4 {
+            return false;
+        }
+        let d = origin - self.origin;
+        let lim = 0.5 * self.cell.abs();
+        d.x.abs() <= lim && d.y.abs() <= lim && d.z.abs() <= lim
     }
 
     /// 压力模板的**单点遍历**（唯一来源：Jacobi 的一趟扫与 CG 的 `A*d` 共用同一段邻居逻辑，
@@ -105,7 +147,13 @@ impl FlipScratch {
     /// 确定性：向量运算全是**固定索引序**的逐元素/归约（无并行重排、无原子）=> 与 Jacobi 同一
     /// 逐位契约（`flip_is_bitwise_reproducible`）。分解保险：`d*A*d` 非正或非有限即停手
     /// （SPD 下不该发生；宁停不炸，解停在当前迭代）。
-    fn solve_cg(&mut self, alpha: f32, max_iters: u32) {
+    ///
+    /// 热启动（`warm = true`，`p` 已被 `solve_pressure` 预置成上一子步的解）：初残差取
+    /// `b - A*p`（多算一次 `A p`，换掉冷启动的几十次扫）。判据的分母也相应取
+    /// `max(|b|, |r0|)`：冷启动下二者逐位相等（`r0 = b`）=> 行为**逐位不变**；热启动下
+    /// `r0` 可能远小于 `b`（本来就快收敛了），只拿 `|b|` 当分母会在 `b = 0` 的场景逼着把解
+    /// 磨到恰好 0，白撞上限。
+    fn solve_cg(&mut self, alpha: f32, max_iters: u32, warm: bool) {
         let (nx, ny, nz) = (self.dims[0], self.dims[1], self.dims[2]);
         let mut r = std::mem::take(&mut self.cg_r);
         let mut d = std::mem::take(&mut self.cg_d);
@@ -134,11 +182,20 @@ impl FlipScratch {
                 }
             }
         }
+        // 热启动：残差不是 `b` 而是 `b - A*p_prev`（`cg_a` 与迭代里用的是同一段模板）。
+        if warm {
+            cg_a(self, &self.p, &mut q);
+            for c in 0..self.n_cells {
+                if self.class[c] == CLASS_FLUID {
+                    r[c] -= q[c];
+                }
+            }
+        }
         self.precond(&r, &mut z);
         d.copy_from_slice(&z);
         let mut rz = dot(&r, &z);
         let mut rmax = rinf(&r);
-        let tol = CG_RTOL * bmax;
+        let tol = CG_RTOL * bmax.max(rmax);
         let mut it = 0u32;
         while it < max_iters && rmax > tol {
             it += 1;

@@ -4,6 +4,7 @@
   "crates/vxl-phys-broad/src/wide/wide_impl.rs": 1,
   "crates/vxl-phys-fluid/src/flip.rs": 5,
   "crates/vxl-phys-fluid/src/flip/grid.rs": 1,
+  "crates/vxl-phys-fluid/src/flip/solve.rs": 1,
   "crates/vxl-phys-fluid/src/fluid_boundary.rs": 1,
   "crates/vxl-phys-fluid/src/fluid_density/wall_gather.rs": 1,
   "crates/vxl-phys-gpu/examples/gpu_narrow_probe/diag.rs": 1,

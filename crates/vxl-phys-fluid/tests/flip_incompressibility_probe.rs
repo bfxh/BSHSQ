@@ -121,6 +121,8 @@ struct Metrics {
     ke: f32,
     digest: u64,
     n_in: usize,
+    /// 全 tick 累计的**压力相位**耗时（`phase_us[2]`，µs）——只给 `#[ignore]` 诊断看成本。
+    phase_us2: u64,
 }
 
 /// 位模式指纹（FNV-1a，与 `pbf_incompressibility_probe.rs` / `src/tests.rs` 同口径）。
@@ -175,6 +177,7 @@ fn run(
         ke: 0.0,
         digest: 0,
         n_in: 0,
+        phase_us2: 0,
     };
     let y0 = com_y(&f);
     let ymax0 = max_y(&f);
@@ -213,6 +216,7 @@ fn run(
     m.height_keep = max_y(&f) / ymax0.max(f32::MIN_POSITIVE);
     m.ke = f.velocities().iter().map(|v| v.length_squared()).sum();
     m.digest = digest(&f);
+    m.phase_us2 = f.phase_us()[2];
     if diag {
         diag_over_density(&f, rho0);
     }
@@ -422,6 +426,34 @@ fn flip_is_bitwise_reproducible() {
     );
 }
 
+/// 热启动（tick 级相位缓冲，见 `flip.rs` 模块头"热启动"）的判据：**同一预算下解得更准**。
+///
+/// 场景与主测试逐字相同，只换压力预算：cap=10 是"欠解"档。冷启动下 10 次 CG 只能把水柱撑到
+/// `height_keep` 0.8935（实测，复用临时关掉的对照跑），热启动把上一子步的解当初始猜测 ⇒ 同样
+/// 的 10 次迭代走得更远，实测 0.9793。**收敛档不受影响**（cap=80 两跑同解 1.0367）⇒ 这条只钉
+/// "固定预算下的进度"，不放松精度口径（判据仍是绝对值残差 `CG_RTOL*max(|b|,|r0|)`）。
+#[test]
+fn flip_warm_start_improves_fixed_budget_accuracy() {
+    let warm10 = run(FluidFamily::CpuFlip, 10, 0.95, true, 60, false);
+    let warm80 = run(FluidFamily::CpuFlip, 80, 0.95, true, 60, false);
+    assert!(
+        warm10.height_keep >= 0.95,
+        "热启动没把 cap=10 拉起来：height_keep {}（冷启动同档实测 0.8935）",
+        warm10.height_keep
+    );
+    assert!(
+        warm10.height_keep < warm80.height_keep,
+        "cap=10 竟与 cap=80 同级（{} vs {}）⇒ 判据松了或场景变了",
+        warm10.height_keep,
+        warm80.height_keep
+    );
+    assert!(
+        warm80.height_keep >= 1.0,
+        "热启动把收敛档带偏了：cap=80 height_keep {}",
+        warm80.height_keep
+    );
+}
+
 /// `#[ignore]` 诊断（不进 CI）：打印 FLIP/WCSPH 末态过密的**空间分布**，用来分辨
 /// "网格投影造会聚流"（过密聚集在壁角/底面/贴邻对）与"纯几何起始条件"（均匀过密）。
 /// 跑法：`cargo test -p vxl-phys-fluid --test flip_incompressibility_probe -- --ignored --nocapture`
@@ -455,6 +487,17 @@ fn diag_pressure_iteration_convergence() {
                 m.ke
             );
         }
+    }
+    // 热启动的**预算敏感性**（tick 级缓冲，见 `flip.rs` 模块头"热启动"）：稳态子步的初残差
+    // 已经 ≤ tol ⇒ `while` 几乎不进入 ⇒ 小预算也该给出 80 档的读数。对照：冷启动下 5 次 CG 的
+    // `height_keep` 只到 ~0.6（上面的表里 cap=10 是 0.894）。
+    eprintln!("-- CG 热启动：预算 1..80 的读数 + 压力相位耗时（µs，同机相对量）--");
+    for it in [1u32, 2, 3, 5, 10, 20, 80] {
+        let m = run(FluidFamily::CpuFlip, it, 0.95, true, 60, false);
+        eprintln!(
+            "cg-热 {it:6}  sink {:10.3e}  height_keep {:11.4}  ke {:10.3e}  压力相位 {} µs",
+            m.sink, m.height_keep, m.ke, m.phase_us2
+        );
     }
 }
 
