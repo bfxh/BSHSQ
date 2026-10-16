@@ -3,7 +3,7 @@
 //! 流体（§4.8，按技术族分档）—— M3 CPU 档 / M4 GPU 档。
 //!
 //! - CPU SPH：WCSPH + XSPH 黏度（Monaghan 核）；
-//! - GPU PBF：Müller 2013，poly6/spiky 核，密度约束迭代 3~4；
+//! - PBF：Müller 2013 poly6/spiky 核，密度约束迭代 3~4（**CPU 口径档** = `CpuPbf`；GPU 1000 万粒目标档 = M4）；
 //! - GPU FLIP/APIC：PIC/FLIP 传输 + APIC 仿射速度，稀疏哈希网格（512³ 活跃格）；
 //! - 刚体耦合：Akinci 边界粒子两层（体积/压力）。
 //!
@@ -24,7 +24,6 @@
 #![forbid(unsafe_code)]
 
 pub mod boundary;
-
 pub use boundary::{lattice, BoundaryLattice, SurfaceLattice};
 
 use vxl_phys_core::interop::{InteropContact, MediumField, MediumSample, ProviderColliders};
@@ -40,6 +39,8 @@ mod fluid_medium;
 mod fluid_step;
 mod grid;
 mod laminar;
+mod pbf;
+mod flip;
 mod system;
 mod types;
 pub use self::{carve::*, config::*, grid::*, system::*, types::*};

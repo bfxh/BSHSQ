@@ -1,7 +1,9 @@
 //! 判据：**执行族要显式失败，不许静默降级**。
 //!
-//! `FluidConfig::family` 目前**未接线**（`FluidSystem` 是 CPU WCSPH；GPU 族走门面的
-//! `World::set_fluid_stepper`）——本判据把"选 GPU 族 ⇒ 显式拒绝"钉住，防止它退化成
+//! `FluidConfig::family` **已接线**：CPU 三族按它在 `fluid_step.rs:80` →`pbf::substep_of`
+//! 分派（`CpuSph` = WCSPH、`CpuPbf` = PBF、`CpuFlip` = FLIP）；**GPU 族在构造入口就被显式拒绝**
+//! （`fluid_access.rs::assert_cpu_family`——GPU 族走门面的 `World::set_fluid_stepper`，
+//! 不在 `FluidSystem` 里静默降级）——本判据把"选 GPU 族 ⇒ 显式拒绝"钉住，防止它退化成
 //! "悄悄跑 CPU SPH 但配置说自己在 GPU 上"（与 `DestructionConfig::depth` 同款纪律：
 //! 配置要求的行为没实现时，入口报错，不静默降级）。
 //!

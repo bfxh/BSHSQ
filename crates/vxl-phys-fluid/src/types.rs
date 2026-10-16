@@ -17,13 +17,15 @@ pub struct BodyPose {
 pub enum FluidFamily {
     /// WCSPH + XSPH（CPU，30 万粒 @30 FPS 档）。
     CpuSph,
-    /// Position Based Fluids（GPU，1000 万粒目标档）。
+    /// Position Based Fluids（CPU 口径档；GPU 1000 万粒目标档 = `GpuPbf`）。
+    CpuPbf,
     GpuPbf,
+    /// FLIP 分层（CPU 口径档，MAC 网格投影；见 `flip` 模块）。
+    CpuFlip,
     /// FLIP/APIC（GPU 高精档，稀疏哈希网格）。
     GpuFlip,
 }
-
-/// 密度约束迭代档（PBF）。
+/// 密度约束迭代档（PBF；`CpuPbf` 档消费，见 `pbf` 模块）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DensityIterations {
     Three,

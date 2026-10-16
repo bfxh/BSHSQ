@@ -24,9 +24,22 @@ pub fn from_positions(cfg: FluidConfig, pos: Vec<Vec3>, spacing: f32) -> FluidSy
     assemble(cfg, pos, spacing)
 }
 
+/// 执行族守卫（**两条入口都受约束**）：本档只实现 CPU 三族（`CpuSph` WCSPH / `CpuPbf` PBF /
+/// `CpuFlip` FLIP）⇒ 显式拒绝 GPU 族（不静默跑 CPU）。自由函数：内联进 `assemble` 会顶破 god 门的 fn 棘轮。
+fn assert_cpu_family(cfg: &FluidConfig) {
+    assert!(
+        matches!(
+            cfg.family,
+            FluidFamily::CpuSph | FluidFamily::CpuPbf | FluidFamily::CpuFlip
+        ),
+        "FluidConfig::family 只支持 CpuSph / CpuPbf / CpuFlip；GPU 族请走 World::set_fluid_stepper"
+    );
+}
+
 /// 组装本体（`new` 的晶格路径与 `from_positions` 的点云路径**共用**一条：核常数 + 质量标定 +
 /// 逐段缓冲初始化）。抽出来的另一个理由：`new` 是本文件最长函数，god 门"合法交换"要求它严格下降。
 fn assemble(cfg: FluidConfig, pos: Vec<Vec3>, spacing: f32) -> FluidSystem {
+    assert_cpu_family(&cfg);
     let h = cfg.smoothing_radius.max(1e-5);
     let h2 = h * h;
     let k6 = 315.0 / (64.0 * std::f32::consts::PI * h.powi(9));
@@ -74,11 +87,6 @@ impl FluidSystem {
     /// 晶格块初始化：粒子位于 `origin + (i + ½)·spacing`（三轴 `dims` 个），
     /// 质量按「静止晶格密度 = ρ0」反解：m = ρ0 / Σ_lattice W（含自身项）。
     pub fn new(cfg: FluidConfig, origin: Vec3, dims: [usize; 3], spacing: f32) -> Self {
-        // 执行族：`FluidConfig::family` 目前未接线 ⇒ **显式拒绝** GPU 族（不静默跑 CPU SPH）。
-        assert!(
-            cfg.family == FluidFamily::CpuSph,
-            "FluidConfig::family 只支持 CpuSph；GPU 族请走 World::set_fluid_stepper"
-        );
         assemble(cfg, lattice_positions(origin, dims, spacing), spacing)
     }
 

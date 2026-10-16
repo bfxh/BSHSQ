@@ -149,8 +149,27 @@ e ∈ [0,1] 每材质对（组合律可配，默认 max），附**恢复速度�
 
 ### 4.8 流体（按技术族分档，不用形容词）
 - **CPU SPH**：WCSPH + XSPH 黏度（Monaghan 核），30 万粒 @30 FPS 档；
-- **GPU PBF**（Müller 2013 Position Based Fluids，poly6/spiky 核，密度约束
-  迭代 3~4）：1000 万粒目标档；tensile instability 用 spiky 梯度抑制；
+- **CPU PBF**（Müller 2013 Position Based Fluids，poly6/spiky 核，密度约束
+  迭代 3~4）：CPU 档的不可压备用档（`FluidFamily::CpuPbf`）—— 同一积分器上的
+  另一种离散（密度误差走**位置投影**而不是 Tait 压力）；张力抑制 = **一边倒约束
+  `λ ≤ 0`**（只推不拉），与 CPU SPH 的"负压钳零"共用同一个
+  `tensile_instability_suppression` 开关。⚠️ 口径（实测）：自由表面上 `C < 0` ⇒
+  `λ > 0` ⇒ 成对项变**吸引**，而"把邻域移回被截断的核内"几何上做不到 ⇒ 表面成了
+  永不满足的常量拉力（迭代越多越差）；论文的 `s_corr` 人工压力治的是同一症状、且要在
+  自由表面上再叠一层排斥（本仓单位下照抄会炸），故默认关（`k = 0`）。
+  判据 = `tests/pbf_incompressibility_probe.rs`（与 WCSPH 同场对拍内部过密）；
+- **CPU FLIP**（P2G/压力投影/G2P，Müller 2009 式混合）：与 CPU PBF 同接口的"网格腿"
+  （`FluidFamily::CpuFlip`）——粒子→网格三线性散射（P2G）→ **交错面**散度 + Jacobi 压力
+  Poisson（`flip_pressure_iterations`，默认 **80**）→ 面速度投影 → 网格→粒子（G2P）
+  `u = θ·u_FLIP + (1−θ)·u_PIC`（`flip_ratio` 默认 **0.95**；θ=0 即纯 PIC）。网格 = 与
+  CPU 档同一个 AABB + `MARGIN_CELLS` 空层（自由表面 Dirichlet）+ 固体 SDF 探针（无通量面
+  置 0）；Jacobi 全量读旧写新 ⇒ 逐位可复现。⚠️ 口径：`densities()` 对本族**只是被动读数**
+  （求解器不消费 ρ，过密读数结构性高于 WCSPH，与迭代数无关）；静水支撑受 Jacobi 预算限制
+  而**收敛单调**（实测 `height_keep`：×20 0.48 → ×80 0.85 → ×160 0.93）；粒子级重叠
+  目前无约束（下一个改法 = APIC 仿射矩阵或最小距离约束）。判据 =
+  `tests/flip_incompressibility_probe.rs`（静水柱高度保持 + 净沉降 + FLIP≫PIC 低耗散 +
+  逐位可复现）；
+- **GPU PBF**（同上算法，1000 万粒目标档）：张力抑制同上一口径（一边倒 `λ ≤ 0`）；
 - **GPU FLIP/APIC**（PIC/FLIP 传输 + APIC 仿射速度，抗耗散）：高精档，
   配稀疏哈希网格（512³ 活跃格预算）；
 - 与刚体耦合：Akinci 边界粒子两层（体积/压力）；与软体耦合同通道。

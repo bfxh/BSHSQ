@@ -4,12 +4,13 @@ use super::*;
 /// WCSPH 参数（PLAN-0.3 §1）。
 #[derive(Clone, Debug)]
 pub struct FluidConfig {
-    /// ⚠️ **执行族选择器目前未接线**：`FluidSystem`（CPU WCSPH）只受理 `CpuSph`；GPU 族请走
-    /// 门面的 `World::set_fluid_stepper`（`vxl-phys-gpu` 的 `GpuFluidStepper`）——设成本字段
-    /// **不会**触发 GPU 求解，`FluidSystem::new` 会显式拒绝（不静默跑 CPU）。
+    /// **执行族选择器**：本 crate 受理 `CpuSph`（WCSPH）、`CpuPbf`（PBF 约束投影，见 `pbf`）与
+    /// `CpuFlip`（FLIP 网格投影，见 `flip`）；GPU 族请走
+    /// 门面的 `World::set_fluid_stepper`（`vxl-phys-gpu` 的 `GpuFluidStepper`）——设成 GPU 族
+    /// **不会**触发 GPU 求解，`assemble` 会显式拒绝（不静默跑 CPU）。
     pub family: FluidFamily,
-    /// ⚠️ **当前无消费方**：这是 **PBF**（GPU 目标档）的密度约束迭代数；CPU WCSPH 的密度是
-    /// 直接求和（单趟、无迭代）⇒ 本字段不影响任何结果（PBF 落地时再接线，见 `SPEC.md` §4.8）。
+    /// **PBF 档消费**：密度约束迭代数（§4.8 的 3~4；每迭代 = 重建邻域 + 重评密度 + 一次投影）。
+    /// `CpuSph` 档的密度是直接求和（单趟、无迭代）⇒ 该档下本字段不影响任何结果（`SPEC.md` §4.8）。
     pub density_iterations: DensityIterations,
     /// 静止密度 ρ0（kg/m³，水 = 1000）。
     pub rest_density: f32,
@@ -58,6 +59,17 @@ pub struct FluidConfig {
     /// 会让 τ ≪ 子步长，半隐式写法在那一档**饱和**（终端速度偏高 `1 + dt/τ` 倍）
     /// ⇒ 那一档需要半解析积分（`v ← v_med + aτ + (v − v_med − aτ)e^{−dt/τ}`），登记为下一刀。
     pub dynamic_viscosity: f32,
+    /// **FLIP 档消费**：FLIP/PIC 混合比 θ（θ = 1 纯 FLIP、θ = 0 纯 PIC；见 `flip` 模块）。
+    /// `CpuSph`/`CpuPbf` 档下本字段不影响任何结果。
+    pub flip_ratio: f32,
+    /// **FLIP 档消费**：压力 Poisson 的 **Jacobi** 迭代次数（固定次数、无预条件 ⇒ 静水柱只
+    /// **部分**抵消重力，见 `flip` 模块头"已知简化 2"）。`CpuSph`/`CpuPbf` 档下无影响。
+    ///
+    /// 默认 **80** 是实测折中（`tests/flip_incompressibility_probe.rs`，水槽静水池 60 tick，
+    /// 判别量 = 末态柱高 / 起步柱高 `height_keep`）：迭代 10/20/40/80/160/320 ⇒
+    /// `0.30/0.48/0.71/0.85/0.93/1.02`。40 档水线要掉 29%（肉眼可见），80 档 15% 以内；
+    /// 求解成本与次数**线性**，故不取 160。换 CG/线隐式/多重网格是本条的下一刀。
+    pub flip_pressure_iterations: u32,
 }
 
 impl Default for FluidConfig {
@@ -79,6 +91,8 @@ impl Default for FluidConfig {
             max_speed_frac: 0.4,
             artificial_viscosity: 1.0,
             dynamic_viscosity: 0.0,
+            flip_ratio: 0.95,
+            flip_pressure_iterations: 80,
         }
     }
 }

@@ -67,7 +67,7 @@ impl FluidSystem {
         self.breact.clear();
     }
 
-    /// 推进一个完整 tick（内部按 `cfg.substeps` 等分子步；边界经统一提供者通道）。
+    /// 推进一个完整 tick（内部按 `cfg.substeps` 等分子步，经 `pbf::substep_of` 分派族；边界经统一提供者通道）。
     ///
     /// **C2（2026-10-01，`PLAN-COUPLING.md` §5 / D1(b)）**：`breact` 是 **tick 级累加器**——
     /// 此处清零、每子步力相末尾累加、末尾 ÷ 子步数 ⇒ `boundary_reactions()` = **dt_sub
@@ -77,7 +77,7 @@ impl FluidSystem {
         let dt = dt_tick / sub as f32;
         self.breact.clear();
         for _ in 0..sub {
-            self.substep(dt, providers);
+            crate::pbf::substep_of(self, dt, providers);
         }
         if sub > 1 {
             let inv = 1.0 / sub as f32; // 等分子步 ⇒ 即 dt_sub/dt_tick
