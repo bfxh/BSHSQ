@@ -1416,8 +1416,8 @@
       "max_type_members": 2
     },
     "crates/vxl-phys/src/world_step/narrow_tier.rs": {
-      "file_lines": 308,
-      "max_fn_lines": 118,
+      "file_lines": 329,
+      "max_fn_lines": 80,
       "max_type_members": 12
     },
     "crates/vxl-phys/src/world_struct.rs": {

@@ -12,6 +12,7 @@
 //! 的读数与默认档**必然不同**，只能当显式档用（默认档一行都不走这里）。
 
 use super::*;
+use vxl_phys_core::narrow_tier::NarrowSlots;
 
 /// **卡上档的分项计时**（`PLAN-gpu.md` §17.10 补记：为什么"卡上档每 tick 5.5 ms"必须能拆开）。
 ///
@@ -138,25 +139,7 @@ impl World {
         let flat = vxl_phys_core::narrow_tier::flat_pairs(pairs);
         // **常驻体表**（§17.10）：与上一份缓存逐记录比，只把**变动**的记录交给后端；
         // 缓存缺失或行数变了 ⇒ 本趟按"全部变动"（首帧/体数变化）。
-        const W: usize = vxl_phys_core::narrow_tier::BODY_WORDS;
-        let n_rec = packed.len() / W;
-        let mut changed: Vec<u32> = Vec::new();
-        let t1 = vxl_phys_core::probe::start();
-        match self.narrow.body_cache.as_mut() {
-            Some(c) if c.len() == packed.len() => {
-                for i in 0..n_rec {
-                    if c[i * W..(i + 1) * W] != packed[i * W..(i + 1) * W] {
-                        changed.push(i as u32);
-                        c[i * W..(i + 1) * W].copy_from_slice(&packed[i * W..(i + 1) * W]);
-                    }
-                }
-            }
-            _ => {
-                changed.extend(0..n_rec as u32);
-                self.narrow.body_cache = Some(packed.clone());
-            }
-        }
-        let s_diff = vxl_phys_core::probe::us(t1);
+        let (changed, s_diff) = diff_body_cache(&mut self.narrow.body_cache, &packed);
         // 每趟都要把**变动记录**推给后端（常驻是"累积"语义：上一趟收过，不代表这一趟的变动已在
         // 卡上）⇒ `narrow_resident` **每趟无条件调**，它的返回值才是"进不进常驻跑法"。
         // ⚠️ 曾经写作 `self.narrow.resident && tier.narrow_resident(..)` —— 首帧 `resident=false`
@@ -188,12 +171,7 @@ impl World {
         let u_run = vxl_phys_core::probe::us(t2);
         // 回填段：只把「卡上不接手」的对交给 CPU 窄相（**一次调用** ⇒ 它的缓存/并行照旧生效）。
         let t3 = vxl_phys_core::probe::start();
-        let sub: Vec<(u32, u32)> = pairs
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| slots.count(*i) == vxl_phys_core::narrow_tier::NOT_HANDLED)
-            .map(|(_, p)| *p)
-            .collect();
+        let sub = not_handled_pairs(pairs, &slots);
         let mut host: Vec<Manifold> = Vec::new();
         if !sub.is_empty() {
             self.narrow.host.collide(
@@ -205,22 +183,7 @@ impl World {
                 self.jobs.as_ref(),
             );
         }
-        // 装配 = **对序**：逐对按升序取「卡上槽」或「回填段」。回填段是 `pairs` 的子序列 ⇒ 顺序走
-        // 下去时 `(a, b)` 相配的流形必然相邻（不需要查表）；复合体一对多流形自然落在这一段里。
-        self.manifolds.clear();
-        let mut cur = 0usize;
-        for (i, &(a, b)) in pairs.iter().enumerate() {
-            match slots.count(i) {
-                vxl_phys_core::narrow_tier::NOT_HANDLED => {
-                    while cur < host.len() && (host[cur].a, host[cur].b) == (a, b) {
-                        self.manifolds.push(host[cur].clone());
-                        cur += 1;
-                    }
-                }
-                0 => {}
-                _ => self.manifolds.push(manifold_of_slot(&slots, i)),
-            }
-        }
+        assemble_manifolds(pairs, &slots, &host, &mut self.manifolds);
         self.narrow.tier = Some(tier);
         // 分项记账（**必须在 `tier` 放回之后**：`stats` 与 `tier` 都是 `self.narrow` 的字段，
         // 但 `tier` 已被 `take` 出来 ⇒ 这里可以自由可变借 `self.narrow.stats`）。
@@ -304,4 +267,62 @@ fn dump_words_if_asked(packed: &[u32], pairs: &[(u32, u32)], tick: u64) {
         q4(b as usize, 3),
         p3(b as usize, 8),
     );
+}
+
+/// **常驻体表**：与上一份缓存逐记录比，把**变动的记录号**交给后端（§17.10）。缓存缺失或行数
+/// 变了 ⇒ 本趟按全部变动处理（首帧 / 体数变化）。返回（记录号表，本项耗时 us）。
+fn diff_body_cache(cache: &mut Option<Vec<u32>>, packed: &[u32]) -> (Vec<u32>, u64) {
+    const W: usize = vxl_phys_core::narrow_tier::BODY_WORDS;
+    let n_rec = packed.len() / W;
+    let mut changed: Vec<u32> = Vec::new();
+    let t = vxl_phys_core::probe::start();
+    match cache.as_mut() {
+        Some(c) if c.len() == packed.len() => {
+            for i in 0..n_rec {
+                if c[i * W..(i + 1) * W] != packed[i * W..(i + 1) * W] {
+                    changed.push(i as u32);
+                    c[i * W..(i + 1) * W].copy_from_slice(&packed[i * W..(i + 1) * W]);
+                }
+            }
+        }
+        _ => {
+            changed.extend(0..n_rec as u32);
+            *cache = Some(packed.to_vec());
+        }
+    }
+    (changed, vxl_phys_core::probe::us(t))
+}
+
+/// 从对表里挑出**卡上不接手**的那些（`NOT_HANDLED` 哨兵）—— 回填段的输入。
+fn not_handled_pairs(pairs: &[(u32, u32)], slots: &NarrowSlots) -> Vec<(u32, u32)> {
+    pairs
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| slots.count(*i) == vxl_phys_core::narrow_tier::NOT_HANDLED)
+        .map(|(_, p)| *p)
+        .collect()
+}
+
+/// **装配 = 对序**：逐对按升序取「卡上槽」或「回填段」。回填段是 `pairs` 的子序列 ⇒ 顺序走下
+/// 去时 `(a, b)` 相配的流形必然相邻（不需要查表）；复合体一对多流形自然落在这一段里。
+fn assemble_manifolds(
+    pairs: &[(u32, u32)],
+    slots: &NarrowSlots,
+    host: &[Manifold],
+    out: &mut Vec<Manifold>,
+) {
+    out.clear();
+    let mut cur = 0usize;
+    for (i, &(a, b)) in pairs.iter().enumerate() {
+        match slots.count(i) {
+            vxl_phys_core::narrow_tier::NOT_HANDLED => {
+                while cur < host.len() && (host[cur].a, host[cur].b) == (a, b) {
+                    out.push(host[cur].clone());
+                    cur += 1;
+                }
+            }
+            0 => {}
+            _ => out.push(manifold_of_slot(slots, i)),
+        }
+    }
 }
