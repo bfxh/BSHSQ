@@ -10,3 +10,7 @@ __pycache__/
 
 # 本地 Python 脚本唯一存放处：内容一律不入库（由统一入口维护）
 .codex-local-python/
+
+# 子代理/临时排查的草稿目录：放在仓内会被门禁当新文件扫（门禁不看 .gitignore），
+# 这里只兜底挡住误提交；约定仍是草稿写仓外 D:\KF\.yanagent\bshsq-scratch\。
+.yanagent/

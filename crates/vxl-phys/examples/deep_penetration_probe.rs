@@ -93,13 +93,8 @@ fn ke(w: &World, i: usize) -> f32 {
     0.5 * m * w.bodies.linvel[i].length_squared()
 }
 
-fn run(
-    name: &str,
-    surface_y: f32,
-    build: impl Fn(&mut World),
-    depth: f32,
-    ticks: usize,
-) -> Reading {
+/// 搭台：子步覆盖 + 世界 + 材质 + 埋在 `surface_y - depth` 的球；返回（世界, 球索引）。
+fn build_world(surface_y: f32, depth: f32, build: impl Fn(&mut World)) -> (World, usize) {
     let subs = env_f32("PROBE_SUBSTEPS", 0.0);
     let cfg = if subs >= 1.0 {
         PhysConfig {
@@ -123,60 +118,81 @@ fn run(
         1000.0,
     ) as usize;
     w.bodies.set_material(i, m);
+    (w, i)
+}
+
+/// 首 tick 的接触摘要：配对 + 各流形的法线与最深点。
+fn first_tick_note(w: &World, i: usize) -> String {
+    let man: Vec<String> = w
+        .manifolds()
+        .iter()
+        .filter(|mf| mf.a as usize == i || mf.b as usize == i)
+        .map(|mf| {
+            let d = mf.points.iter().map(|p| p.depth).fold(f32::MIN, f32::max);
+            format!(
+                "n=({:+.2},{:+.2},{:+.2}) pts={} dmax={d:+.4}",
+                mf.normal.x,
+                mf.normal.y,
+                mf.normal.z,
+                mf.points.len()
+            )
+        })
+        .collect();
+    let in_pairs = w
+        .pairs()
+        .iter()
+        .any(|&(p, q)| p as usize == i || q as usize == i);
+    format!("｜首 tick：配对 {in_pairs}、流形 [{}]", man.join(" | "))
+}
+
+/// `PROBE_TRACE` 的逐 tick 一行（位置/速度/流形）。
+fn trace_line(w: &World, i: usize, k: usize) -> String {
+    let man: Vec<String> = w
+        .manifolds()
+        .iter()
+        .filter(|mf| mf.a as usize == i || mf.b as usize == i)
+        .map(|mf| {
+            let d = mf.points.iter().map(|p| p.depth).fold(f32::MIN, f32::max);
+            let p0 = mf
+                .points
+                .first()
+                .map(|p| format!("{:+.2},{:+.2},{:+.2}", p.point.x, p.point.y, p.point.z))
+                .unwrap_or_default();
+            format!(
+                "({},{}) n=({:+.5},{:+.5},{:+.5}) d={d:+.5} p=({p0})",
+                mf.a, mf.b, mf.normal.x, mf.normal.y, mf.normal.z,
+            )
+        })
+        .collect();
+    format!(
+        "    t={k:>3} y={:+.4} vy={:+.4} x={:+.4} vx={:+.4} wz={:+.3} man=[{}]",
+        w.bodies.position[i].y,
+        w.bodies.linvel[i].y,
+        w.bodies.position[i].x,
+        w.bodies.linvel[i].x,
+        w.bodies.angvel(i).z,
+        man.join(" | ")
+    )
+}
+
+fn run(
+    name: &str,
+    surface_y: f32,
+    build: impl Fn(&mut World),
+    depth: f32,
+    ticks: usize,
+) -> Reading {
+    let (mut w, i) = build_world(surface_y, depth, build);
     let (mut ke_peak, mut v_tail, mut n) = (0.0f32, 0.0f32, 0.0f32);
     let mut first_tick = String::new();
     for k in 0..ticks {
         w.step();
         if k == 0 {
-            let man: Vec<String> = w
-                .manifolds()
-                .iter()
-                .filter(|mf| mf.a as usize == i || mf.b as usize == i)
-                .map(|mf| {
-                    let d = mf.points.iter().map(|p| p.depth).fold(f32::MIN, f32::max);
-                    format!(
-                        "n=({:+.2},{:+.2},{:+.2}) pts={} dmax={d:+.4}",
-                        mf.normal.x,
-                        mf.normal.y,
-                        mf.normal.z,
-                        mf.points.len()
-                    )
-                })
-                .collect();
-            let in_pairs = w
-                .pairs()
-                .iter()
-                .any(|&(p, q)| p as usize == i || q as usize == i);
-            first_tick = format!("｜首 tick：配对 {in_pairs}、流形 [{}]", man.join(" | "));
+            first_tick = first_tick_note(&w, i);
         }
         if std::env::var_os("PROBE_TRACE").is_some() && k < env_f32("PROBE_TRACE_N", 60.0) as usize
         {
-            let man: Vec<String> = w
-                .manifolds()
-                .iter()
-                .filter(|mf| mf.a as usize == i || mf.b as usize == i)
-                .map(|mf| {
-                    let d = mf.points.iter().map(|p| p.depth).fold(f32::MIN, f32::max);
-                    let p0 = mf
-                        .points
-                        .first()
-                        .map(|p| format!("{:+.2},{:+.2},{:+.2}", p.point.x, p.point.y, p.point.z))
-                        .unwrap_or_default();
-                    format!(
-                        "({},{}) n=({:+.5},{:+.5},{:+.5}) d={d:+.5} p=({p0})",
-                        mf.a, mf.b, mf.normal.x, mf.normal.y, mf.normal.z,
-                    )
-                })
-                .collect();
-            println!(
-                "    t={k:>3} y={:+.4} vy={:+.4} x={:+.4} vx={:+.4} wz={:+.3} man=[{}]",
-                w.bodies.position[i].y,
-                w.bodies.linvel[i].y,
-                w.bodies.position[i].x,
-                w.bodies.linvel[i].x,
-                w.bodies.angvel(i).z,
-                man.join(" | ")
-            );
+            println!("{}", trace_line(&w, i, k));
         }
         ke_peak = ke_peak.max(ke(&w, i));
         if k + 60 >= ticks {
@@ -200,6 +216,40 @@ fn run(
         r.v_tail,
     );
     r
+}
+
+/// `hull` 档夹具：4×4×4 m 盒壳（顶面 y = 0）的 8 点凸体外壳。
+fn add_hull_floor(w: &mut World) {
+    // 8 点盒壳：**几何中心在原点**（点 ∈ ±2）⇒ 位姿下移 2 m 让顶面正好在 y = 0，
+    // 且 `half` 与点集匹配（宽相 AABB 才不会错）。
+    let mut pts = Vec::new();
+    for sx in [-1.0f32, 1.0] {
+        for sy in [-1.0f32, 1.0] {
+            for sz in [-1.0f32, 1.0] {
+                pts.push(Vec3::new(sx * 2.0, sy * 2.0, sz * 2.0));
+            }
+        }
+    }
+    let hull = w.add_hull(pts);
+    w.add_static(
+        Shape::ConvexHull {
+            hull,
+            half: Vec3::new(2.0, 2.0, 2.0),
+        },
+        Vec3::new(0.0, -2.0, 0.0),
+        Quat::IDENTITY,
+    );
+}
+
+/// `box` 档夹具：同一个 4×4×4 m 静态盒（顶面 y = 0），走解析腿。
+fn add_box_floor(w: &mut World) {
+    w.add_static(
+        Shape::Box {
+            half: Vec3::new(2.0, 2.0, 2.0),
+        },
+        Vec3::new(0.0, -2.0, 0.0),
+        Quat::IDENTITY,
+    );
 }
 
 fn main() {
@@ -233,47 +283,7 @@ fn main() {
         depth,
         ticks,
     );
-    run(
-        "hull ",
-        0.0,
-        |w| {
-            // 8 点盒壳：**几何中心在原点**（点 ∈ ±2）⇒ 位姿下移 2 m 让顶面正好在 y = 0，
-            // 且 `half` 与点集匹配（宽相 AABB 才不会错）。
-            let mut pts = Vec::new();
-            for sx in [-1.0f32, 1.0] {
-                for sy in [-1.0f32, 1.0] {
-                    for sz in [-1.0f32, 1.0] {
-                        pts.push(Vec3::new(sx * 2.0, sy * 2.0, sz * 2.0));
-                    }
-                }
-            }
-            let hull = w.add_hull(pts);
-            w.add_static(
-                Shape::ConvexHull {
-                    hull,
-                    half: Vec3::new(2.0, 2.0, 2.0),
-                },
-                Vec3::new(0.0, -2.0, 0.0),
-                Quat::IDENTITY,
-            );
-        },
-        depth,
-        ticks,
-    );
+    run("hull ", 0.0, add_hull_floor, depth, ticks);
     // 静态**盒**（同一个 4×4×4 m 盒、顶面 y = 0）—— 走 `prims::sphere_convex_ab` 的"球心在凸体内部"分支。
-    run(
-        "box  ",
-        0.0,
-        |w| {
-            w.add_static(
-                Shape::Box {
-                    half: Vec3::new(2.0, 2.0, 2.0),
-                },
-                Vec3::new(0.0, -2.0, 0.0),
-                Quat::IDENTITY,
-            );
-        },
-        depth,
-        ticks,
-    );
+    run("box  ", 0.0, add_box_floor, depth, ticks);
 }

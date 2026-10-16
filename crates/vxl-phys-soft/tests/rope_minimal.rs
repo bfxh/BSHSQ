@@ -256,13 +256,8 @@ fn rope_sticks_on_slope_up_to_coulomb_threshold() {
     );
 }
 
-/// **粒子 ↔ 刚体耦合（Akinci 式最小实现）**：① 绳落在**静态盒**上就位；② 绳把**动态盒吊住**
-/// —— 后者是双向耦合的**杀手判据**（A/B：把代理表换成空 ⇒ 盒子直接掉下去）。
-///
-/// 测试自己扮演"门面"的角色：盒子的积分自己推（半隐式，与引擎积分器同款），并把绳的反作用
-/// 冲量加回盒子速度（`Δv = Σimpulse / m`）——这条**与门面 `rope_pass` 的账一致**。
-#[test]
-fn rope_couples_with_rigid_bodies() {
+/// ① **静态盒当"地板"**那条的读数：`(最低就位间隙, 最高就位间隙, 末速max)`。
+fn static_box_rest_readout() -> (f32, f32, f32) {
     // ① 静态盒当"地板"（顶面 y = 0，inv_mass = 0 ⇒ 不收反作用）
     let floor = RigidProxy {
         body: 0,
@@ -293,13 +288,39 @@ fn rope_couples_with_rigid_bodies() {
         lo = lo.min(p.y - 0.02);
         hi = hi.max(p.y - 0.02);
     }
+    (lo, hi, max_speed(&r))
+}
+
+/// **粒子 ↔ 刚体耦合（Akinci 式最小实现）**：① 绳落在**静态盒**上就位；② 绳把**动态盒吊住**
+/// —— 后者是双向耦合的**杀手判据**（A/B：把代理表换成空 ⇒ 盒子直接掉下去）。
+///
+/// 测试自己扮演"门面"的角色：盒子的积分自己推（半隐式，与引擎积分器同款），并把绳的反作用
+/// 冲量加回盒子速度（`Δv = Σimpulse / m`）——这条**与门面 `rope_pass` 的账一致**。
+#[test]
+fn rope_couples_with_rigid_bodies() {
+    let (lo, hi, speed_at_rest) = static_box_rest_readout();
     println!(
         "① 静态盒：就位间隙 最低={lo:.5} 最高={hi:.5} | 末速max={:.3e}",
-        max_speed(&r)
+        speed_at_rest
     );
     assert!(lo > -0.01, "绳不该陷进盒子（最低 {lo:.5}）");
     assert!(hi < 0.05, "绳该整体贴在盒面上（最高 {hi:.5}）");
 
+    let held = suspended_box_y_after_60(true);
+    let fell = suspended_box_y_after_60(false);
+    println!("② 紧绳 60 tick：耦合 y={held:.4} | 不耦合 y={fell:.4}");
+    assert!(
+        held > 0.70,
+        "耦合开 ⇒ 盒该被绳**接住**（实得 y={held:.4}）——掉了说明接触/反作用没起作用"
+    );
+    assert!(
+        fell < -1.0,
+        "耦合关 ⇒ 60 tick 内该已落到绳下方（实得 y={fell:.4}）——这条证明上面的'接住'来自耦合"
+    );
+}
+
+/// ② **紧绳当"吊索"**那条的读数：`couple` = 是否把盒代理喂给 `r.step` ⇒ 60 tick 后的盒心 `y`。
+fn suspended_box_y_after_60(couple: bool) -> f32 {
     // ② **紧绳**（段长 = 弦长、两端钉住）当"吊索"：盒从上方压下，绳把它接住（**短窗判据**）。
     //    用紧绳而不是松垂绳：松垂绳的垂度（0.45）与盒高可比 ⇒ 盒子会**跨骑**在绳上（一端接触、
     //    另一端悬空），"最近面"判据会把粒子往侧面推 ⇒ 盒子锯过绳线（两种几何都实测失败过）。
@@ -361,17 +382,7 @@ fn rope_couples_with_rigid_bodies() {
         }
         pos.y
     };
-    let held = run(true);
-    let fell = run(false);
-    println!("② 紧绳 60 tick：耦合 y={held:.4} | 不耦合 y={fell:.4}");
-    assert!(
-        held > 0.70,
-        "耦合开 ⇒ 盒该被绳**接住**（实得 y={held:.4}）——掉了说明接触/反作用没起作用"
-    );
-    assert!(
-        fell < -1.0,
-        "耦合关 ⇒ 60 tick 内该已落到绳下方（实得 y={fell:.4}）——这条证明上面的'接住'来自耦合"
-    );
+    run(couple)
 }
 
 /// 自由下落的绳落到**真实三角网地板**上：每个粒子就位于半径高度、且已静止。

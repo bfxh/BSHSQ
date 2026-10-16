@@ -44,5 +44,5 @@
   "crates/vxl-phys-terrain/src/plane_set.rs": 1,
   "crates/vxl-phys/examples/m1_pile.rs": 1,
   "crates/vxl-phys/src/providers.rs": 1,
-  "crates/vxl-phys/tests/float_quiet_probe.rs": 1
+  "crates/vxl-phys/tests/float_quiet_probe/main.rs": 1
 }

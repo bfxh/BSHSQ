@@ -123,6 +123,7 @@ RULES = [
 ]
 
 SCAN_EXTS = {".py"}
+SKIP_DIRS = ("__pycache__", ".git", "target", "node_modules")
 
 
 def find_files(targets):
@@ -132,11 +133,7 @@ def find_files(targets):
             out.append(t)
         elif os.path.isdir(t):
             for dp, dn, fn in os.walk(t):
-                dn[:] = [
-                    d
-                    for d in dn
-                    if d not in ("__pycache__", ".git", "target", "node_modules")
-                ]
+                dn[:] = [d for d in dn if d not in SKIP_DIRS]
                 for f in fn:
                     if os.path.splitext(f)[1].lower() in SCAN_EXTS:
                         out.append(os.path.join(dp, f))
@@ -145,48 +142,25 @@ def find_files(targets):
     return sorted(set(out))
 
 
+def _cannot_review(text):
+    """读不到或读不成文本一律 BLOCK——无法评审不等于通过。"""
+    return [{"rule": "SEC-00 无法评审", "severity": BLOCK, "line": 0, "text": text}]
+
+
 def review_file(path):
     """返回 (findings, 行数)。无法读取必须产出 BLOCK——读不到不等于通过。"""
     if not os.path.exists(path):
-        return [
-            {
-                "rule": "SEC-00 无法评审",
-                "severity": BLOCK,
-                "line": 0,
-                "text": "路径不存在：" + path,
-            }
-        ], 0
+        return _cannot_review("路径不存在：" + path), 0
     try:
         raw = open(path, "rb").read()
     except OSError as exc:
-        return [
-            {
-                "rule": "SEC-00 无法评审",
-                "severity": BLOCK,
-                "line": 0,
-                "text": "读取失败：%s" % exc,
-            }
-        ], 0
+        return _cannot_review("读取失败：%s" % exc), 0
     if b"\x00" in raw[:4096]:
-        return [
-            {
-                "rule": "SEC-00 无法评审",
-                "severity": BLOCK,
-                "line": 0,
-                "text": "二进制/含 NUL，无法按文本评审",
-            }
-        ], 0
+        return _cannot_review("二进制/含 NUL，无法按文本评审"), 0
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
-        return [
-            {
-                "rule": "SEC-00 无法评审",
-                "severity": BLOCK,
-                "line": 0,
-                "text": "非 UTF-8，无法按文本评审：%s" % exc,
-            }
-        ], 0
+        return _cannot_review("非 UTF-8，无法按文本评审：%s" % exc), 0
 
     lines = text.splitlines()
     findings = []
@@ -319,20 +293,94 @@ def selftest():
     return ok, fails
 
 
-def main(argv=None):
+def _parse_args(argv):
     ap = argparse.ArgumentParser(description="本地 Python 脚本入库前安全评审（只读）")
-    ap.add_argument(
-        "targets", nargs="*", help="文件或目录；缺省时评审 .codex-local-python/"
-    )
+    ap.add_argument("targets", nargs="*", help="文件或目录；缺省时评审 .codex-local-python/")
     ap.add_argument("--json", action="store_true", help="机器可读输出")
     ap.add_argument("--report", metavar="PATH", help="把结论写成 markdown 报告")
     ap.add_argument("--selftest", action="store_true", help="逐条反证本门的判定能力")
-    ap.add_argument(
-        "--allow-warn",
-        action="store_true",
-        help="WARN 不写入报告首屏计数（默认写入，便于对账）",
-    )
-    args = ap.parse_args(argv)
+    ap.add_argument("--allow-warn", action="store_true", help="WARN 不写入报告首屏计数（默认写入，便于对账）")
+    return ap.parse_args(argv)
+
+
+def tally(per_file):
+    """汇总计数；覆盖面无文件时补一条阻断——没在看 ≠ 通过。"""
+    blocks = sum(1 for r in per_file for f in r["findings"] if f["severity"] == BLOCK)
+    warns = sum(1 for r in per_file for f in r["findings"] if f["severity"] == WARN)
+    reviewed = sum(1 for r in per_file if r["lines"] or not r["findings"])
+    cannot = sum(1 for r in per_file for f in r["findings"] if f["rule"].startswith("SEC-00"))
+    # 覆盖面为 0 的门不许报绿：否则"没在看"会被读成"通过了"
+    empty_run = reviewed == 0
+    if empty_run:
+        blocks += 1
+    return {"blocks": blocks, "warns": warns, "reviewed": reviewed,
+            "cannot": cannot, "empty_run": empty_run}
+
+
+def write_report(path, per_file, stats, verdict, targets):
+    """写 markdown 报告：先计数小结，再逐条命中。"""
+    with open(path, "w", encoding="utf-8", newline="\n") as w:
+        w.write("# 本地 Python 安全评审报告\n\n")
+        w.write(
+            "- 结论：**%s**\n- 覆盖面：评审 %d 个文件，无法评审 %d 个\n"
+            "- 阻断项 %d ｜ 提示项 %d\n- 目标：%s\n\n"
+            % (verdict, stats["reviewed"], stats["cannot"], stats["blocks"],
+               stats["warns"], " ".join(targets))
+        )
+        w.write("| 文件 | 行 | 级别 | 规则 | 命中 |\n|---|---|---|---|---|\n")
+        for r in per_file:
+            for f in r["findings"]:
+                cell = f["text"].replace("|", "\\|")
+                w.write(
+                    "| `%s` | %d | %s | %s | `%s` |\n"
+                    % (r["path"], f["line"], f["severity"], f["rule"], cell[:90])
+                )
+
+
+def emit_report(args, per_file, stats, targets):
+    """按口径输出结论：json 或人读文本，并按需写报告文件。"""
+    blocks = stats["blocks"]
+    verdict = "通过" if blocks == 0 else "判红"
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "verdict": verdict,
+                    "block": blocks,
+                    "warn": stats["warns"],
+                    "files_reviewed": stats["reviewed"],
+                    "cannot_review": stats["cannot"],
+                    "results": per_file,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    else:
+        print("安全评审 · %s" % verdict)
+        print(
+            "覆盖面：文件 %d（其中无法评审 %d）｜发现：阻断 %d｜提示 %d"
+            % (stats["reviewed"], stats["cannot"], blocks, stats["warns"])
+        )
+        for r in per_file:
+            if not r["findings"]:
+                continue
+            print("- %s（%d 行）" % (r["path"], r["lines"]))
+            for f in r["findings"]:
+                print(
+                    "    %s %s:%d  %s"
+                    % (f["severity"], f["rule"], f["line"], f["text"])
+                )
+        if stats["empty_run"]:
+            print("    BLOCK SEC-00 覆盖面：本次没有评审到任何文件 ⇒ 不得判绿")
+
+    if args.report:
+        write_report(args.report, per_file, stats, verdict, targets)
+        print("报告已写：%s" % args.report)
+
+
+def main(argv=None):
+    args = _parse_args(argv)
 
     if args.selftest:
         n, fails = selftest()
@@ -365,70 +413,9 @@ def main(argv=None):
         f, n = review_file(p)
         per_file.append({"path": p, "lines": n, "findings": f})
 
-    blocks = sum(1 for r in per_file for f in r["findings"] if f["severity"] == BLOCK)
-    warns = sum(1 for r in per_file for f in r["findings"] if f["severity"] == WARN)
-    reviewed = sum(1 for r in per_file if r["lines"] or not r["findings"])
-    cannot = sum(
-        1 for r in per_file for f in r["findings"] if f["rule"].startswith("SEC-00")
-    )
-    # 覆盖面为 0 的门不许报绿：否则"没在看"会被读成"通过了"
-    empty_run = reviewed == 0
-    if empty_run:
-        blocks += 1
-
-    verdict = "通过" if blocks == 0 else "判红"
-    if args.json:
-        print(
-            json.dumps(
-                {
-                    "verdict": verdict,
-                    "block": blocks,
-                    "warn": warns,
-                    "files_reviewed": reviewed,
-                    "cannot_review": cannot,
-                    "results": per_file,
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
-    else:
-        print("安全评审 · %s" % verdict)
-        print(
-            "覆盖面：文件 %d（其中无法评审 %d）｜发现：阻断 %d｜提示 %d"
-            % (reviewed, cannot, blocks, warns)
-        )
-        for r in per_file:
-            if not r["findings"]:
-                continue
-            print("- %s（%d 行）" % (r["path"], r["lines"]))
-            for f in r["findings"]:
-                print(
-                    "    %s %s:%d  %s"
-                    % (f["severity"], f["rule"], f["line"], f["text"])
-                )
-        if empty_run:
-            print("    BLOCK SEC-00 覆盖面：本次没有评审到任何文件 ⇒ 不得判绿")
-
-    if args.report:
-        with open(args.report, "w", encoding="utf-8", newline="\n") as w:
-            w.write("# 本地 Python 安全评审报告\n\n")
-            w.write(
-                "- 结论：**%s**\n- 覆盖面：评审 %d 个文件，无法评审 %d 个\n"
-                "- 阻断项 %d ｜ 提示项 %d\n- 目标：%s\n\n"
-                % (verdict, reviewed, cannot, blocks, warns, " ".join(targets))
-            )
-            w.write("| 文件 | 行 | 级别 | 规则 | 命中 |\n|---|---|---|---|---|\n")
-            for r in per_file:
-                for f in r["findings"]:
-                    cell = f["text"].replace("|", "\\|")
-                    w.write(
-                        "| `%s` | %d | %s | %s | `%s` |\n"
-                        % (r["path"], f["line"], f["severity"], f["rule"], cell[:90])
-                    )
-        print("报告已写：%s" % args.report)
-
-    return 1 if blocks else 0
+    stats = tally(per_file)
+    emit_report(args, per_file, stats, targets)
+    return 1 if stats["blocks"] else 0
 
 
 if __name__ == "__main__":

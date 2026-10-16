@@ -147,14 +147,23 @@ fn finish(pass_p95: bool, pass_any: bool, p95: f64, cmax: f64, max_tick: usize, 
     }
 }
 
-fn main() {
-    let bodies = WORLD_TILES + (CARRIERS * CARRIER_CELLS) as usize + PROBES as usize;
-    let mut w = build();
-    // **不预热**：验收口径对齐 8B 的「沉降期任一 tick」——量的是**最严**的沉降期，
-    // 而非静置后（静置帧零树操作，量出来只是管线空转）。
-    let t_wall = Instant::now();
-    let (mut broad, mut narrow, total, max_tick, max_bd) = run_ticks(&mut w);
-    let wall = t_wall.elapsed().as_secs_f64() * 1000.0 / TICKS as f64;
+/// 采样汇总：p50/p95/max、宽相 p95、窄相 p95、墙钟均、静置 p50/p95、p95 通过、任一 tick 通过、
+/// 载入 ms、建树 ms、峰值 tick、末帧细分、峰值细分、健康（NaN/深穿透/活跃/接触）。
+type Stats = (
+    (f64, f64, f64, f64, f64, f64, f64, f64),
+    (bool, bool, f64, f64),
+    usize,
+    (u64, u64, u64, u64),
+    (u64, u64, u64, u64),
+    u32,
+    u32,
+    u32,
+    u32,
+);
+
+/// 采样 → 汇总（纯统计，不改世界；口径见 M1-PLAN 读数陷阱：宽/窄相分位 + 末 30 tick 静置窗）。
+fn summarize(w: &World, samples: TickSamples, wall: f64) -> Stats {
+    let (mut broad, mut narrow, total, max_tick, max_bd) = samples;
     let bd = w.broad.breakdown_us();
     let h = w.health();
     let p50 = pct(&mut total.clone(), 0.50);
@@ -176,7 +185,23 @@ fn main() {
     } else {
         max_bd.1 as f64 / 1000.0
     };
+    (
+        (p50, p95, cmax, bp95, np95, wall, settle_p50, settle_p95),
+        (pass_p95, pass_any, load, load_tree),
+        max_tick,
+        bd,
+        max_bd,
+        h.nan_bodies,
+        h.deep_penetrations,
+        h.awake_bodies,
+        h.contacts,
+    )
+}
 
+/// 人读报表：分位、宽相/窄相细分、峰值 tick、健康（`println!` 格式串逐字保留）。
+fn report(w: &World, s: &Stats, bodies: usize) {
+    let (pc, _, max_tick, bd, max_bd, nan, deep, awake, contacts) = *s;
+    let (p50, p95, cmax, bp95, np95, wall, settle_p50, settle_p95) = pc;
     println!(
         "8A 碰撞行：{CARRIERS} 载体 × {CARRIER_CELLS} 格 + 世界（{bodies} 体，含 {PROBES} 探针）"
     );
@@ -201,14 +226,20 @@ fn main() {
     );
     println!(
         "健康：NaN {} 深穿透 {} 末态活跃 {} 接触 {} | 树高 {}",
-        h.nan_bodies,
-        h.deep_penetrations,
-        h.awake_bodies,
-        h.contacts,
+        nan,
+        deep,
+        awake,
+        contacts,
         w.broad.tree_height()
     );
+}
 
-    let json = format!(
+/// 机器口径：ASCII 报告 JSON（字段与人读报表同源，供 CI 归档）。
+fn report_json(w: &World, s: &Stats, bodies: usize) -> String {
+    let (pc, flags, max_tick, _, _, nan, deep, awake, contacts) = *s;
+    let (p50, p95, cmax, bp95, np95, wall, settle_p50, settle_p95) = pc;
+    let (pass_p95, pass_any, load, load_tree) = flags;
+    format!(
         "{{\n  \"gate\": \"m1_8a_collision_row\",\n  \"env\": {{\"os\": \"{}\", \"arch\": \"{}\"}},\n  \
          \"scene\": {{\"carriers\": {}, \"cells_per_carrier\": {}, \"world_tiles\": {}, \"probes\": {}, \"bodies\": {}}},\n  \
          \"collision_row_ms\": {{\"p50\": {:.4}, \"p95\": {:.4}, \"max\": {:.4}, \"broad_p95\": {:.4}, \"narrow_p95\": {:.4}, \"wall_avg\": {:.4}, \"settled_p50\": {:.4}, \"settled_p95\": {:.4}}},\n  \
@@ -233,15 +264,28 @@ fn main() {
         max_tick,
         load,
         load_tree,
-        h.nan_bodies,
-        h.deep_penetrations,
-        h.awake_bodies,
-        h.contacts,
+        nan,
+        deep,
+        awake,
+        contacts,
         w.broad.tree_height(),
         LIMIT_MS,
         pass_p95,
         pass_any,
-    );
+    )
+}
+
+fn main() {
+    let bodies = WORLD_TILES + (CARRIERS * CARRIER_CELLS) as usize + PROBES as usize;
+    let mut w = build();
+    // **不预热**：验收口径对齐 8B 的「沉降期任一 tick」——量的是**最严**的沉降期，
+    // 而非静置后（静置帧零树操作，量出来只是管线空转）。
+    let t_wall = Instant::now();
+    let samples = run_ticks(&mut w);
+    let wall = t_wall.elapsed().as_secs_f64() * 1000.0 / TICKS as f64;
+    let stats = summarize(&w, samples, wall);
+    report(&w, &stats, bodies);
+    let json = report_json(&w, &stats, bodies);
     println!("\n{json}");
     if let Some(path) = std::env::args().nth(1) {
         if let Err(e) = std::fs::write(&path, &json) {
@@ -250,6 +294,9 @@ fn main() {
             println!("报告已写入 {path}");
         }
     }
+    let (pc, flags, max_tick, ..) = stats;
+    let (_, p95, cmax, ..) = pc;
+    let (pass_p95, pass_any, _, load_tree) = flags;
     // 退出码只看管线口径（p95）；首帧载入只报告不阻断（加载期成本，非管线成本）。
     finish(pass_p95, pass_any, p95, cmax, max_tick, load_tree);
 }

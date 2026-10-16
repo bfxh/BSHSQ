@@ -77,7 +77,7 @@
 
 > **⚠️ 2026-10-05 补正（液体行的 `deposit` 那句会误导）**：液体的**双向（2b）已经落地**，
 > 走的是**边界粒子**路线 —— `FluidSystem::boundary_reactions()` → 门面 `world_step::fluid_reaction_pass()`
-> （带时间加权账 `coupling::fluid_reaction_ledger`；判据 `vxl-phys-fluid/src/tests.rs` 的 2b 组 +
+> （带时间加权账 `coupling::fluid_reaction_ledger`；判据 `vxl-phys-fluid/src/tests/boundary.rs` 的 2b 组 +
 > 门面 `tests/fluid_boundary.rs` / `fluid_reaction_torque.rs`）。**刚体**的反作用走那条路线，
 > **不**经 `MediumField::deposit` —— 后者 2026-10-05 起是**软体/布**的点式沉积口
 > （`world_soft_reaction::cloth_medium_reaction`）。⇒ 两条通道各管一类受体，别混着读。

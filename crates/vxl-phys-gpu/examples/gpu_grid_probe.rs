@@ -10,6 +10,8 @@
 //! 前进了一个子步 ⇒ 必须先**快照**位置，再跑一步，拿那一步的 `neighbor_grid()` 与快照对齐。
 //!
 //! 运行：`cargo run --release -p vxl-phys-gpu --example gpu_grid_probe -- [n] [--adapter K] [--cap C]`
+//!
+//! **拆分（2026-10-17）**：CPU 对照档（build_cpu）/ 卡上一轮（run_gpu）/ 判据比较（compare）各自成 fn；main 只留编排与打印。
 
 use vxl_phys_core::Vec3;
 use vxl_phys_fluid::{FluidConfig, FluidSystem};
@@ -177,19 +179,24 @@ fn parse_args() -> (usize, usize, u32, usize) {
             .unwrap_or(1),
     )
 }
+/// CPU 对照档的一次实测：建场后的**快照**位置 + 引擎建出来的表 + 该子步的网格相位耗时。
+/// ⚠️ 表对应的位置是快照那一组（口径见文件头），不是步进后的位置。
+struct Cpu {
+    pos: Vec<Vec3>,
+    np: usize,
+    total: usize,
+    min: Vec3,
+    inv: f32,
+    dims: (u32, u32, u32),
+    start: Vec<u32>,
+    items: Vec<u32>,
+    grid_ms_step: f64,
+    substeps: f64,
+    threads: usize,
+}
 
-fn main() {
-    let (n, adapter_index, cap, cpu_threads) = parse_args();
-
-    println!("== 适配器清单（不绑厂商核对）==");
-    for (i, a) in probe::adapters().iter().enumerate() {
-        println!("  [{i}] {a}");
-    }
-
-    let spacing = 0.05f32;
-    if cpu_threads > 1 {
-        println!("⚠️ CPU 对照档 threads={cpu_threads}（并行口径；与串行逐位相同）");
-    }
+/// CPU 对照档：建场 → 5 趟静置 → **快照位置** → 跑一步，拿它建出来的表（口径见文件头 ⚠️）。
+fn build_cpu(n: usize, cpu_threads: usize, spacing: f32) -> Cpu {
     let cfg = FluidConfig {
         threads: cpu_threads,
         ..FluidConfig::default()
@@ -212,7 +219,7 @@ fn main() {
     let pos: Vec<Vec3> = f.positions().to_vec();
     f.reset_phase_us();
     f.step(1.0 / 60.0, &vxl_phys_core::interop::NoProviders);
-    let cpu_grid_ms_step = f.phase_us()[0] as f64 / 1e3;
+    let grid_ms_step = f.phase_us()[0] as f64 / 1e3;
     let (cmin, cinv, cdims, cstart, citems) = {
         let gd = f.neighbor_grid();
         (
@@ -225,21 +232,37 @@ fn main() {
     };
     let np = pos.len();
     let total = (cdims.0 as usize) * (cdims.1 as usize) * (cdims.2 as usize);
+    Cpu {
+        pos,
+        np,
+        total,
+        min: cmin,
+        inv: cinv,
+        dims: cdims,
+        start: cstart,
+        items: citems,
+        grid_ms_step,
+        substeps,
+        threads: f.config().threads,
+    }
+}
 
-    let mut pos_flat: Vec<f32> = Vec::with_capacity(np * 3);
-    for p in &pos {
+/// 卡上一轮：四入口 + 清零 + 拷贝 + 同步回读（20 轮均值）；`None` = 卡上路径不可用。
+fn run_gpu(adapter_index: usize, cap: u32, cpu: &Cpu) -> Option<GridOut> {
+    let mut pos_flat: Vec<f32> = Vec::with_capacity(cpu.np * 3);
+    for p in &cpu.pos {
         pos_flat.extend_from_slice(&[p.x, p.y, p.z]);
     }
     let params = GridParams {
-        gmin: [cmin.x, cmin.y, cmin.z],
-        inv: cinv,
-        nx: cdims.0,
-        ny: cdims.1,
-        nz: cdims.2,
-        n: np as u32,
-        total: total as u32,
+        gmin: [cpu.min.x, cpu.min.y, cpu.min.z],
+        inv: cpu.inv,
+        nx: cpu.dims.0,
+        ny: cpu.dims.1,
+        nz: cpu.dims.2,
+        n: cpu.np as u32,
+        total: cpu.total as u32,
         cap,
-        n_fluid: np as u32, // 纯流体档：类 0 覆盖全量粒子
+        n_fluid: cpu.np as u32, // 纯流体档：类 0 覆盖全量粒子
         class_lo: 0,
     };
     let out = grid::grid_on_adapter(
@@ -252,35 +275,59 @@ fn main() {
     );
     if let Some(e) = out.error {
         println!("GPU 路径不可用：{e}");
-        return;
+        return None;
     }
+    Some(out)
+}
 
-    // ① start / items 逐位；② 逐粒 bin（CPU 侧从表反推）
-    let (s_bad, s_first) = cmp_u32(&cstart, &out.start);
-    let (i_bad, i_first) = cmp_u32(&citems, &out.items);
-    let cpu_bin = bins_from_table(&cstart, &citems, total, np);
+/// 判据：① `start` / `items` 逐位；② 逐粒 bin（CPU 侧从表反推）。
+fn compare(cpu: &Cpu, out: &GridOut) -> TableCmp {
+    let (s_bad, s_first) = cmp_u32(&cpu.start, &out.start);
+    let (i_bad, i_first) = cmp_u32(&cpu.items, &out.items);
+    let cpu_bin = bins_from_table(&cpu.start, &cpu.items, cpu.total, cpu.np);
     let (b_bad, b_first) = cmp_u32(&cpu_bin, &out.bins);
-    let cpu_grid_ms_sub = cpu_grid_ms_step / substeps;
-    let t = TableCmp {
-        n_start: cstart.len(),
-        n_items: citems.len(),
+    TableCmp {
+        n_start: cpu.start.len(),
+        n_items: cpu.items.len(),
         s_bad,
         s_first,
         i_bad,
         i_first,
         b_bad,
         b_first,
-        h_cpu: hash_of(&cstart, &citems, &cpu_bin),
+        h_cpu: hash_of(&cpu.start, &cpu.items, &cpu_bin),
         h_gpu: hash_of(&out.start, &out.items, &out.bins),
+    }
+}
+
+fn main() {
+    let (n, adapter_index, cap, cpu_threads) = parse_args();
+
+    println!("== 适配器清单（不绑厂商核对）==");
+    for (i, a) in probe::adapters().iter().enumerate() {
+        println!("  [{i}] {a}");
+    }
+
+    let spacing = 0.05f32;
+    if cpu_threads > 1 {
+        println!("⚠️ CPU 对照档 threads={cpu_threads}（并行口径；与串行逐位相同）");
+    }
+    let cpu = build_cpu(n, cpu_threads, spacing);
+    let Some(out) = run_gpu(adapter_index, cap, &cpu) else {
+        return;
     };
 
+    // ① start / items 逐位；② 逐粒 bin（CPU 侧从表反推）
+    let t = compare(&cpu, &out);
+    let cpu_grid_ms_sub = cpu.grid_ms_step / cpu.substeps;
+
     let scene = Scene {
-        np,
-        total,
+        np: cpu.np,
+        total: cpu.total,
         cap,
-        dims: cdims,
-        substeps,
-        threads: f.config().threads,
+        dims: cpu.dims,
+        substeps: cpu.substeps,
+        threads: cpu.threads,
         cpu_grid_ms_sub,
     };
     report(&scene, &t, &out);

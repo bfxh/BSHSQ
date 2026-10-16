@@ -15,5 +15,5 @@
   "crates/vxl-phys-terrain/src/mesh.rs": 1,
   "crates/vxl-phys-terrain/src/voxel/surface.rs": 1,
   "crates/vxl-phys-terrain/src/voxel/voxel_volume.rs": 1,
-  "crates/vxl-phys/tests/float_quiet_probe.rs": 1
+  "crates/vxl-phys/tests/float_quiet_probe/main.rs": 1
 }

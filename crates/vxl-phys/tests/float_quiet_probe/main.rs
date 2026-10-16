@@ -9,95 +9,20 @@
 //! 对照 = 同场景 `add_fluid`（2a 单向，介质场浮力/阻力）。
 //!
 //! 跑法：`cargo test --release -p vxl-phys --test float_quiet_probe -- --ignored --nocapture`
+//!
+//! **拆分**（god 门 file>800 硬线，拆前 778 行）：场景件 → `scene`、窗口统计 → `stats`、
+//! 三个"量一个场景"的取数件 → `protocol`；本文件留测试本体与 `report` / `run_protocol_block`
+//! —— `report` 有 8 个形参（超 args 门 soft=7）⇒ **不能**搬进新文件，否则新文件的 args 计数非 0。
 
 use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
 
-fn tank(w: &mut World) -> u32 {
-    let mut vol =
-        vxl_phys_terrain::voxel::VoxelVolume::new(Vec3::new(-1.25, 0.0, -1.25), 0.5, 5, 3, 5);
-    vol.fill_box(Vec3::new(-1.25, 0.0, -1.25), Vec3::new(1.25, 1.0, 1.25));
-    for ix in 0..5u32 {
-        for iz in 0..5u32 {
-            if ix == 2 && iz == 2 {
-                continue;
-            }
-            vol.set(ix, 2, iz, true);
-        }
-    }
-    w.add_voxel(vol)
-}
+mod protocol;
+mod scene;
+mod stats;
 
-fn water(layers: u32) -> vxl_phys_fluid::FluidSystem {
-    vxl_phys_fluid::FluidSystem::new(
-        vxl_phys_fluid::FluidConfig {
-            boundary_layers: layers,
-            ..vxl_phys_fluid::FluidConfig::default()
-        },
-        Vec3::new(-0.2, 1.05, -0.2),
-        [8, 8, 8],
-        0.05,
-    )
-}
-
-/// 返回 `(y 峰峰, |v| 峰峰, |ω| 峰峰, y 均值, 反作用 f.y 峰峰/ρVg)`。
-fn quiet(couple: bool, layers: u32) -> (f32, f32, f32, f32, f32) {
-    let mut w = World::new(PhysConfig::default());
-    let v = tank(&mut w);
-    let sys = water(layers);
-    if couple {
-        w.add_fluid_with_boundary_coupling(sys, &[v]);
-    } else {
-        w.add_fluid(sys, &[v]);
-    }
-    // 轻盒从水面上方落入（干净开局：不落在已有水格上）。
-    let half = 0.06f32;
-    let b = w.add_dynamic(
-        Shape::Box {
-            half: Vec3::splat(half),
-        },
-        Vec3::new(0.0, 1.50, 0.0),
-        Quat::IDENTITY,
-        300.0,
-    );
-    for _ in 0..300 {
-        w.step(); // 落水 + 漂稳
-    }
-    let win = 180usize;
-    let (mut ylo, mut yhi) = (f32::MAX, f32::MIN);
-    let (mut vlo, mut vhi) = (f32::MAX, f32::MIN);
-    let (mut wlo, mut whi) = (f32::MAX, f32::MIN);
-    let (mut ysum, mut fsum) = (0.0f64, 0.0f64);
-    let (mut flo, mut fhi) = (f32::MAX, f32::MIN);
-    let expect = 1000.0 * (2.0 * half).powi(3) * 9.81;
-    for _ in 0..win {
-        w.step();
-        let p = w.bodies.position[b as usize];
-        let lv = w.bodies.linvel[b as usize].length();
-        let av = w.bodies.angvel(b as usize).length();
-        ylo = ylo.min(p.y);
-        yhi = yhi.max(p.y);
-        vlo = vlo.min(lv);
-        vhi = vhi.max(lv);
-        wlo = wlo.min(av);
-        whi = whi.max(av);
-        ysum += p.y as f64;
-        // 反作用：2b 档读流体侧；2a 档没有反作用（读体受力替代不了）⇒ 只 2b 档有意义。
-        if let Some(r) = w.fluids()[0]
-            .0
-            .boundary_reactions()
-            .iter()
-            .find(|r| r.0 == b)
-        {
-            fsum += r.1.y as f64;
-            flo = flo.min(r.1.y);
-            fhi = fhi.max(r.1.y);
-        }
-    }
-    let n = win as f64;
-    let fpp = if couple { (fhi - flo) / expect } else { 0.0 };
-    let _ = fsum / n;
-    (yhi - ylo, vhi - vlo, whi - wlo, (ysum / n) as f32, fpp)
-}
+use protocol::{quiet, quiet_shaped, run_yaw};
+use scene::{quat_y_45, tank, water};
+use stats::{surface_height, window_stats, yaw_of};
 
 #[test]
 #[ignore = "仪表（只打印）：漂浮体安分度；见文件头跑法"]
@@ -136,6 +61,7 @@ fn floating_body_quietness() {
 /// - 若换姿态（盒绕 Y 转 45°）自旋即大改 ⇒ **面栅格相位伪影**（数值）；
 /// - 若换体形（球，表面无面栅格）自旋同量级 ⇒ **流场/力矩建模**（更接近物理）；
 /// - 另打印**力矩均值**（系统性偏置 = 真扭矩；零均值大方差 = 噪声）与**累计偏航**（真转了多少）。
+
 #[test]
 #[ignore = "仪表（只打印）：漂浮体自旋的来源；见上注"]
 fn float_spin_source_diagnosis() {
@@ -186,80 +112,6 @@ fn float_spin_source_diagnosis() {
     );
 }
 
-/// 同 `quiet`，但可传体形/姿态，并额外返回（|τ| 窗口均值、累计偏航）。
-fn quiet_shaped(couple: bool, shape: Shape, rot: Quat) -> (f32, f32, f32, f32, f32) {
-    let mut w = World::new(PhysConfig::default());
-    let v = tank(&mut w);
-    let sys = water(2);
-    if couple {
-        w.add_fluid_with_boundary_coupling(sys, &[v]);
-    } else {
-        w.add_fluid(sys, &[v]);
-    }
-    let b = w.add_dynamic(shape, Vec3::new(0.0, 1.50, 0.0), rot, 300.0);
-    for _ in 0..300 {
-        w.step(); // 落水 + 漂稳
-    }
-    let mut prev_yaw = 0.0f32;
-    let mut unwrapped = 0.0f32;
-    let (mut ylo, mut yhi) = (f32::MAX, f32::MIN);
-    let (mut vlo, mut vhi) = (f32::MAX, f32::MIN);
-    let (mut wlo, mut whi) = (f32::MAX, f32::MIN);
-    let mut tsum = 0.0f64;
-    for _ in 0..180 {
-        w.step();
-        let p = w.bodies.position[b as usize];
-        ylo = ylo.min(p.y);
-        yhi = yhi.max(p.y);
-        let lv = w.bodies.linvel[b as usize].length();
-        vlo = vlo.min(lv);
-        vhi = vhi.max(lv);
-        let av = w.bodies.angvel(b as usize).length();
-        wlo = wlo.min(av);
-        whi = whi.max(av);
-        if let Some(r) = w.fluids()[0]
-            .0
-            .boundary_reactions()
-            .iter()
-            .find(|r| r.0 == b)
-        {
-            tsum += r.2.length() as f64;
-        }
-        // 累计偏航（unwrap：把每步 Δyaw 折到 (-π, π] 再累加）
-        let yaw = yaw_of(w.bodies.rot(b as usize));
-        let mut d = yaw - prev_yaw;
-        while d > std::f32::consts::PI {
-            d -= 2.0 * std::f32::consts::PI;
-        }
-        while d < -std::f32::consts::PI {
-            d += 2.0 * std::f32::consts::PI;
-        }
-        unwrapped += d;
-        prev_yaw = yaw;
-    }
-    (
-        yhi - ylo,
-        vhi - vlo,
-        whi - wlo,
-        (tsum / 180.0) as f32,
-        unwrapped,
-    )
-}
-
-/// 姿态的偏航角（绕 Y；用旋转矩阵的 x 轴投影求）。
-fn yaw_of(q: Quat) -> f32 {
-    let x = q.rotate_vec3(Vec3::X);
-    x.z.atan2(x.x)
-}
-
-/// **自旋偏置来源隔离**（仪表，只打印）——上一轮已证"噪声与偏置是两个成分"，本测试只追偏置。
-///
-/// 三格对拍（同槽同体，窗口 180 tick）：
-/// - **干槽**（无流体）：体落在槽底。若它也转 ⇒ 偏置在**刚体接触侧**（排序/法线选择）；
-///   （干槽是刚体↔体素提供者接触，与 2b 无关，能一刀切开"流体 vs 刚体"。）
-/// - **静态体**（marker，inv_mass=0）+ 流体：体不动 ⇒ 读**反作用力矩均值**——
-///   非零即证明"流体对**静止**体也施加系统性转矩"（与体的转动反馈无关）。
-/// - **自由体 + 流体**：基准（复现上一轮的 −0.142 rad/3 s）。
 #[test]
 #[ignore = "仪表（只打印）：自旋偏置来源；见上注"]
 fn float_spin_bias_isolation() {
@@ -335,29 +187,7 @@ fn float_spin_bias_isolation() {
     }
 }
 /// 跑 `settle` 步再取 `win` 步窗口，返回（累计偏航、|ω| 峰）。
-fn run_yaw(w: &mut World, body: usize, settle: usize, win: usize) -> (f32, f32) {
-    for _ in 0..settle {
-        w.step();
-    }
-    let mut prev = yaw_of(w.bodies.rot(body));
-    let mut unwrapped = 0.0f32;
-    let mut wpeak = 0.0f32;
-    for _ in 0..win {
-        w.step();
-        let y = yaw_of(w.bodies.rot(body));
-        let mut d = y - prev;
-        while d > std::f32::consts::PI {
-            d -= 2.0 * std::f32::consts::PI;
-        }
-        while d < -std::f32::consts::PI {
-            d += 2.0 * std::f32::consts::PI;
-        }
-        unwrapped += d;
-        prev = y;
-        wpeak = wpeak.max(w.bodies.angvel(body).length());
-    }
-    (unwrapped, wpeak)
-}
+
 /// **冲击 vs 稳态**（仪表，只打印）：三格隔离实验里体都是**从 1.5 m 落下**（冲击 ≈4.4 m/s）⇒
 /// 那个符号确定的偏航**可能只是"一次性冲击的不对称残差"**（角动量守恒 ⇒ 转了就留着），
 /// 而不是稳态偏置。本测试把同一格改成**轻放**（起点就在平衡位附近，几乎无冲击）：
@@ -410,6 +240,7 @@ fn spin_bias_impact_vs_steady() {
 /// ⚠️ **2026-10-04 实测：这套协议对流体格跑不出有效读数**——① 把体直接放进已有水格，
 /// 正是 `RECIPES.md` 写明的禁忌（重合 ⇒ ρ 爆 ⇒ 弹射：0° 被弹到速度上限后**穿透地板**掉到
 /// y=−1319、45° 被抛上槽壁）；⇒ 要稳态读数须先有**铸装挖空 API**。干槽两格则**自旋恰为 0**。
+
 #[test]
 #[ignore = "仪表（只打印）：合格协议下的稳态自旋；见上注"]
 fn steady_spin_with_valid_protocol() {
@@ -434,6 +265,7 @@ fn steady_spin_with_valid_protocol() {
 }
 
 /// 一档配置下的完整协议表。
+
 fn run_protocol_block(cfg: PhysConfig, settle_ticks: usize, win_ticks: usize) {
     let _ = &cfg;
     println!(
@@ -510,9 +342,6 @@ fn run_protocol_block(cfg: PhysConfig, settle_ticks: usize, win_ticks: usize) {
     }
 }
 
-fn quat_y_45() -> Quat {
-    Quat::from_axis_angle(Vec3::Y, std::f32::consts::FRAC_PI_4)
-}
 /// 静置后**自检**再取窗口；未静止（或**被弹离就位高度**）则报"无效"。⚠️ 位置这一项是必须的：
 /// 被反作用弹到槽壁顶的体会"静止且已入睡"（|v|=|ω|=0）⇒ 只查速度会把它当有效读数（2026-10-04 实测）。
 fn report(
@@ -574,6 +403,7 @@ fn report(
 /// 回答三个判别问题：① **绕哪个轴转**（ω 分量）；② **逐 tick 注入还是自增长**（|ω| 走势）；
 /// ③ **有没有"睡着又被叫醒"**（awake / sleep_timer）；并顺带打印**流形**（点数与相对体心的面内偏移
 /// —— 判"接触补丁是否对称"：对称补丁的点应成 ±x / ±z 对出现）。
+
 #[test]
 #[ignore = "仪表（只打印）：P10 单盒自旋的逐 tick 轨迹；见上注"]
 fn p10_single_box_spin_trace() {
@@ -630,82 +460,6 @@ fn p10_single_box_spin_trace() {
 /// ④ **2a 单向**（`add_fluid`，无边界粒子反作用）对照 —— 若两档同量级 ⇒ 与 2b 无关。
 /// 零冲击就位：先建**同参数的空水槽**跑 300 tick，量中心区（±0.05 m）的水面最高点。
 /// `couple` 选 2b 双向（`add_fluid_with_boundary_coupling`）或 2a 单向（`add_fluid`）。
-fn surface_height(couple: bool) -> f32 {
-    let mut w0 = World::new(PhysConfig::default());
-    let v0 = tank(&mut w0);
-    let s0 = water(2);
-    let f0 = if couple {
-        w0.add_fluid_with_boundary_coupling(s0, &[v0])
-    } else {
-        w0.add_fluid(s0, &[v0])
-    };
-    for _ in 0..300 {
-        w0.step();
-    }
-    w0.fluids()[f0]
-        .0
-        .positions()
-        .iter()
-        .filter(|p| p.x.abs() < 0.05 && p.z.abs() < 0.05)
-        .map(|p| p.y)
-        .fold(0.0f32, f32::max)
-}
-
-/// 窗口统计：**体动 vs 局部水动**（窗口 `win` tick，逐步 `w.step()`）。
-///
-/// 口径：体心 y 起伏、`|v|`/`|ω|` 窗口均值；邻近水 = 水平 `±0.08` m 内的平均/峰 `|v|`
-/// 与**水面高度**（该窗口内邻近水最高点）的起伏。两档共用（2b 双向 / 2a 单向）；
-/// 2a 侧不打印水面起伏，但统计照算（同一次遍历，不额外扫一遍）。
-struct Stats {
-    ylo: f32,
-    yhi: f32,
-    slo: f32,
-    shi: f32,
-    vsum: f64,
-    vmax: f32,
-    n: f64,
-    bvsum: f64,
-    bwsum: f64,
-}
-
-fn window_stats(w: &mut World, b: usize, fid: usize, win: usize) -> Stats {
-    let (mut ylo, mut yhi) = (f32::MAX, f32::MIN);
-    let (mut slo, mut shi) = (f32::MAX, f32::MIN);
-    let (mut vsum, mut vmax, mut n) = (0.0f64, 0.0f32, 0.0f64);
-    let (mut bvsum, mut bwsum) = (0.0f64, 0.0f64);
-    for _ in 0..win {
-        w.step();
-        let p = w.bodies.position[b];
-        ylo = ylo.min(p.y);
-        yhi = yhi.max(p.y);
-        bvsum += w.bodies.linvel[b].length() as f64;
-        bwsum += w.bodies.angvel(b).length() as f64;
-        let f = &w.fluids()[fid].0;
-        let mut sh = 0.0f32;
-        for (q, vv) in f.positions().iter().zip(f.velocities().iter()) {
-            if (q.x - p.x).abs() < 0.08 && (q.z - p.z).abs() < 0.08 {
-                let sp = vv.length();
-                vsum += sp as f64;
-                vmax = vmax.max(sp);
-                n += 1.0;
-                sh = sh.max(q.y);
-            }
-        }
-        slo = slo.min(sh);
-        shi = shi.max(sh);
-    }
-    Stats {
-        ylo,
-        yhi,
-        slo,
-        shi,
-        vsum,
-        vmax,
-        n,
-        bvsum,
-        bwsum,
-    }
-}
 
 #[test]
 #[ignore = "P10 续：漂浮体不静止的归因（随波 vs 数值）；见上注"]

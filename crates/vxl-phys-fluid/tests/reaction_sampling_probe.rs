@@ -136,6 +136,112 @@ fn tick_samples(
     (fs, ts)
 }
 
+/// 统计窗口的逐 tick 采样账（WIN 个物理 tick 的累加量与逐 tick 相对偏置）。
+struct WindowStats {
+    sum_last: Vec3,
+    sum_mean: Vec3,
+    tau_last: Vec3,
+    tau_mean: Vec3,
+    rel_y: Vec<f32>,
+    rel_lat: Vec<f32>,
+    rel_tau: Vec<f32>,
+    max_spread_y: f32,
+}
+
+/// 跑满 WIN 个物理 tick，累加两种口径（末子步 / 时间平均）的样本与相对偏置。
+/// 算式与累加序与拆分前逐字相同（浮点结合序不变 ⇒ 读数不变）。
+fn sample_window(
+    f: &mut FluidSystem,
+    bodies: &[(u32, Shape, BodyPose)],
+    basin: &Basin,
+    body: u32,
+) -> WindowStats {
+    let mut w = WindowStats {
+        sum_last: Vec3::ZERO,
+        sum_mean: Vec3::ZERO,
+        tau_last: Vec3::ZERO,
+        tau_mean: Vec3::ZERO,
+        rel_y: Vec::new(),
+        rel_lat: Vec::new(),
+        rel_tau: Vec::new(),
+        max_spread_y: 0.0f32,
+    };
+    for _ in 0..WIN {
+        let (fs, ts) = tick_samples(f, bodies, basin, body);
+        let mean = fs.iter().fold(Vec3::ZERO, |a, b| a + *b) * (1.0 / SUB as f32);
+        let mean_t = ts.iter().fold(Vec3::ZERO, |a, b| a + *b) * (1.0 / SUB as f32);
+        let last = *fs.last().unwrap();
+        let last_t = *ts.last().unwrap();
+        w.sum_last += last;
+        w.sum_mean += mean;
+        w.tau_last += last_t;
+        w.tau_mean += mean_t;
+        // 相对偏置：|末 − 均| / |均|（逐分量只为看 x/z 噪声，故用模长）
+        w.rel_y
+            .push((last.y - mean.y).abs() / mean.y.abs().max(1e-9));
+        w.rel_lat
+            .push(((last.x - mean.x).abs() + (last.z - mean.z).abs()) / mean.y.abs().max(1e-9));
+        w.rel_tau
+            .push((last_t - mean_t).length() / mean_t.length().max(1e-9));
+        // tick 内**逐子步**离散度（相对 |F̄_y|）
+        let hi = fs.iter().map(|v| v.y).fold(f32::NEG_INFINITY, f32::max);
+        let lo = fs.iter().map(|v| v.y).fold(f32::INFINITY, f32::min);
+        w.max_spread_y = w.max_spread_y.max((hi - lo) / mean.y.abs().max(1e-9));
+    }
+    w
+}
+
+/// 汇总打印两种口径的账（统计工具 + 6 条 println），返回窗口均值 avg_mean（金丝雀要用）。
+fn report(f: &FluidSystem, w: &WindowStats, half: f32) -> Vec3 {
+    let inv = 1.0 / WIN as f32;
+    let (avg_last, avg_mean) = (w.sum_last * inv, w.sum_mean * inv);
+    let (t_last, t_mean) = (w.tau_last * inv, w.tau_mean * inv);
+    let stat = |v: &[f32]| {
+        let mut s = v.to_vec();
+        s.sort_by(|a, b| a.total_cmp(b));
+        (
+            s[s.len() / 2],
+            s[s.len() - 1],
+            v.iter().sum::<f32>() / v.len() as f32,
+        )
+    };
+    let (my, xy, ay) = stat(&w.rel_y);
+    let (ml, xl, al) = stat(&w.rel_lat);
+    let (mt, xt, at) = stat(&w.rel_tau);
+    let expect = f.config().rest_density * (2.0 * half).powi(3) * 9.81;
+    println!("== C2 采样口径偏置（SUB = {SUB}，窗口 {WIN} 物理 tick，静置 {SETTLE}）==");
+    println!(
+        "窗口均值 F_y：末子步口径 {:.4} / 时间平均口径 {:.4} N（差 {:+.2}%）| ρVg = {:.4} N",
+        avg_last.y,
+        avg_mean.y,
+        100.0 * (avg_last.y - avg_mean.y) / avg_mean.y.abs().max(1e-9),
+        expect
+    );
+    println!(
+        "  ⇒ P7 读数 F_y/ρVg：末子步 {:.3} / 时间平均 {:.3}（**C2 会不会动这张表**看这一行）",
+        avg_last.y / expect,
+        avg_mean.y / expect
+    );
+    println!(
+        "  侧向（窗口均值）：末子步 ({:+.4}, {:+.4}) / 时间平均 ({:+.4}, {:+.4}) N",
+        avg_last.x, avg_last.z, avg_mean.x, avg_mean.z
+    );
+    println!(
+        "  |τ| 窗口均值：末子步 {:.4} / 时间平均 {:.4}",
+        t_last.length(),
+        t_mean.length()
+    );
+    println!(
+        "逐 tick 相对偏置 |末 − 均|/|均|：F_y 中位 {my:.3} 最大 {xy:.3} 均值 {ay:.3}；\
+         侧向/|F̄_y| 中位 {ml:.3} 最大 {xl:.3} 均值 {al:.3}；|τ| 中位 {mt:.3} 最大 {xt:.3} 均值 {at:.3}"
+    );
+    println!(
+        "tick 内逐子步离散度（峰峰/|F̄_y|）最大 {:.3}",
+        w.max_spread_y
+    );
+    avg_mean
+}
+
 /// 场景诊断（探针的职责：先说清"场景到底在不在"）——边界粒数 / 流体数 / 水面 / 盒反作用。
 fn scene_diag(f: &mut FluidSystem, bodies: &[(u32, Shape, BodyPose)], body: u32) -> String {
     let nb = f.set_boundary_particles(bodies);
@@ -191,74 +297,8 @@ fn last_substep_vs_tick_average() {
     }
     println!("{}", scene_diag(&mut f, &bodies, box_body));
 
-    let mut rel_y = Vec::new();
-    let mut rel_lat = Vec::new();
-    let mut rel_tau = Vec::new();
-    let mut max_spread_y = 0.0f32;
-    let (mut sum_last, mut sum_mean) = (Vec3::ZERO, Vec3::ZERO);
-    let (mut tau_last, mut tau_mean) = (Vec3::ZERO, Vec3::ZERO);
-    for _ in 0..WIN {
-        let (fs, ts) = tick_samples(&mut f, &bodies, &basin, box_body);
-        let mean = fs.iter().fold(Vec3::ZERO, |a, b| a + *b) * (1.0 / SUB as f32);
-        let mean_t = ts.iter().fold(Vec3::ZERO, |a, b| a + *b) * (1.0 / SUB as f32);
-        let last = *fs.last().unwrap();
-        let last_t = *ts.last().unwrap();
-        sum_last += last;
-        sum_mean += mean;
-        tau_last += last_t;
-        tau_mean += mean_t;
-        // 相对偏置：|末 − 均| / |均|（逐分量只为看 x/z 噪声，故用模长）
-        rel_y.push((last.y - mean.y).abs() / mean.y.abs().max(1e-9));
-        rel_lat.push(((last.x - mean.x).abs() + (last.z - mean.z).abs()) / mean.y.abs().max(1e-9));
-        rel_tau.push((last_t - mean_t).length() / mean_t.length().max(1e-9));
-        // tick 内**逐子步**离散度（相对 |F̄_y|）
-        let hi = fs.iter().map(|v| v.y).fold(f32::NEG_INFINITY, f32::max);
-        let lo = fs.iter().map(|v| v.y).fold(f32::INFINITY, f32::min);
-        max_spread_y = max_spread_y.max((hi - lo) / mean.y.abs().max(1e-9));
-    }
-    let inv = 1.0 / WIN as f32;
-    let (avg_last, avg_mean) = (sum_last * inv, sum_mean * inv);
-    let (t_last, t_mean) = (tau_last * inv, tau_mean * inv);
-    let stat = |v: &[f32]| {
-        let mut s = v.to_vec();
-        s.sort_by(|a, b| a.total_cmp(b));
-        (
-            s[s.len() / 2],
-            s[s.len() - 1],
-            v.iter().sum::<f32>() / v.len() as f32,
-        )
-    };
-    let (my, xy, ay) = stat(&rel_y);
-    let (ml, xl, al) = stat(&rel_lat);
-    let (mt, xt, at) = stat(&rel_tau);
-    let expect = f.config().rest_density * (2.0 * half).powi(3) * 9.81;
-    println!("== C2 采样口径偏置（SUB = {SUB}，窗口 {WIN} 物理 tick，静置 {SETTLE}）==");
-    println!(
-        "窗口均值 F_y：末子步口径 {:.4} / 时间平均口径 {:.4} N（差 {:+.2}%）| ρVg = {:.4} N",
-        avg_last.y,
-        avg_mean.y,
-        100.0 * (avg_last.y - avg_mean.y) / avg_mean.y.abs().max(1e-9),
-        expect
-    );
-    println!(
-        "  ⇒ P7 读数 F_y/ρVg：末子步 {:.3} / 时间平均 {:.3}（**C2 会不会动这张表**看这一行）",
-        avg_last.y / expect,
-        avg_mean.y / expect
-    );
-    println!(
-        "  侧向（窗口均值）：末子步 ({:+.4}, {:+.4}) / 时间平均 ({:+.4}, {:+.4}) N",
-        avg_last.x, avg_last.z, avg_mean.x, avg_mean.z
-    );
-    println!(
-        "  |τ| 窗口均值：末子步 {:.4} / 时间平均 {:.4}",
-        t_last.length(),
-        t_mean.length()
-    );
-    println!(
-        "逐 tick 相对偏置 |末 − 均|/|均|：F_y 中位 {my:.3} 最大 {xy:.3} 均值 {ay:.3}；\
-         侧向/|F̄_y| 中位 {ml:.3} 最大 {xl:.3} 均值 {al:.3}；|τ| 中位 {mt:.3} 最大 {xt:.3} 均值 {at:.3}"
-    );
-    println!("tick 内逐子步离散度（峰峰/|F̄_y|）最大 {max_spread_y:.3}");
+    let w = sample_window(&mut f, &bodies, &basin, box_body);
+    let avg_mean = report(&f, &w, half);
 
     // **金丝雀**（防空跑）：反作用必须真是非零的，否则上面全是"0/0 的统计"。
     assert!(

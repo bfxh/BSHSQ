@@ -66,8 +66,8 @@ cargo run -p vxl-phys-cli -- replay stack 600 base.jsonl   # 与之逐行对拍�
 要**跨机器/跨版本**比，就在参考机上 `record` 留一份 `*.jsonl` 基线，别的机器上 `replay` 逐行对拍
 （不一致会指到第一个不同的观测点；行数不同也判 FAIL）。
 
-`crates/vxl-phys-cli/src/lib.rs` 本身就是"只用公共 API 能写完整个工具"的样板 —— 接自己的场景
-抄它比抄仓库里的里程碑示例更快（后者是内部视角：直接摸 `bodies`/`manifolds` 做诊断）。
+`crates/vxl-phys-cli/src/cmd/`（每个子命令一个文件；`lib.rs` 只留子命令派发）同样是"只用公共 API 能写完整个
+工具"的样板 —— 接自己的场景抄它比抄仓库里的里程碑示例更快（后者是内部视角：直接摸 `bodies`/`manifolds` 做诊断）。
 
 ## 4. 域扩展 trait（本仓的域 API 约定）
 
