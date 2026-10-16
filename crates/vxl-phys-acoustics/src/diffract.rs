@@ -1,7 +1,7 @@
-//! **A4「绕射」（工程近似）**：棱上取 **Fermat 点**、**只在阴影里**产出。
+//! **A4「绕射」**（工程近似）+ **A9a**（刀刃真 Fresnel）：棱上取 **Fermat 点**、**只在阴影里**产出。
 //!
 //! 抽成独立模块只是为了 `lib.rs` 留在 god 门的 800 行上限内；口径与判据见 crate 头注与
-//! `tests/a4_diffraction.rs`（含与**暴力扫棱**的对拍）。
+//! `tests/a4_diffraction.rs`（含与**暴力扫棱**的对拍）/ `tests/a9_utd.rs`（A9a 的 Fresnel 对拍）。
 
 use crate::medium::seg_effect;
 use crate::{AcousticStats, Ctx, Edge, PathKind, SoundPath, BANDS};
@@ -13,9 +13,14 @@ const FERMAT_ITERS: u32 = 48;
 /// **A4：绕射（工程近似）** —— `声源 → 棱上的 Fermat 点 → 听者`，**只在阴影里**产出
 /// （直达没被挡就不算绕射，免得与直达重复计能；这也就是"拐角后仍可闻"的语义）。
 ///
-/// 能量口径：`coeff_b · D(θ) · 介质衰减 / (d1·d2)` —— `1/(d1·d2)` 是 UTD 的**远场形状**，
-/// `D(θ) = (1 + cosθ)/2`（`θ` = 两段折线的夹角）：**掠射**（刚被挡）时 `D → 1`（与自由场连续），
-/// 越往阴影深处越小。⚠️ **不做** Fresnel 积分、也不做楔角相关的 UTD 系数（那是 A4 的另一半）。
+/// 能量口径：`coeff_b · D_b · 介质衰减 / (d1·d2)` —— `1/(d1·d2)` 是 UTD 的**远场形状**，
+/// `D_b` **逐带**取：
+/// · `cfg.band_hz[b] ≤ 0`（默认，**没给绝对频率**）⇒ A4 旧口径 `D(θ) = (1 + cosθ)/2`
+///   （`θ` = 两段折线的夹角；掠射时 `D → 1`）—— **逐位不变**；
+/// · `cfg.band_hz[b] > 0`（**A9a**：显式声明频率）⇒ 真 **Fresnel 刀刃**系数 `|E_d/E₀|²`
+///   （[`utd`](crate::utd)：`ν = 2√(Δ/λ)`、`Δ` = Fermat 折线超出直连的**多余路程**，3D、含斜掠）。
+///   ⚠️ 阴影边界因此从 `1` 变到 `1/4`（**恰好 −6.02 dB**，经典的「半场」）—— 这是**口径修正**。
+/// ⚠️ **一般楔角 `n`（直角墙角之类）的 UTD 系数仍未做**（A9b）。
 pub(crate) fn push_diffraction(out: &mut Vec<SoundPath>, st: &mut AcousticStats, cx: &Ctx<'_>) {
     if crate::blocker(cx.geo, cx.src, cx.listener.pos).is_none() {
         return;
@@ -36,16 +41,26 @@ pub(crate) fn push_diffraction(out: &mut Vec<SoundPath>, st: &mut AcousticStats,
         }
         let cos_t = (v1.dot(v2) / (d1 * d2)).clamp(-1.0, 1.0);
         let dir_factor = 0.5 * (1.0 + cos_t);
+        // A9a：`excess` = 折线超出直连的**多余路程**（`≥ 0`）⇒ `ν = 2√(Δ/λ)`。只在逐带声明了
+        // 频率时才启用（否则 `dir_factor` = 旧口径，逐位不变）。
+        let excess = (d1 + d2) - (cx.listener.pos - cx.src).length();
         let (t1, a1) = seg_effect(cx.geo.medium, cx.src, p, cx.c, cx.cfg.medium_step);
         let (t2, a2) = seg_effect(cx.geo.medium, p, cx.listener.pos, cx.c, cx.cfg.medium_step);
         let mut bands = [0.0f32; BANDS];
-        for (((o, k), x), y) in bands
+        for (b, (((o, k), x), y)) in bands
             .iter_mut()
             .zip(e.coeff.iter())
             .zip(a1.iter())
             .zip(a2.iter())
+            .enumerate()
         {
-            *o = k * dir_factor * x * y / (d1 * d2);
+            let lambda = crate::utd::wavelength(cx.c, cx.cfg.band_hz[b]);
+            let df = if lambda > 0.0 {
+                crate::utd::knife_gain(crate::utd::fresnel_nu(excess, lambda))
+            } else {
+                dir_factor
+            };
+            *o = k * df * x * y / (d1 * d2);
         }
         let dirv = (p - cx.listener.pos) * (1.0 / d2);
         out.push(SoundPath {

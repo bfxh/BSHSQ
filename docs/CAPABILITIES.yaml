@@ -603,11 +603,12 @@ capabilities:
           （`record/replay` 的旧基线会 FAIL 并指到第一个观测点 —— 这是设计内的 loud failure）。
       - id: acoustic_not_done
         note: >-
-          **仍未做（如实登记）**：UTD 的 **Fresnel 积分**（A4 的 `D(θ)` 与漫反射口径都是工程近似）、
+          **仍未做（如实登记）**：UTD 的**一般楔角系数**（A9b）与漫反射口径仍是工程近似
+          （**刀刃 Fresnel 积分已由 A9a 补上（2026-10-16），见 `a9a_fresnel_utd_landed`**）、
           **GPU 档五条腿全落（M1–M5：直达 / 一次反射 / 绕射 / 散射 / 介质积分）**（见
           `a5_gpu_direct_kernel` / `a5_gpu_reflect_kernel` / `a5_gpu_diffract_kernel` /
           `a5_gpu_scatter_kernel` / `a5_gpu_medium_kernel`；本层已落批处理入口与逐位等价契约，
-          见 `a5_gpu_base`）。卡上仍没有的是**多次反射**（混响尾巴）与**绕射的 Fresnel 积分**。
+          见 `a5_gpu_base`）。卡上仍没有的是**多次反射**（混响尾巴）与**绕射的 Fresnel 积分**（CPU 侧已落 A9a）。
           portal 与衍射棱都按文档 §8 的取舍先落"显式图元"（衍射棱另有兜底，见下条）；
           **"体素空洞自动识别"**（从占据位找连通孔）仍未做。低频不承诺 / **不做双耳渲染**见文档 §7
           （2026-10-12 起有**单声道**离线渲染供试听与对表，见 `a6_audio_render`；HRTF/双耳仍归宿主）。
@@ -621,7 +622,8 @@ capabilities:
           判据 `tests/a4_diffraction.rs` 5 条：拐角后仍可闻且折线长与**暴力扫棱**一致、阴影越深越弱
           （严格单调）且出阴影后直达接管、棱的半截（端点解）也对、绕射腿被挡死则无路径、逐带系数
           ⇒ 带比等于系数比 + `max_edges` 预算 + 逐字确定性 + `state_hash` 不变。
-          ⚠️ **不做** Fresnel 积分与楔角 UTD 系数（散射那一半见下条 `a4_scatter_landed`）。
+          ⚠️ 当时**不做** Fresnel 积分与楔角 UTD 系数（散射那一半见下条 `a4_scatter_landed`）；
+          **刀刃 Fresnel 已由 A9a 补上（2026-10-16）**，楔角 UTD 系数仍不做（A9b）。
       - id: a4_scatter_landed
         note: >-
           **A4「散射」已落地（2026-10-11）**：逐面 `scattering: [[f32; BANDS]]`（**外部表**，缺了按
@@ -633,7 +635,7 @@ capabilities:
           判据 `tests/a4_scatter.rs` 5 条：能量分工（`s=0.6` ⇒ 镜面恰好是原来的 0.4、且多出散射路径）、
           散射增益与**闭式口径**对拍且对系数**线性**、**Lambertian**（同距离下绕离法向 60° 恰好弱一半）、
           腿被挡则无路径、逐带系数 ⇒ 带比等于系数比 + 预算 + 逐字确定性 + `state_hash` 不变。
-          ⚠️ 仍**不做** Fresnel 积分与楔角 UTD 系数（`D(θ) = (1+cosθ)/2` 与 Lambertian 都是工程近似）。
+          ⚠️ 仍**不做**楔角 UTD 系数（Lambertian 仍是工程近似）；`D(θ)` 的 Fresnel 积分已由 A9a 补上（2026-10-16）。
       - id: a5_landed
         note: >-
           **A5 已落地（2026-10-11）**：动态源/听者本来就成立（声源逐 tick 取 `World::impacts()`、
@@ -842,7 +844,23 @@ capabilities:
           CLI：`acoustic` / `audio` 加 `--order2`。实测（本机，`voxel` 场景单声撞击）：默认 5 条 cue
           （透射 9.431 / 门洞 9.934 / 绕射 11.885 / 反射 32.576 / 漫反射 34.023 ms），`--order2` 多一条
           **34.187 ms 的二阶反射（能量 0.00182，比一阶那条 0.00323 更晚更弱）** —— 多一次弹跳 = 更长的
-          路 + 多一份吸声，方向是对的。
+           路 + 多一份吸声，方向是对的。
+      - id: a9a_fresnel_utd_landed
+        note: >-
+          **A9a「刀刃（半平面）真 Fresnel 绕射」已落地（2026-10-16）**：`crates/vxl-phys-acoustics/src/utd.rs`
+          —— 真 Fresnel 积分 `C(x)/S(x)`（**两段式**：`x < 2.5` 幂级数、`x ≥ 2.5` 渐近展开；**全 f32**
+          （SPEC §5「严格 f32」，实测两段最坏误差 ~1.4e-5，渐进段按**项比递推**避 `(4m±1)!!` 溢出）；
+          `ν = 2√(Δ/λ)`，`Δ` = Fermat 折线超出直连的**多余路程**、`λ = c/band_hz`；
+          能量比 `|E_d/E₀|² = ½[(½−C(ν))²+(½−S(ν))²]`。**逐带显式频率**
+          `AcousticConfig::band_hz: [f32; BANDS]`（⚠️ **口径变更**：默认 `[0.0;BANDS]` = 不给绝对频率 ⇒
+          逐带退回 A4 旧口径 `(1+cosθ)/2`、**逐位不变**；`band_hz[b] > 0` 该带才切真 Fresnel）。
+          ⚠️ **口径修正（设计内 loud change）**：阴影边界 `ν = 0` ⇒ 能量比恰 `1/4` = **−6.02 dB**
+          （旧口径掠射 `D → 1`）；给绝对频率的那一带会相对旧值变化 —— 这是"真 Fresnel"的应有结果。
+          判据 `tests/a9_utd.rs` 8 条：表值（对独立 Python Simpson 积分 `n=20000`）/ 导数据恒等式 /
+          奇对称 `C(−x)=−C(x)` 逐位 / 阴影边界 −6.02 dB 且严格单调 / `ν` 与经典刀口
+          `ν = h√(2(s+s')/(λ·s·s'))` 等价 / 默认无频率 = 旧口径 / 显式频率切真 Fresnel 对独立积分 /
+          逐字确定性 + `state_hash`。
+          ⚠️ **仍未做（A9b）**：**一般楔角 UTD 系数** `D(n,…)`（需给 `Edge` 引 `wedge`）。
       - id: cli_wired
         note: >-
           **工具链已接（2026-10-11）**：`vxl-phys-cli acoustic <voxel> [ticks]` 打声学路径流（JSONL，

@@ -13,7 +13,7 @@
 //!   确定性），只在**阴影里**产出 `Diffracted` 路径，能量口径 `coeff_b · D(θ) · 介质衰减 / (d1·d2)`，
 //!   `D(θ) = (1 + cosθ)/2`（掠射时与自由场连续）；**散射**（`scattering` 表）—— 镜面那条按
 //!   `(1 - s_b)` 打折、剩下的按**漫反射二级声源**给出 `Scattered` 路径。**UTD 的 Fresnel 积分
-//!   仍未做**。
+//!   仍未做**（→ 见 A9a）。
 //! - **A5**：**动态源/听者 + 预算与实时档** —— 声源本来就逐 tick 从 `World::impacts()` 来（会动），
 //!   听者位置每次调用都由调用方给（会动）；本层补上**按优先级（能量）截断**与 [`AcousticTier`]
 //!   （**确定性**的工作量上界，不是墙钟预算）；GPU 档落的是**基础件**（平铺布局 + 批处理入口 +
@@ -27,6 +27,10 @@
 //! - **A8**：**多次反射（二阶镜像展开）**（[`AcousticConfig::reflection_order`] = 2）——
 //!   `声源 →(面 f₁) →(面 f₂) → 听者` 的展开构造 + 逐点内点/逐段遮挡检查（跳过链上的面），
 //!   逐阶段预算、三角索引序 ⇒ 确定性。判据 `tests/a8_bounces.rs`。
+//! - **A9a**：**刀刃真 Fresnel 绕射**（[`utd`]）—— 逐带**显式声明频率**（[`AcousticConfig::band_hz`]）
+//!   时绕射「方向因子」换成真系数（Fresnel 积分 `C/S`、`ν = 2√(Δ/λ)`、`Δ` = Fermat 折线多余路程）；
+//!   默认 `[0;3]`（不给绝对频率）⇒ 退回 A4 旧口径、**逐位不变**。**一般楔角 `n` 的 UTD 系数仍未做（A9b）**。
+//!   判据 `tests/a9_utd.rs`。
 //!
 //! ## 三条设计原则（文档 §4 的落实）
 //!
@@ -79,6 +83,7 @@
 
 pub mod audio;
 pub mod reverb;
+pub mod utd;
 
 mod auto_edge;
 mod bounce;
@@ -157,6 +162,10 @@ pub struct Listener {
 pub struct AcousticConfig {
     /// 声速（m/s）；空气常温 ≈ 343。
     pub speed_of_sound: f32,
+    /// **逐带中心频率**（Hz，A9 入口）：`> 0` = 该带显式声明了绝对频率 ⇒ 绕射走**真 Fresnel**
+    /// 刀刃口径（[`utd`]）；`≤ 0` = 该带没有频率 ⇒ 退回 A4 旧口径。默认 `[0.0; BANDS]`
+    /// （= crate 的「不给绝对频率」口径落实）⇒ **逐位不变**。
+    pub band_hz: [f32; BANDS],
     /// 一次反射的最大候选面数（`0` = 只算直达；预算口径见模块头注）。
     pub max_reflections: u32,
     /// **反射阶数**：`1` = 只做一次镜面反射（A1–A7 的行为，默认）、`2` = 再加二阶镜像展开（A8）。
@@ -183,6 +192,7 @@ impl Default for AcousticConfig {
     fn default() -> Self {
         Self {
             speed_of_sound: 343.0,
+            band_hz: [0.0; BANDS],
             max_reflections: 24,
             reflection_order: 1,
             max_portals: 8,
