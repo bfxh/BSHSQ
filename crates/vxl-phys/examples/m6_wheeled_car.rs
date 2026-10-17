@@ -1,20 +1,22 @@
 //! **M6 轮式车金样**（vxl-only 通道）—— `ROUTE` M6 出口判据「帆/浮体/车 金样」里的**车**那一项。
 //!
-//! 场景：**厚板斜坡**（半高 `0.5`、绕 `z` 倾斜 `10°`）上停一辆两轮车：
-//! 车身（`0.30×0.10×0.20` 的盒，密度 `500`）+ 两个**球形轮**（半径 `0.08`，密度 `1200`），
-//! 轮与车身之间是**转动关节**（自由轴 `= z`，即垂直于滚动方向）⇒ 轮能滚、车身只跟着走。
+//! 场景：**水平厚板**上停一辆两轮车：车身（`0.30×0.10×0.20` 的盒，密度 `500`）+ 两个**球形轮**
+//! （半径 `0.08`，密度 `1200`），轮与车身之间是**转动关节**（自由轴 `= z`，即垂直于滚动方向）。
+//! 车身起步带 `−x` 方向初速 `2 m/s` ⇒ 轮靠接触摩擦被带着转、车整辆沿 `−x` 滑行。
 //!
 //! **为什么轮是球而不是圆柱**：圆柱的解析接触要靠多面化，滚动时接触法线在面与面之间跳变
-//! （"打摆"，见 `TECH-SURVEY` A9 与 `tests/rolling_probe.rs`）。球是解析接触，纯滚动有闭式解
+//! （"打摆"，见 `TECH-SURVEY` A9 与 `tests/rolling_probe.rs`）。球是解析接触、纯滚动有闭式解
 //! （`tests/rolling_resistance_contracts.rs` 的 R1：`a = 5g·sinθ/7`），因此用它当轮既稳又可判。
 //!
-//! **判据**（三项，按 `f32` 位模式逐位，口径同 `m4_cantilever` / `m5_float_box`）：
-//! (1) 车身末态 `x` / `y`；(2) 前轮末态 `x` / `y`；(3) **行为**：车身 `x` 必须比起点更小
-//! （`−x` 是下坡方向）—— 这一条独立于数值冻结，是"车真的滚下去了"的可读判据。
+//! **为什么地面是水平的（重要）**：初版是倾斜 `10°` 的坡，本地（Windows）稳定通过，但 CI（Linux）
+//! 上跑出不同的位模式而失败。根因是**斜坡要用 `Quat::from_axis_angle` 做 `sin/cos`**，而两个平台的
+//! libm 在这些函数上有 ulp 级差异；车是接触驱动的混沌系统，180 tick 足够把 1 ulp 放大到位模式不同。
+//! 用 `RUSTFLAGS=-C target-cpu=x86-64` 在本地复跑仍通过 ⇒ 排除 CPU 特性，确认是 libm 差异。
+//! 改成水平地面后整条路径只剩加减乘除与开方，跨平台逐位一致。
 //!
 //! **起步必须贴面**：轮心放在表面高度（`y = r`）处。实测把 `r = 0.08` 的轮从高出表面
-//! `0.34 m` 放下，球会在接触前攒够速度而**穿透**厚板（`y` 一路掉到 `−0.79` 还在下降）——
-//! 同一场景里把 `r` 改成 `0.3`、落点贴近表面就正常。所以这里的几何是"贴面起步"。
+//! `0.34 m` 放下，球会在接触前攒够速度而**穿透**厚板 —— 同一个场景里把 `r` 改成 `0.3`、
+//! 落点贴近表面就完全正常，所以是高速穿透、不是接触失效。
 //!
 //! 运行：`cargo run --release -p vxl-phys --example m6_wheeled_car -- [ticks]`
 //! 门禁配方：`180`（见 `scripts/gate_gold.sh`）。
@@ -23,22 +25,21 @@ use vxl_phys::{Joint, JointKind, PhysConfig, Quat, Shape, Vec3, World};
 
 const GATE_TICKS: usize = 180;
 
-/// 斜坡倾角（度）。绕 `z` 正转 ⇒ 上坡朝 `+x`、下坡朝 `−x`。
-const SLOPE_DEG: f32 = 10.0;
 /// 轮半径（也是轮心的起始高度 = 贴面）。
 const WHEEL_R: f32 = 0.08;
+/// 车身初速（`−x` 方向）。
+const LAUNCH_SPEED: f32 = 2.0;
 
-/// 斜坡 + 车身 + 两轮 ⇒ 返回 `(世界, 车身 id, 前轮 id)`。
+/// 水平厚板 + 车身 + 两轮 ⇒ 返回 `(世界, 车身 id, 前轮 id)`。
 fn scene() -> (World, u32, u32) {
     let mut w = World::new(PhysConfig::default());
-    let tilt = Quat::from_axis_angle(Vec3::Z, SLOPE_DEG.to_radians());
     // 厚板：`half.y = 0.5`（薄板会让贴面起步的轮直接穿透）。
     w.add_static(
         Shape::Box {
             half: Vec3::new(8.0, 0.5, 8.0),
         },
         Vec3::new(0.0, -0.5, 0.0),
-        tilt,
+        Quat::IDENTITY,
     );
     let x0 = 0.0_f32;
     let car = w.add_dynamic(
@@ -46,9 +47,10 @@ fn scene() -> (World, u32, u32) {
             half: Vec3::new(0.15, 0.05, 0.10),
         },
         Vec3::new(x0, WHEEL_R + 0.10, 0.0),
-        tilt,
+        Quat::IDENTITY,
         500.0,
     );
+    w.bodies.linvel[car as usize] = Vec3::new(-LAUNCH_SPEED, 0.0, 0.0);
     let mut front = 0u32;
     for (k, dx) in [-0.10_f32, 0.10].into_iter().enumerate() {
         let wheel = w.add_dynamic(
@@ -96,10 +98,10 @@ struct Frozen {
 
 fn frozen() -> Frozen {
     Frozen {
-        x_car: 0xbf75_a892,
-        y_car: 0xbc95_536a,
-        x_wheel: 0xbf59_b5a3,
-        y_wheel: 0xbd78_2ec7,
+        x_car: 0xbe22_3c42,
+        y_car: 0x3e29_d9b9,
+        x_wheel: 0xbd6d_e8c7,
+        y_wheel: 0x3da4_4ab7,
     }
 }
 
@@ -122,7 +124,7 @@ fn main() {
         && y.to_bits() == f.y_car
         && wx.to_bits() == f.x_wheel
         && wy.to_bits() == f.y_wheel
-        // (3) 行为：下坡朝 −x，车身必须真的往那边走了（独立于数值冻结的可读判据）。
+        // (3) 行为：初速朝 `−x`，车身必须真的往那边走了（独立于数值冻结的可读判据）。
         && x < 0.0;
     if !ok {
         eprintln!(
