@@ -8,8 +8,7 @@
 //! （实测给 5 m/s 初速，锚点间隙也只涨不到 0.01 m）⇒ 拉伸量没有可用的量级。
 //!
 //! ⚠️ 另一个踩过的坑：**两端都是自由动态体**的距离关节在无重力下会发散
-//! （实测间距 0.8 → 25.6）⇒ 本档用静态锚点 + 动态球；且 `rest` 取**初始距离**
-//! （`rest ≠ 初始距离` 时求解器会把间距直接压到 0，已登记 `docs/OPEN-PROBLEMS.md`）。
+//! （实测间距 0.8 → 25.6）⇒ 本档用静态锚点 + 动态球。//! `rest` 仍取**初始距离**，但**不再**是必需的：`rest ≠ 初始距离` 的那个缺陷已于 2026-10-17 修好//! （根因是约束行的冲量符号写反，迭代在发散；回归判据见本文件末尾的 `distance_rest_differs`）。
 // 新文件：glob 门对新增文件零基线 ⇒ 显式导入（不用 `use vxl_phys::*`）。
 use vxl_phys::{Joint, JointKind, PhysConfig, Quat, Shape, Vec3, World};
 
@@ -109,4 +108,36 @@ fn broken_joint_exerts_no_more_constraint() {
         after > before,
         "断开后仍被约束回缩：间距 {before} → {after}（应当增大）"
     );
+}
+
+/// **`rest ≠ 初始距离` 必须收敛到 `rest`**（回归：修好之前的约束行冲量符号写反，
+/// 第一次迭代后 `v·n` 与偏置同号 ⇒ 迭代发散 —— 实测 `v·n` 序列 `0 → −7.2 → −21.6 →
+/// −50.4 → … → −914`，间距一步从 `0.8` 砸到 `0.0129`、第二 tick 到 `0` 后再也不动）。
+///
+/// 现在：每 tick 消除约 `β = 0.2` 的误差，单调逼近 `rest`。
+#[test]
+fn distance_rest_differs_from_initial_distance_converges() {
+    let mut w = World::new(PhysConfig {
+        gravity: Vec3::ZERO,
+        ..PhysConfig::default()
+    });
+    let anchor = w.add_static(Shape::Sphere { radius: 0.05 }, Vec3::ZERO, Quat::IDENTITY);
+    let body = w.add_dynamic(
+        Shape::Sphere { radius: 0.05 },
+        Vec3::new(0.8, 0.0, 0.0),
+        Quat::IDENTITY,
+        1000.0,
+    );
+    // 初始间距 0.8、目标 0.5 ⇒ 必须**缩短**，而不是被压到 0。
+    w.joints
+        .add(Joint::new(JointKind::Distance, anchor, body, Vec3::ZERO, Vec3::ZERO).with_rest(0.5));
+    for _ in 0..60 {
+        w.step();
+    }
+    let d = gap_of(&w, body);
+    assert!(
+        (d - 0.5).abs() < 0.02,
+        "间距应收敛到 rest=0.5，实得 {d}（不收敛或掉到 0 都算失败）"
+    );
+    assert!(d > 0.4, "间距被压塌了：{d}");
 }

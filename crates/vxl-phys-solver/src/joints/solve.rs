@@ -130,11 +130,7 @@ fn linear_rows(
                 let bias = -(len - j.rest) * sp.bias_inv_dt;
                 let v = rel_vel(bodies, ai, bi, ra, rb);
                 let k = row_mass(bodies, ai, bi, ra, rb, n);
-                let lambda = if k > 1e-9 {
-                    -(v.dot(n) + bias) / k
-                } else {
-                    0.0
-                };
+                let lambda = if k > 1e-9 { (bias - v.dot(n)) / k } else { 0.0 };
                 apply_pair(bodies, ai, bi, ra, rb, n * lambda);
                 lambda.abs()
             }

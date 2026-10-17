@@ -102,7 +102,7 @@ fn frozen(ticks: usize) -> Option<Frozen> {
     (ticks == GATE_TICKS).then_some(Frozen {
         n: 512,
         y_held: 0x3fa6_6666,
-        vy_held: 0x35c0_b434,
+        vy_held: 0xb5bf_4bca,
         y_broken: 0x3f9a_ddfb,
         vy_broken: 0x3c9b_fa9f,
     })
