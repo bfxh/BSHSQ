@@ -98,6 +98,10 @@ struct Frozen {
 }
 
 /// 只认门禁配方；其余返回 `None` ⇒ 打印"跳过"（本二进制仍可自由做实验）。
+///
+/// ⚠️ `vy_held` 在修 `Distance` 关节的冲量符号之前是 `0x35c0_b434`，修后变成 `0xb5bf_4bca`
+/// —— **只有符号翻转、绝对值不变**（两端都约 `1.4e-6`，浮体静止在绳长处）。同一次修复里
+/// `y_held` / `y_broken` / `vy_broken` 三项**逐位不变** ⇒ 修好的是"发散"而不是"平衡点"。
 fn frozen(ticks: usize) -> Option<Frozen> {
     (ticks == GATE_TICKS).then_some(Frozen {
         n: 512,
