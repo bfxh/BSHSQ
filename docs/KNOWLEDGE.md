@@ -678,3 +678,36 @@ release 下静默 wrap 成错误值。修法 = `saturating_add` + `saturating_mu
    另：**这类统计判据必须把"预热长度"写进口径**——本例 2 s 与 10 s 差 80×，不写清楚就是
    不可复现的数字。配套还要一条**非空洞**判据（2 s 窗口必须明显波动），否则"堆根本没受力"
    也会读出"很稳"。
+
+### V. 纯文档提交**不触发 CI**（`paths-ignore`）—— vocab/typos 没人替你跑（2026-10-18）
+
+`ci.yml` 的触发条件带 `paths-ignore: ["docs/**", "**/*.md"]`：
+
+```yaml
+push:
+  branches: [main]
+  paths-ignore: ["docs/**", "**/*.md"]
+```
+
+**后果**：只改 `docs/*.md` 或 `README.md` 的提交**不产生任何 CI run**——23 个 job 一个都不跑。
+实测最近 8 个提交：纯文档的 4 个（`435b012` / `8af2d6b` / `08290ce` / `0325b9c`）全部无 run，
+含代码的 4 个全部有 run。不是故障，是配置。
+
+**为什么是坑**：`static-text` job 跑 `vocab_scan.sh` / `typos` / `naming_gate.py`，
+**它也在被跳过的那批里**；而 `local_gate.py` 的 28 道门**不含**这三项
+（dag / rayon / cpp / fastmath / f64 / asm / staticmut / license / dbg / print / memfind-core /
+engine-dep / clone / unwrap / unsafe / linelen / usize / glob / todo / god / god-selftest /
+cyc / nest / args / security / security-selftest / gate-selftest / gate-probe）。
+⇒ 纯文档提交**唯一的** vocab/typos 把关是**人手动跑**。
+
+**处置**：改文档的提交，提交前手动跑这三条：
+
+```powershell
+& "C:\Program Files\Git\bin\bash.exe" scripts/vocab_scan.sh .
+typos
+python -X utf8 scripts/naming_gate.py
+```
+
+**没改 `paths-ignore` 的理由**：文档改动确实不该跑 23 个 job（编译 / 测试 / miri / loom 与
+markdown 无关）。真要给文档上 CI，正确做法是**单独一个轻量 workflow**（只跑静态文本门），
+而不是让全量 CI 对 markdown 触发。
