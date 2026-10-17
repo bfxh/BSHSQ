@@ -7,10 +7,11 @@
 
 ## 0. 库清单（依赖事实）
 
-- 工作区共 **23 个 crate**（**2026-10-18 更新**：`vxl-phys-acoustics` 与
-  `vxl-phys-wheeled` 已加入 `members` ⇒ 由 21 变 23。上一轮 2026-10-11：感官输出域
-  `vxl-phys-sense` 落地 S1 ⇒ 由 20 变 21。再上一轮更正 2026-09-27：`Cargo.toml` 的
-  `members` 当时实为 20 项，差额来自后加的
+- 工作区共 **23 个 crate**（**2026-10-18 核实**：`Cargo.toml` 的 `members` 实为 23 项。
+  上一轮 2026-10-11 的同一天连加三个，本条却只记到第一个 ⇒ 由 20 变 21 之后没跟上：
+  `2bc6ee9` 加 `vxl-phys-sense`（20 → 21）、`3ba6d49` 加 `vxl-phys-cli`（21 → 22）、
+  `6390250` 加 `vxl-phys-acoustics`（22 → 23）。再上一轮更正 2026-09-27：当时的
+  `members` 实为 20 项，差额来自后加的
   `vxl-phys-gpu` / `vxl-phys-memfind` / `vxl-phys-ffi` / `vxl-phys-splat` 等）。
 - **外部依赖面**（⚠️ **2026-09-27 更正**：此前写"零外部依赖"——自 GPU 档起不再成立）：
   运行期 **2 件**——`xxhash-rust`（仅 `vxl-phys-replay`，xxh3-128 状态哈希）与 `wgpu`
