@@ -29,9 +29,9 @@
 > 无法做到逐位跨平台，只能要求**有界容差**（实测最大差 `1.2e-4`）。这条经验写进了
 > [`docs/PHYSICS-INVARIANTS.md`](docs/PHYSICS-INVARIANTS.md) §2.4。
 >
-> **金样清单（11 项，全部在 CI 阻断）**：`col45` · `pile5` · `tower25`（Rapier 对照）·
-> `m3_collapse` · `m4_cantilever` · `m4_flag` · `m5_dam_break` · `m5_float_box` ·
-> `m6_float_mooring` · `m6_float_sail` · `m6_wheeled_car`。
+> **金样清单（12 项，全部在 CI 阻断）**：`col45` · `pile5` · `tower25`（Rapier 对照）·
+> `m3_collapse` · `m4_cantilever` · `m4_flag` · **`m4_rope`** · `m5_dam_break` ·
+> `m5_float_box` · `m6_float_mooring` · `m6_float_sail` · `m6_wheeled_car`。
 >
 > **接下来做什么**：见 [`docs/PHYSICS-INVARIANTS.md`](docs/PHYSICS-INVARIANTS.md) §4.4 的
 > 方向排序（VBD 块坐标下降 → 确定性产品化 → GPU 纯函数下沉），以及 `docs/CAPABILITIES.yaml`
@@ -95,7 +95,7 @@ crates/
 # 全量测试（含确定性/稳定性验收测试）
 cargo test --workspace --release
 
-# 11 项金样（本地等价物；CI 用同一个脚本当唯一配方来源）
+# 12 项金样（本地等价物；CI 用同一个脚本当唯一配方来源）
 bash scripts/gate_gold.sh
 
 # 28 道本地门禁（打印 LOCAL_RC=0 才算过）
@@ -127,7 +127,7 @@ RUSTFLAGS="--cfg loom" LOOM_MAX_PREEMPTIONS=3 cargo test -p vxl-phys-core --test
 | **编译矩阵** | `MSVC` / `GCC` / `Clang+LLD` / `GCC-aarch64(qemu)` | 三编译器 × 两架构全部能编过；`clippy -D warnings` 在每份上单跑 |
 | **确定性** | 「确定性」×4 + 「跨平台哈希比对」 | 同配置逐位可复现；跨编译器/跨架构哈希一致 |
 | **内存/并发** | `miri`（core 子集）/ `loom` / `TSan` / `ASan` | UB、数据竞争、越界——静态分析抓不到的用这些兜 |
-| **物理正确** | `金样 (Rapier 对照)` / `测试 (debug 档)` / `真实性基准` / `感官输出` | 11 项金样 + `debug_assert` 档全量测试 + 真实度基准 |
+| **物理正确** | `金样 (Rapier 对照)` / `测试 (debug 档)` / `真实性基准` / `感官输出` | 12 项金样 + `debug_assert` 档全量测试 + 真实度基准 |
 | **静态纪律** | 「静态」×3（依赖/文档/文本）+ `棘轮门禁` | `cargo deny` + 强化 lint + 词汇禁令 + god 门棘轮（只准降） |
 | **性能** | `规模档 (10 万+10 万)` / `覆盖率` | 大场景不退化；覆盖率报告 |
 
@@ -147,7 +147,7 @@ RUSTFLAGS="--cfg loom" LOOM_MAX_PREEMPTIONS=3 cargo test -p vxl-phys-core --test
 ## 提交门（§11）
 
 - **单元 + 集成 + 属性测试**：`cargo test --workspace --release`；
-- **11 项金样**：3 项与 Rapier 同场景逐帧位姿对照（`col45`/`pile5`/`tower25`）+ 8 项
+- **12 项金样**：3 项与 Rapier 同场景逐帧位姿对照（`col45`/`pile5`/`tower25`）+ 9 项
   vxl-only 场景（`m3`–`m6`），全部在 CI 阻断。金样分两类判据：
   - **位模式**（收敛型：浮体、布、绳索、坍塌）—— 要求 `f32::to_bits` 完全相等；
   - **有界容差**（接触驱动的多体系统：车）—— 实测跨平台最大差 `1.2e-4`，取 `1e-3` 留 8 倍余量。
