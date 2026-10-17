@@ -118,9 +118,9 @@ RUSTFLAGS="--cfg loom" LOOM_MAX_PREEMPTIONS=3 cargo test -p vxl-phys-core --test
 ```
 
 
-## CI 现在守什么（21 个 job，2026-10-17）
+## CI 现在守什么（23 个 job，2026-10-18）
 
-一次 push 跑 **21 个 job**，任一失败即阻断合并（「汇总（提交门）」把它们的结论聚合）：
+一次 push 跑 **23 个 job**，任一失败即阻断合并（「汇总（提交门）」把它们的结论聚合）：
 
 | 组 | job | 守的东西 |
 |---|---|---|

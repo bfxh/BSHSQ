@@ -17,7 +17,7 @@
 | crate 数 | **23 个**，DAG 无环 | `ls crates/`，`Cargo.toml` 的 workspace 成员 |
 | 测试 | **763 个** | `cargo test --workspace -- --list` |
 | 金样（回归基线） | **13 项**，全部在 CI 阻断 | `scripts/gate_gold.sh` 的注册项 |
-| CI | **21 个 job**，覆盖 3 个编译器 × 2 个架构 | `.github/workflows/ci.yml` |
+| CI | **23 个 job**，覆盖 3 个编译器 × 2 个架构 | `.github/workflows/ci.yml` |
 | 本地门禁 | **28 道** | `python -X utf8 scripts/local_gate.py` |
 | 文档 | **47 份** + **10 条 ADR** | `docs/` |
 | 提交 | **164 个** | `git rev-list --count HEAD` |
@@ -136,7 +136,7 @@
 
 **5/**
 ```
-现在的规模：23 个 crate，5 万行源码 + 3 万行测试，763 个测试，13 项金样，CI 21 个 job。
+现在的规模：23 个 crate，5 万行源码 + 3 万行测试，763 个测试，13 项金样，CI 23 个 job。
 
 没做到的也写清楚：10 万动态+10 万静态 30FPS 还差 9.9×，这是结构性缺口，不是调参能关的。
 
