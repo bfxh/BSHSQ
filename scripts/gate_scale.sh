@@ -75,7 +75,8 @@ cargo run --release -q -p vxl-phys --example m1_scale -- 8 102400 100000 600 16 
 run_rc=$?
 if [ "$run_rc" -ne 0 ]; then
     echo "❌ 场景运行失败（exit ${run_rc}）" >&2
-    tail -n 10 "$log" >&2 || true
+    # GHA 会把多行 stderr 并成一行 ⇒ 主动压单行，否则关键读数会消失。
+    tail -n 20 "$log" | sed -e :a -e 'N;s/\n/ ⏎ /;ta' >&2 || true
     exit "$run_rc"
 fi
 
@@ -85,7 +86,8 @@ line_time=$(grep -m1 -E '平均 +[0-9.]+ ms/tick' "$log" || true)
 line_act=$(grep -m1 -E '活跃期（awake>0 的' "$log" || true)
 [ -n "$line_time" ] && [ -n "$line_act" ] || {
     echo "❌ 解析不到摘要行 —— 没有真正做判定（输出格式变了？）" >&2
-    tail -n 8 "$log" >&2 || true
+    # GHA 会把多行 stderr 并成一行 ⇒ 主动压单行，否则关键读数会消失。
+    tail -n 20 "$log" | sed -e :a -e 'N;s/\n/ ⏎ /;ta' >&2 || true
     exit 3
 }
 

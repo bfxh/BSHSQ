@@ -70,7 +70,9 @@ run_scene() { # run_scene <场景名> <后随参数…>
     case "$line" in
         *"金样基线 PASS"*) ;;
         *) echo "❌ gold ${name}：**没有真正做基线判定**（配方与 frozen_baseline 不匹配？）" >&2
-           tail -n 8 "$log" >&2 || true
+           # ⚠️ 同 `fail()`：GHA 会把多行 stderr 合并成一行 ⇒ 主动压成单行，
+           # 行间用 ` ⏎ ` 分隔，否则"期望 / 实测"两个关键读数会一起消失。
+           tail -n 20 "$log" | sed -e :a -e 'N;s/\n/ ⏎ /;ta' >&2 || true
            exit 3 ;;
     esac
 }
@@ -98,7 +100,9 @@ run_vxl_gold() { # run_vxl_gold <example> [--pkg <crate>] <配方参数…>
     case "$line" in
         *"金样基线 PASS"*) ;;
         *) echo "❌ gold ${ex}：**没有真正做基线判定**（配方与 frozen 不匹配？）" >&2
-           tail -n 8 "$log" >&2 || true
+           # ⚠️ 同 `fail()`：GHA 会把多行 stderr 合并成一行 ⇒ 主动压成单行，
+           # 行间用 ` ⏎ ` 分隔，否则"期望 / 实测"两个关键读数会一起消失。
+           tail -n 20 "$log" | sed -e :a -e 'N;s/\n/ ⏎ /;ta' >&2 || true
            exit 3 ;;
     esac
 }
