@@ -194,6 +194,9 @@ fn sep4(
     let mut sep_arr = [0f32; 4];
     let flags: i32;
     let degen: i32;
+    // SAFETY: 全部是 x86_64 基线 SSE2 内建（本函数仅在 	arget_arch = "x86_64" 下编译）：
+    // _mm_loadu_ps 的入参是长度 4 的本地 32 数组指针（未对齐读仍在界内），其余内建
+    // 只消费/产出 __m128 寄存器值 —— 没有裸指针运算、生命周期擦除或别名假设。
     unsafe {
         let nx = _mm_loadu_ps(cx.as_ptr());
         let ny = _mm_loadu_ps(cy.as_ptr());
