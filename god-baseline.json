@@ -376,8 +376,8 @@
       "max_type_members": 0
     },
     "crates/vxl-phys-gpu/examples/gpu_narrow_tier_probe/main.rs": {
-      "file_lines": 518,
-      "max_fn_lines": 106,
+      "file_lines": 547,
+      "max_fn_lines": 90,
       "max_type_members": 6
     },
     "crates/vxl-phys-gpu/examples/gpu_narrow_up_probe.rs": {

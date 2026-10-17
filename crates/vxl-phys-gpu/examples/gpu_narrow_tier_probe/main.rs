@@ -409,14 +409,18 @@ fn run_pair(
     (t1, worst, worst_at, end, endv, cps, us)
 }
 
-fn main() {
-    let mut adapter = 0usize;
+/// 命令行：`--adapter K` / `--m1` / `--mult K`。返回（adapter 序号，规模倍数）。
+///
+/// `mult` = 规模倍数：`--m1` ⇒ 1，`--mult K` ⇒ K（找**跨越点**：卡的固定往返 vs CPU 的每对开销）。
+fn parse_args() -> (usize, usize) {
     let rest: Vec<String> = std::env::args().skip(1).collect();
-    if let Some(k) = rest.iter().position(|x| x == "--adapter") {
-        adapter = rest.get(k + 1).and_then(|v| v.parse().ok()).unwrap_or(0);
-    }
+    let adapter = rest
+        .iter()
+        .position(|x| x == "--adapter")
+        .and_then(|k| rest.get(k + 1))
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
     let big = rest.iter().any(|x| x == "--m1");
-    // `mult` = 规模倍数：`--m1` ⇒ 1，`--mult K` ⇒ K（找**跨越点**：卡的固定往返 vs CPU 的每对开销）。
     let mult = if let Some(k) = rest.iter().position(|x| x == "--mult") {
         rest.get(k + 1)
             .and_then(|v| v.parse::<usize>().ok())
@@ -426,6 +430,11 @@ fn main() {
     } else {
         0
     };
+    (adapter, mult)
+}
+
+/// 打印场景与判据头（规模档由 `mult` 决定）。
+fn print_header(mult: usize) {
     println!("== 窄相卡上档接线 vs 默认 CPU 窄相：两条链只差「谁跑窄相」==");
     println!(
         "  {TICKS} tick | threads=8 | 场景 = {} | 判据 t=1 ≤ {T1_MAX:.0e} m",
@@ -439,28 +448,10 @@ fn main() {
             "小档（144 静 + 60 球 + 40 带旋转盒）".to_string()
         }
     );
-    let (cap_b, cap_p) = if mult > 0 {
-        (CAP_BODIES_M1 * mult as u32, CAP_PAIRS_M1 * mult as u32 / 4)
-    } else {
-        (CAP_BODIES, CAP_PAIRS)
-    };
-    let skin = cfg().contact_skin;
-    let Ok(tier) = NarrowTier::new(adapter, cap_b, cap_p, skin) else {
-        // 无适配器 ⇒ **未判定**（别当绿；同 `gpu_narrow_probe` 的约定）。
-        println!("  ⚠️ 本机无可用适配器 ⇒ **本探针未判定**（不是通过）");
-        std::process::exit(2);
-    };
-    println!("  适配器：{}", tier.adapter());
-    // 0) **量具自检**：把复算表拿到「引擎」与「卡上」面前各对一次（不一致就先修表，别去动核）。
-    if !selftest(Some(&tier)) {
-        println!("  ⚠️ 三方不同轴 ⇒ 复算表或核有问题（上面已点名），下面的「轴」诊断只能当线索");
-    }
-    // ① 自证：两条链都**不注册** ⇒ 应当逐位相同（证明比较器本身不引入差）；同时把场景预热。
-    let (t1_self, end_self, ..) = run_pair(None, "自证（都不注册）", mult, WARM, false, adapter);
-    if t1_self != 0.0 || end_self != 0.0 {
-        println!("     ⚠️ 自证不为零 ⇒ 比较器/场景有不确定性，下面的读数不可信");
-    }
-    // ② 正题：B 链注册卡上档。
+}
+
+/// ② 正题：B 链注册卡上档，跑 pair 并打印走势/累计。返回 t=1 的读数。
+fn probe_tier(mult: usize, cap_b: u32, cap_p: u32, skin: f32, adapter: usize) -> f32 {
     let (t1, _, _, _, _, cps, us) = run_pair(
         Some(Box::new(
             NarrowTier::new(adapter, cap_b, cap_p, skin).expect("建卡上档"),
@@ -490,7 +481,11 @@ fn main() {
             "**这一档规模下卡上更慢**（往返固定开销主导）"
         }
     );
-    // ③ 金丝雀：清空 count ⇒ 判据必须变红。
+    t1
+}
+
+/// ③ 金丝雀：清空 count ⇒ 判据必须变红。返回 t=1 的读数。
+fn probe_canary(mult: usize, cap_b: u32, cap_p: u32, skin: f32, adapter: usize) -> f32 {
     let (t1c, ..) = run_pair(
         Some(Box::new(DropAll(
             NarrowTier::new(adapter, cap_b, cap_p, skin).expect("建卡上档"),
@@ -501,6 +496,11 @@ fn main() {
         false,
         adapter,
     );
+    t1c
+}
+
+/// 裁决打印：正题过阈 **且** 金丝雀如期红 ⇒ 判据有分辨力、接线成立。
+fn print_verdict(t1: f32, t1c: f32) {
     println!(
         "  裁决：{}\n    （t=1：正题 {t1:.3e} / 金丝雀 {t1c:.3e} ⇒ {}）",
         if t1 <= T1_MAX && t1c > T1_MAX {
@@ -514,4 +514,33 @@ fn main() {
             "**金丝雀没红 ✗**"
         }
     );
+}
+
+fn main() {
+    let (adapter, mult) = parse_args();
+    print_header(mult);
+    let (cap_b, cap_p) = if mult > 0 {
+        (CAP_BODIES_M1 * mult as u32, CAP_PAIRS_M1 * mult as u32 / 4)
+    } else {
+        (CAP_BODIES, CAP_PAIRS)
+    };
+    let skin = cfg().contact_skin;
+    let Ok(tier) = NarrowTier::new(adapter, cap_b, cap_p, skin) else {
+        // 无适配器 ⇒ **未判定**（别当绿；同 `gpu_narrow_probe` 的约定）。
+        println!("  ⚠️ 本机无可用适配器 ⇒ **本探针未判定**（不是通过）");
+        std::process::exit(2);
+    };
+    println!("  适配器：{}", tier.adapter());
+    // 0) **量具自检**：把复算表拿到「引擎」与「卡上」面前各对一次（不一致就先修表，别去动核）。
+    if !selftest(Some(&tier)) {
+        println!("  ⚠️ 三方不同轴 ⇒ 复算表或核有问题（上面已点名），下面的「轴」诊断只能当线索");
+    }
+    // ① 自证：两条链都**不注册** ⇒ 应当逐位相同（证明比较器本身不引入差）；同时把场景预热。
+    let (t1_self, end_self, ..) = run_pair(None, "自证（都不注册）", mult, WARM, false, adapter);
+    if t1_self != 0.0 || end_self != 0.0 {
+        println!("     ⚠️ 自证不为零 ⇒ 比较器/场景有不确定性，下面的读数不可信");
+    }
+    let t1 = probe_tier(mult, cap_b, cap_p, skin, adapter);
+    let t1c = probe_canary(mult, cap_b, cap_p, skin, adapter);
+    print_verdict(t1, t1c);
 }
