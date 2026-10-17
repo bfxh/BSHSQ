@@ -102,11 +102,13 @@ struct Frozen {
 }
 
 fn frozen() -> Frozen {
+    // 用位模式写浮点字面量：十进制写法很容易超过 `f32` 的有效位而触发
+    // `clippy::excessive_precision`（CI 的强化档 clippy 把它当错误）。
     Frozen {
-        x_car: -0.158_433_0,
-        y_car: 0.165_869_6,
-        x_wheel: -0.058_083_3,
-        y_wheel: 0.080_220_6,
+        x_car: f32::from_bits(0xbe22_3c42),
+        y_car: f32::from_bits(0x3e29_d9b9),
+        x_wheel: f32::from_bits(0xbd6d_e8c7),
+        y_wheel: f32::from_bits(0x3da4_4ab7),
     }
 }
 
