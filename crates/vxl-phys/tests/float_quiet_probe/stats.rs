@@ -17,7 +17,6 @@ pub(crate) fn yaw_of(q: Quat) -> f32 {
 /// - **静态体**（marker，inv_mass=0）+ 流体：体不动 ⇒ 读**反作用力矩均值**——
 ///   非零即证明"流体对**静止**体也施加系统性转矩"（与体的转动反馈无关）。
 /// - **自由体 + 流体**：基准（复现上一轮的 −0.142 rad/3 s）。
-
 pub(crate) fn surface_height(couple: bool) -> f32 {
     let mut w0 = World::new(PhysConfig::default());
     let v0 = tank(&mut w0);

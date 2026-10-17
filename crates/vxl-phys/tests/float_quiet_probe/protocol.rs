@@ -125,7 +125,6 @@ pub(crate) fn quiet_shaped(couple: bool, shape: Shape, rot: Quat) -> (f32, f32, 
 }
 
 /// 姿态的偏航角（绕 Y；用旋转矩阵的 x 轴投影求）。
-
 pub(crate) fn run_yaw(w: &mut World, body: usize, settle: usize, win: usize) -> (f32, f32) {
     for _ in 0..settle {
         w.step();

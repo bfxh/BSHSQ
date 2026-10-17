@@ -166,7 +166,7 @@ fn drop_scan(mesh: &TriMesh, cases: [(&str, f32, f32); 4]) {
                 w.step();
             }
             let (pos, _rot) = w.bodies.pose(i);
-            let d_min = brute_min_dist(&mesh, pos);
+            let d_min = brute_min_dist(mesh, pos);
             let clearance = d_min - r;
             println!(
                 "  {:20} {r:4.2}  ({:7.3},{:7.3})  {:8.4}  {:8.4}  {:+8.4}  {:+9.4}   {}  {:.4}",

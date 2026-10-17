@@ -187,7 +187,6 @@ fn float_spin_bias_isolation() {
     }
 }
 /// 跑 `settle` 步再取 `win` 步窗口，返回（累计偏航、|ω| 峰）。
-
 /// **冲击 vs 稳态**（仪表，只打印）：三格隔离实验里体都是**从 1.5 m 落下**（冲击 ≈4.4 m/s）⇒
 /// 那个符号确定的偏航**可能只是"一次性冲击的不对称残差"**（角动量守恒 ⇒ 转了就留着），
 /// 而不是稳态偏置。本测试把同一格改成**轻放**（起点就在平衡位附近，几乎无冲击）：
@@ -265,7 +264,6 @@ fn steady_spin_with_valid_protocol() {
 }
 
 /// 一档配置下的完整协议表。
-
 fn run_protocol_block(cfg: PhysConfig, settle_ticks: usize, win_ticks: usize) {
     let _ = &cfg;
     println!(

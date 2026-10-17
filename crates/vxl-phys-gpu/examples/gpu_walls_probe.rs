@@ -244,8 +244,8 @@ fn ghost_report(
         }
         (mx, mean / a.len() as f32)
     };
-    let (mx_w, mn_w) = dev(&cpu_dens, &gpu_with);
-    let (mx_wo, mn_wo) = dev(&cpu_dens, &gpu_without);
+    let (mx_w, mn_w) = dev(cpu_dens, gpu_with);
+    let (mx_wo, mn_wo) = dev(cpu_dens, gpu_without);
     println!("== 提供者壁面的镜像鬼影（GPU 侧）vs CPU 档：同一状态比密度场 ==");
     println!(
         "  体素水槽 + 8³@0.05 水块（{n} 粒）| 近壁粒子（有条目）{} / {} 面 | 零步长 ⇒ 位置不动",
