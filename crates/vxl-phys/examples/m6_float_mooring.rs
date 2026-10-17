@@ -9,8 +9,13 @@
 //! ② **被扯断**（`break_force = 5 N`）：浮力（净 ≈ 12 N）超过绳的断裂力 ⇒ 绳断，浮体浮到水面 ——
 //!    钉末态 `y`、`v_y`、以及 `is_broken`。
 //!
-//! ⚠️ **绳长取的是初始间距**：`rest ≠ 初始距离` 时求解器会把间距直接压到 0（`rest` 形同虚设），
-//! 已登记 `docs/OPEN-PROBLEMS.md`。本档因此让浮体**从绳长处起步**，靠浮力去绷紧它。
+//! **绳长取的是初始间距**：`rest ≠ 初始距离` 曾把间距直接压到 0（`rest` 形同虚设）——
+//! 那是 `Distance` 关节的**冲量符号写反**（`lambda = -(v·n + bias)/k` 在 `apply_pair` 的约定下
+//! 解出 `v·n = +bias`，与目标 `−bias` 相反 ⇒ 每轮翻倍）。**已于 2026-10-17 修复（`922e685`）**，
+//! 回归测试 `tests/joint_break.rs::distance_rest_differs_from_initial_distance_converges`。
+//!
+//! 本档仍然让浮体**从绳长处起步**，但那现在是**保守选择**（让"被拉住"的判据不依赖
+//! `rest ≠ 初始` 这条路径），不是绕开缺陷。
 //!
 //! 运行：`cargo run --release -p vxl-phys --example m6_float_mooring -- [ticks]`
 //! 门禁配方见 `scripts/gate_gold.sh`。
