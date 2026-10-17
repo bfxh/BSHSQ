@@ -268,6 +268,59 @@ capabilities:
       断裂力记在 `Breakage.forces` 的并行数组里 —— god 门的 `max_type_members` 是棘轮、只准降。
       同时登记了 `rest ≠ 初始距离` 时 `Distance` 关节把间距压到 0 的既有缺陷（见 `OPEN-PROBLEMS.md`）。
 
+  - id: PHY-SCOPE-M6-SAIL
+    title: 默认铆内的帆面推进（船体 + 竖直帆 + 顺风漂移）
+    scope: included
+    implementation: covered
+    implementation_path: crates/vxl-phys/examples/m6_float_sail.rs
+    evidence:
+      - id: gold_sample
+        note: >
+          `examples/m6_float_sail.rs` + `scripts/gate_gold.sh`（配方 `720`）。四项判据（`f32` 位模式）：
+          粒子数守恒 / 顺风档末态船心 `x, y` / 零风档末态船心 `x, y`，以及最关键的第四条
+          —— **顺风档 `x` 严格大于零风档**（差分判据，这才是“风真的推了船”）。
+      - id: honesty_note
+        note: >
+          **判据为什么是差分而不是“零风档 x ≡ 0”**：实测零风档也会漂 `+0.1094`，
+          来源是水块铸装沉降的推力 + 帆把质心抬高后的姿态扰动，两者都不是风。
+          摸高船体只能让伪影改号。所以两档都冻结成基线，只认两档之差。
+      - id: ci_verification_path
+        note: Linux CI（金样 job）+ 本地 `bash scripts/gate_gold.sh` 双通过（2026-10-17）。
+    required_evidence:
+      - implementation_path
+      - ci_verification_path
+    decision_id: null
+    owner: maintainer
+    notes: >
+      结构：体素水槽 + 船体（长条轻盒，密度 300）+ 竖直三角面板帆（法线沿 ±x）+ 固定桧杆。
+      风对帆面的作用走面元气动（`F = ½ρCdA·u·|u|`），经固定关节带动船体。
+
+  - id: PHY-SCOPE-M6-WHEELED
+    title: 车辆地面行驶的确定性金样（车身 + 球轮 + 转动关节）
+    scope: included
+    implementation: covered
+    implementation_path: crates/vxl-phys/examples/m6_wheeled_car.rs
+    evidence:
+      - id: gold_sample
+        note: >
+          `examples/m6_wheeled_car.rs` + `scripts/gate_gold.sh`（配方 `180`）。判据：车身/前轮末态
+          `x, y` 的 `f32` 位模式（容差 `1e-3`）+ 行为断言 `x_car < 0`（确实往 −x 下坡走了）。
+      - id: why_tolerance_not_bits
+        note: >
+          **这一项是本仓唯一不要求逐位的金样**，并且是被 CI 逼出来的结论：车是**接触驱动的混沌系统**，
+          `180` tick 足够把 1 ulp 放大到末态位模式不同。去掉全部三角函数后差距仍有
+          **`1.2e-4`**（实测，Windows vs Linux CI）⇒ 取 `1e-3` 留 8 倍余量。详见 `docs/PHYSICS-INVARIANTS.md` §2.4。
+      - id: ci_verification_path
+        note: Linux CI（金样 job）+ 本地 `bash scripts/gate_gold.sh` 双通过（2026-10-17）。
+    required_evidence:
+      - implementation_path
+      - ci_verification_path
+    decision_id: null
+    owner: maintainer
+    notes: >
+      场景设计上的两个硬约束：① 轮子用**球**而不是多面化圆柱（球是解析接触、纯滚动有闭式解，
+      多面化圆柱实测会抖）；② 地面改**水平**、车身带 −x 初速，而不用倾斜坡——让数值路径只剩加减乘除与开方。
+
   - id: PHY-SCOPE-GPU-CLOTH
     title: 布料的 GPU 档
     scope: included
