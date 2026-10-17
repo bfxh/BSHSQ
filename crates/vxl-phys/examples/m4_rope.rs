@@ -98,9 +98,6 @@ fn readings(ticks: usize) -> Readings {
     let low_y = r.pos.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
     let rope_v = r.vel.iter().map(|v| v.length()).fold(0.0f32, f32::max);
     let v = w.bodies.linvel[ball];
-    // `quat`/`pos` 读出来只为让门禁看得见"球确实在场景里"；判据只用 `y` 与 `|v|`。
-    let _ = w.bodies.position[ball];
-    let _ = w.bodies.rot(ball);
     Readings {
         hash: h,
         low_y,
@@ -137,17 +134,22 @@ fn main() {
     let ok = r.hash == f.hash
         && (r.low_y - f.low_y).abs() < 1e-6
         && (r.ball_y - f.ball_y).abs() < 1e-6
-        // (4) 结构判据（可读、不依赖数值）：绳中间必须**真的垂下来**（低于两端固定的
-        //     `y = 1.6`），且球必须**在绳低点之上**（说明它被绳托住而不是穿过去）。
-        //     ⚠️ 不能断言"球速 ≈ 0"：球压着绳，绳会持续微振（实测 `|v| ≈ 6e-2`、
-        //     绳自己 `1.2e-1`），这是物理上正确的行为，而它**每次跑都逐位相同**
-        //     （三次实测同一 hash）—— 金样守的是确定性，不是静止。
-        && r.low_y < 1.55
-        && r.ball_y > r.low_y;
+        // (4) 结构判据（可读、不依赖数值）。两条都要够**紧**，否则等于没判：
+        //  - 绳必须**真的垂下来**：两端固定在 `y = 1.6`，实测低点 `1.4139`（垂度 0.186）。
+        //    阈值取 `1.5`（垂度 ≥ 0.10 ≈ 半个垂度）—— 松到"参数偏了仍能过"就没意义了；
+        //  - 球必须**贴在绳上**：实测 `ball_y − low_y = 0.1442`，与球半径 `0.12` 同量级。
+        //    上界取 `0.2` ⇒ 球若只是悬在半空（或绳被压塌后球继续下沉）都会被拦下。
+        //    只写 `ball_y > low_y` 是不够的：球悬在 10 m 高也满足它。
+        && r.low_y < 1.5
+        && (r.ball_y - r.low_y) < 0.2;
+    // ⚠️ **不要**在这里断言"球速 ≈ 0"。球压着一根没摩擦的绳，持续微振是物理上正确的：
+    // 实测球 `|v| ≈ 6.2e-2`、绳自己 `|v|max ≈ 1.2e-1`，跑多久都不降。而它**每次跑都逐位
+    // 相同**（三次实测同一 hash）—— 金样守的是**确定性**，不是静止。把这两件事混为一谈，
+    // 会写出一个永远不可能通过、或者必须靠放宽到无意义才能通过的判据。
     if !ok {
         eprintln!(
             "❌ 金样基线 FAIL（m4_rope / {ticks} tick）\n   \
-             期望 hash=0x{:016x} low_y={:.9} ball_y={:.9} 且 low_y<1.55、ball_y>low_y\n   \
+             期望 hash=0x{:016x} low_y={:.9} ball_y={:.9} 且 low_y<1.5、ball_y-low_y<0.2\n   \
              实测 hash=0x{:016x} low_y={:.9} ball_y={:.9} |v|={:.3e}",
             f.hash, f.low_y, f.ball_y, r.hash, r.low_y, r.ball_y, r.ball_v,
         );
