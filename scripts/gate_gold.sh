@@ -126,6 +126,8 @@ run_vxl_gold m5_float_box 720
 run_vxl_gold m6_float_mooring 720
 # M6 帆：船体 + 帆 + 顺风（面元气动）——判据是「顺风档 vs 零风档」的差分，两档末态都冻成位模式。
 run_vxl_gold m6_float_sail 720
+# M6 车：厚板斜坡 + 车身 + 两个球轮（转动关节）—— 球是解析接触，纯滚动有闭式解。
+run_vxl_gold m6_wheeled_car 180
 
 echo "✅ 金样门全绿（fmt / clippy / col45 / pile5 / tower25 / m3_collapse / m4_cantilever / m4_flag / m5_dam_break / m5_float_box / m6_float_mooring 全 0）"
 exit 0

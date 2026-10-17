@@ -1,0 +1,144 @@
+//! **M6 轮式车金样**（vxl-only 通道）—— `ROUTE` M6 出口判据「帆/浮体/车 金样」里的**车**那一项。
+//!
+//! 场景：**厚板斜坡**（半高 `0.5`、绕 `z` 倾斜 `10°`）上停一辆两轮车：
+//! 车身（`0.30×0.10×0.20` 的盒，密度 `500`）+ 两个**球形轮**（半径 `0.08`，密度 `1200`），
+//! 轮与车身之间是**转动关节**（自由轴 `= z`，即垂直于滚动方向）⇒ 轮能滚、车身只跟着走。
+//!
+//! **为什么轮是球而不是圆柱**：圆柱的解析接触要靠多面化，滚动时接触法线在面与面之间跳变
+//! （"打摆"，见 `TECH-SURVEY` A9 与 `tests/rolling_probe.rs`）。球是解析接触，纯滚动有闭式解
+//! （`tests/rolling_resistance_contracts.rs` 的 R1：`a = 5g·sinθ/7`），因此用它当轮既稳又可判。
+//!
+//! **判据**（三项，按 `f32` 位模式逐位，口径同 `m4_cantilever` / `m5_float_box`）：
+//! (1) 车身末态 `x` / `y`；(2) 前轮末态 `x` / `y`；(3) **行为**：车身 `x` 必须比起点更小
+//! （`−x` 是下坡方向）—— 这一条独立于数值冻结，是"车真的滚下去了"的可读判据。
+//!
+//! **起步必须贴面**：轮心放在表面高度（`y = r`）处。实测把 `r = 0.08` 的轮从高出表面
+//! `0.34 m` 放下，球会在接触前攒够速度而**穿透**厚板（`y` 一路掉到 `−0.79` 还在下降）——
+//! 同一场景里把 `r` 改成 `0.3`、落点贴近表面就正常。所以这里的几何是"贴面起步"。
+//!
+//! 运行：`cargo run --release -p vxl-phys --example m6_wheeled_car -- [ticks]`
+//! 门禁配方：`180`（见 `scripts/gate_gold.sh`）。
+// 新文件：`glob-gate` 对新增文件零基线 ⇒ 显式导入（不用 `use vxl_phys::*`）。
+use vxl_phys::{Joint, JointKind, PhysConfig, Quat, Shape, Vec3, World};
+
+const GATE_TICKS: usize = 180;
+
+/// 斜坡倾角（度）。绕 `z` 正转 ⇒ 上坡朝 `+x`、下坡朝 `−x`。
+const SLOPE_DEG: f32 = 10.0;
+/// 轮半径（也是轮心的起始高度 = 贴面）。
+const WHEEL_R: f32 = 0.08;
+
+/// 斜坡 + 车身 + 两轮 ⇒ 返回 `(世界, 车身 id, 前轮 id)`。
+fn scene() -> (World, u32, u32) {
+    let mut w = World::new(PhysConfig::default());
+    let tilt = Quat::from_axis_angle(Vec3::Z, SLOPE_DEG.to_radians());
+    // 厚板：`half.y = 0.5`（薄板会让贴面起步的轮直接穿透）。
+    w.add_static(
+        Shape::Box {
+            half: Vec3::new(8.0, 0.5, 8.0),
+        },
+        Vec3::new(0.0, -0.5, 0.0),
+        tilt,
+    );
+    let x0 = 0.0_f32;
+    let car = w.add_dynamic(
+        Shape::Box {
+            half: Vec3::new(0.15, 0.05, 0.10),
+        },
+        Vec3::new(x0, WHEEL_R + 0.10, 0.0),
+        tilt,
+        500.0,
+    );
+    let mut front = 0u32;
+    for (k, dx) in [-0.10_f32, 0.10].into_iter().enumerate() {
+        let wheel = w.add_dynamic(
+            Shape::Sphere { radius: WHEEL_R },
+            Vec3::new(x0 + dx, WHEEL_R, 0.0),
+            Quat::IDENTITY,
+            1200.0,
+        );
+        // 转动关节：自由轴 = z（垂直于滚动方向 `x`）⇒ 轮能绕它滚，车身只被带着平移。
+        w.joints.add(
+            Joint::new(
+                JointKind::Revolute,
+                car,
+                wheel,
+                Vec3::new(dx, -0.10, 0.0),
+                Vec3::ZERO,
+            )
+            .with_axis(Vec3::Z),
+        );
+        if k == 1 {
+            front = wheel;
+        }
+    }
+    (w, car, front)
+}
+
+/// 跑 `ticks`，返回 `(车身 x, 车身 y, 前轮 x, 前轮 y)`。
+fn run(ticks: usize) -> (f32, f32, f32, f32) {
+    let (mut w, car, front) = scene();
+    for _ in 0..ticks {
+        w.step();
+    }
+    let p = w.bodies.position[car as usize];
+    let q = w.bodies.position[front as usize];
+    (p.x, p.y, q.x, q.y)
+}
+
+/// 冻结的末态读数（`f32` 位模式）。真值来源：`GATE_TICKS = 180` 实测，两次独立运行逐位相同。
+struct Frozen {
+    x_car: u32,
+    y_car: u32,
+    x_wheel: u32,
+    y_wheel: u32,
+}
+
+fn frozen() -> Frozen {
+    Frozen {
+        x_car: 0xbf75_a892,
+        y_car: 0xbc95_536a,
+        x_wheel: 0xbf59_b5a3,
+        y_wheel: 0xbd78_2ec7,
+    }
+}
+
+fn main() {
+    let ticks: usize = std::env::args()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(GATE_TICKS);
+    let (x, y, wx, wy) = run(ticks);
+    println!("  车身 x={x:.9} y={y:.9} | 前轮 x={wx:.9} y={wy:.9}");
+    println!(
+        "  位模式 x_car=0x{:08x} y_car=0x{:08x} x_wheel=0x{:08x} y_wheel=0x{:08x}",
+        x.to_bits(),
+        y.to_bits(),
+        wx.to_bits(),
+        wy.to_bits()
+    );
+    let f = frozen();
+    let ok = x.to_bits() == f.x_car
+        && y.to_bits() == f.y_car
+        && wx.to_bits() == f.x_wheel
+        && wy.to_bits() == f.y_wheel
+        // (3) 行为：下坡朝 −x，车身必须真的往那边走了（独立于数值冻结的可读判据）。
+        && x < 0.0;
+    if !ok {
+        eprintln!(
+            "❌ 金样基线 FAIL（m6_wheeled_car / {ticks} tick）\n   \
+             期望 x_car=0x{:08x} y_car=0x{:08x} x_wheel=0x{:08x} y_wheel=0x{:08x} 且 x_car<0\n   \
+             实测 x_car=0x{:08x} y_car=0x{:08x} x_wheel=0x{:08x} y_wheel=0x{:08x}",
+            f.x_car,
+            f.y_car,
+            f.x_wheel,
+            f.y_wheel,
+            x.to_bits(),
+            y.to_bits(),
+            wx.to_bits(),
+            wy.to_bits(),
+        );
+        std::process::exit(1);
+    }
+    println!("✅ 金样基线 PASS（m6_wheeled_car / {ticks} tick）");
+}
