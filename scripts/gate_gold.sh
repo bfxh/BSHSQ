@@ -124,6 +124,8 @@ run_vxl_gold m5_float_box 720
 # ② **被扯断**（`break_force = 2 N` < 浮体重 ≈ 5.1 N）⇒ 绳断、浮体入水浮到水面 `y ≈ 1.21`。
 # 判据 = 粒子数 / 两个子场景的末态 `y` 与 `v_y` 的 `f32` 位模式逐位 / 各自的断裂标志。
 run_vxl_gold m6_float_mooring 720
+# M6 帆：船体 + 帆 + 顺风（面元气动）——判据是「顺风档 vs 零风档」的差分，两档末态都冻成位模式。
+run_vxl_gold m6_float_sail 720
 
 echo "✅ 金样门全绿（fmt / clippy / col45 / pile5 / tower25 / m3_collapse / m4_cantilever / m4_flag / m5_dam_break / m5_float_box / m6_float_mooring 全 0）"
 exit 0
