@@ -112,8 +112,9 @@ fn frozen() -> Frozen {
     }
 }
 
-/// 容差（绝对）。实测跨平台差异约 `1.6e-5` ⇒ 取 `1e-4` 有 6 倍余量。
-const TOL: f32 = 1e-4;
+/// 容差（绝对）。**实测跨平台最大差 `1.2e-4`**（`x_car`，Windows 与正式 CI 读数对比）
+/// ⇒ 取 `1e-3` 留 8 倍余量。早先按位模式换算估成 `1.6e-5` 是错的，CI 实测差了一个数量级。
+const TOL: f32 = 1e-3;
 
 fn main() {
     let ticks: usize = std::env::args()
