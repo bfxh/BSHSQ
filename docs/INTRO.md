@@ -17,7 +17,7 @@
 | crate 数 | **23 个**，DAG 无环 | `ls crates/`，`Cargo.toml` 的 workspace 成员 |
 | 测试 | **763 个** | `cargo test --workspace -- --list` |
 | 金样（回归基线） | **11 项**，全部在 CI 阻断 | `scripts/gate_gold.sh` 的注册项 |
-| CI | **21 个 job**，覆盖 4 个编译器 × 2 个架构 | `.github/workflows/ci.yml` |
+| CI | **21 个 job**，覆盖 3 个编译器 × 2 个架构 | `.github/workflows/ci.yml` |
 | 本地门禁 | **28 道** | `python -X utf8 scripts/local_gate.py` |
 | 文档 | **47 份** + **10 条 ADR** | `docs/` |
 | 提交 | **164 个** | `git rev-list --count HEAD` |
@@ -37,8 +37,8 @@
 
 ### 1. 逐位确定性，而且跨编译器验证
 
-固定 60 Hz + 严格 f32 + 无 fast-math + 归约有序。CI 里跑 **4 个编译器**
-（MSVC / GCC / Clang+LLD / GCC-aarch64-qemu）并要求**末态哈希全等**：
+固定 60 Hz + 严格 f32 + 无 fast-math + 归约有序。CI 里跑 **3 个编译器 × 2 个架构**
+（MSVC / GCC / Clang+LLD 各自在 x86_64，GCC 另跑 aarch64-qemu）并要求**末态哈希全等**：
 `0xc0dfc6f4bb0382c2c47a1eab66c575bb`。
 
 为什么重要：确定性 = 任何 bug 都能**逐位复现**，任何回归都能二进制级定位。
@@ -90,7 +90,7 @@
 
 23 个 crate，5 万行源码 + 3 万行测试，763 个测试，11 项回归金样全在 CI 阻断。
 
-最在意的不是性能，是可复现性：4 个编译器 × 2 个架构，末态哈希必须逐位相等。
+最在意的不是性能，是可复现性：3 个编译器 × 2 个架构，末态哈希必须逐位相等。
 任何一个物理 bug 都能二进制级定位。
 
 刚体和软体不能共用一个求解器——这个我做过评审，结论是不做。
@@ -109,7 +109,7 @@
 
 **2/**
 ```
-现在做到了：4 个编译器（MSVC / GCC / Clang / aarch64-qemu）交叉验证，末态哈希全等。
+现在做到了：3 个编译器 × 2 个架构（MSVC / GCC / Clang 在 x86_64，GCC 另跑 aarch64-emu）交叉验证，末态哈希全等。
 
 代价是很多"聪明"的优化不能做：没有 fast-math，归约必须有固定顺序，
 岛内约束得按 (a,b,点序) 排死。
