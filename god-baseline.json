@@ -1046,8 +1046,8 @@
       "max_type_members": 0
     },
     "crates/vxl-phys-solver/src/joints.rs": {
-      "file_lines": 484,
-      "max_fn_lines": 50,
+      "file_lines": 500,
+      "max_fn_lines": 49,
       "max_type_members": 0
     },
     "crates/vxl-phys-solver/src/joints/linalg.rs": {

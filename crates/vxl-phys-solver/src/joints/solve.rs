@@ -16,11 +16,18 @@ pub(crate) fn params(cfg: &PhysConfig, dt: f32) -> JointParams {
 impl JointSet {
     pub fn add(&mut self, j: Joint) -> u32 {
         self.joints.push(j);
+        // 断裂状态按需对齐（与 `joints` 同索引）。
+        self.breakage.broken.push(false);
+        self.breakage.impulse.push(0.0);
+        self.breakage.forces.push(0.0);
         (self.joints.len() - 1) as u32
     }
 
     pub fn clear(&mut self) {
         self.joints.clear();
+        self.breakage.broken.clear();
+        self.breakage.impulse.clear();
+        self.breakage.forces.clear();
     }
 
     pub fn len(&self) -> usize {
@@ -55,6 +62,8 @@ impl JointSet {
         if self.joints.is_empty() {
             return;
         }
+        // 断裂状态按需对齐 `joints`（`joints` 是 pub 字段，可能被直接 push 过），并清零冲量。
+        self.breakage.prepare(self.joints.len());
         self.wake(bodies);
         let sp = params(config, dt);
         // 关节独立迭代预算（接触档是标定过的接触预算；关节链的敏感度不同，
@@ -62,17 +71,23 @@ impl JointSet {
         let iters = config.joint_iterations.max(1);
         for it in 0..iters {
             let mut resid = 0.0f32;
-            for j in self.joints.iter_mut() {
+            for (i, j) in self.joints.iter_mut().enumerate() {
+                if self.breakage.broken[i] {
+                    continue;
+                }
                 let (a, b) = (j.a as usize, j.b as usize);
                 if !joint_active(bodies, a, b) {
                     continue;
                 }
-                resid = resid.max(solve_joint(j, bodies, &sp));
+                let imp = solve_joint(j, bodies, &sp);
+                self.breakage.impulse[i] = self.breakage.impulse[i].max(imp);
+                resid = resid.max(imp);
             }
             if it + 1 >= sp.min_iters && resid < sp.eps {
                 break;
             }
         }
+        self.check_break(dt);
     }
 }
 

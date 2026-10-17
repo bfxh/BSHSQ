@@ -39,6 +39,8 @@ use vxl_phys_core::{BodySet, Mat3, PhysConfig, Vec3};
 
 // ── 按域拆出的子模块（子目录 joints/）
 mod ang;
+mod breakage;
+mod builders;
 mod linalg;
 mod solve;
 mod types;

@@ -228,6 +228,36 @@ capabilities:
     owner: maintainer
     notes: 别再据此立项（`ROUTE.md` 的 M3 出口判定曾挂着它，2026-10-07 已按此口径更正）。
 
+  - id: PHY-SCOPE-JOINT-BREAKABLE
+    title: 关节可断裂（约束力超过阈值后永久断开）
+    scope: included
+    implementation: covered
+    implementation_path: crates/vxl-phys-solver/src/joints/breakage.rs
+    evidence:
+      - id: unit_tests
+        note: >
+          `crates/vxl-phys/tests/joint_break.rs` 四条判据：`break_force = 0` 永不断（"无此功能"的
+          等价性）/ 超阈即断且**永久** / 阈内不断且关节照常拉住 / 断后不再施加任何约束。
+      - id: gold_sample
+        note: >
+          `examples/m6_float_mooring.rs` + `scripts/gate_gold.sh`（配方 `720`）：同一场景两个子场景
+          （被拉住 `y = 1.30` / 被扯断后浮到水面 `y = 1.21`），末态 `y` / `v_y` 的 `f32` 位模式逐位，
+          并各自断言断裂标志 —— 把"功能有效"与"数值逐位可复现"一起钉住。
+      - id: semantics
+        note: >
+          `break_force <= 0` = 不断（默认）⇒ **逐位等价**于无此功能（照抄 `motor_max_force <= 0` 的
+          约定）；判据 = 本子步最大约束力（冲量 / `dt`），在解完之后统一判一次 ⇒ 与迭代数无关；
+          断开是永久的，不自动恢复。
+    required_evidence:
+      - implementation_path
+      - ci_verification_path
+    decision_id: null
+    owner: maintainer
+    notes: >
+      用户 2026-10-17 口头立项（"搞新功能" → 选定 M6 浮体）。实现时刻意**不给 `Joint` 加字段**：
+      断裂力记在 `Breakage.forces` 的并行数组里 —— god 门的 `max_type_members` 是棘轮、只准降。
+      同时登记了 `rest ≠ 初始距离` 时 `Distance` 关节把间距压到 0 的既有缺陷（见 `OPEN-PROBLEMS.md`）。
+
   - id: PHY-SCOPE-GPU-CLOTH
     title: 布料的 GPU 档
     scope: included

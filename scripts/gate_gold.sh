@@ -118,5 +118,12 @@ run_vxl_gold m5_dam_break 400
 # 1200 的 y 逐位相同 ⇒ 取 720 才钉的是"浮到平衡"。判据 = 粒子数 / 末态盒心 y / v_y 的位模式逐位。
 run_vxl_gold m5_float_box 720
 
-echo "✅ 金样门全绿（fmt / clippy / col45 / pile5 / tower25 / m3_collapse / m4_cantilever / m4_flag / m5_dam_break / m5_float_box 全 0）"
+# M6 浮体系泊（液体 × 刚体 + **可断裂约束**；配方 `720`）：水槽 + 铸装水块 + 系泊轻盒
+# （绳 = `JointKind::Distance`，锚点在水面上方、绳长 0.30 m）。两个子场景：
+# ① **被拉住**（`break_force = 0` ⇒ 绳永不断）⇒ 浮体停在绳长处 `y = 1.30`、`v_y ≈ 0`；
+# ② **被扯断**（`break_force = 2 N` < 浮体重 ≈ 5.1 N）⇒ 绳断、浮体入水浮到水面 `y ≈ 1.21`。
+# 判据 = 粒子数 / 两个子场景的末态 `y` 与 `v_y` 的 `f32` 位模式逐位 / 各自的断裂标志。
+run_vxl_gold m6_float_mooring 720
+
+echo "✅ 金样门全绿（fmt / clippy / col45 / pile5 / tower25 / m3_collapse / m4_cantilever / m4_flag / m5_dam_break / m5_float_box / m6_float_mooring 全 0）"
 exit 0
