@@ -83,11 +83,13 @@ run_scene tower25 2400 16 0.01 1 3.0 30 16
 # 跑**主 workspace** 的 example（`gold-sample` 自带 [workspace] ⇒ 在那里 `-p vxl-phys` 找不到包）、
 # 要求真出现 `金样基线 PASS`（只打"跳过基线判定"即判失败）。判据与冻结值都在各 example 里，
 # 换代按 ADR-0004 记新旧值与理由。
-run_vxl_gold() { # run_vxl_gold <example> <配方参数…>
+run_vxl_gold() { # run_vxl_gold <example> [--pkg <crate>] <配方参数…>
     local ex="$1"; shift
+    local pkg="vxl-phys"
+    if [ "${1:-}" = "--pkg" ]; then pkg="$2"; shift 2; fi
     local log="${out}/g_${ex}.log"
     ( cd "$root" && CARGO_TARGET_DIR="${CARGO_TARGET_DIR_M3:-C:/vxl-wl-target}" \
-        cargo run --release -q -p vxl-phys --example "$ex" -- "$@" ) >"$log" 2>&1
+        cargo run --release -q -p "$pkg" --example "$ex" -- "$@" ) >"$log" 2>&1
     local rc=$?
     local line
     line="$(grep -m1 -E '金样基线 (PASS|FAIL)|跳过基线判定' "$log" || true)"
@@ -121,7 +123,7 @@ run_vxl_gold m4_rope 600
 # 两档：**开阔**（直达 + 地板反射，共 2 条）与**遮挡**（`z = 1` 立强吸声墙，直达与反射全挡，0 条）。
 # 判据：两档 `jsonl` 全量 FNV-1a 哈希 + 条数 + 结构断言（开阔 `direct≥1 且 total≥2`、
 # 遮挡 `direct==0 且 total==0`）。声学是纯函数 ⇒ 要位模式。
-run_vxl_gold a1_acoustic_gold 40
+run_vxl_gold a1_acoustic_gold --pkg vxl-phys-acoustics 40
 
 # M5 溃坝（液体；配方 `400`）：体素盆（地板 + 围堰）+ 自由水柱 `0.25×0.25×0.65`（504 粒）
 # 失支撑坍塌 ⇒ 质心沿 +x 前移、波前沿推进。判据 = 粒子数 / 末态质心 / 末态最大 x 的 `f32`

@@ -22,11 +22,6 @@ vxl-phys-replay = { workspace = true }
 # 软体域（绳索/T1）：门面只做装配与每 tick 推进，物理在 `vxl-phys-soft` 内。
 vxl-phys-soft = { workspace = true }
 
-[dev-dependencies]
-# 仅 example 用（`a1_acoustic_gold`）：声学是**输出侧只读域**，依赖 `vxl-phys` 本体。
-# dev-dependency 成环是 Cargo 允许的（example 是独立 target），不会进 lib 的依赖图。
-vxl-phys-acoustics = { workspace = true }
-
 [[example]]
 name = "m0_pyramid"
 
