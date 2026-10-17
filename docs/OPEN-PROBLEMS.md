@@ -3317,7 +3317,7 @@ world_ccd/sweep.rs::eval_hit  →  world.narrow.collide(.., &world.providers, ..
 开档的收益是旋转/密度重叠（`over_in` −61%），代价是近静场的动能（+18% `ke`）；两者都已进代码内
 文档（`src/config.rs` 的字段 doc、`src/flip.rs` 模块头 `## APIC` 节）与判据，默认值不动。
 
-## 2026-10-17 — `Distance` 关节在 `rest ≠ 初始距离` 时把间距压到 0（既有缺陷，**未修**）
+## 2026-10-17 — `Distance` 关节在 `rest ≠ 初始距离` 时把间距压到 0（**已修**，根因见本节末）
 
 - **现象**：静态锚点 + 动态球、`JointKind::Distance`、`rest = 0.5`、初始间距 `0.8` ⇒ 间距在
   **4 个 tick 内**掉到 0 并**停住**（不回弹到 0.5）。实测轨迹 `0.932 → 0.081 → 0.0129 → 0`，
@@ -3326,7 +3326,7 @@ world_ccd/sweep.rs::eval_hit  →  world.narrow.collide(.., &world.providers, ..
 - **绕开方式**：让 `rest` **等于初始间距**。solver 自己的 `distance_holds_rest_length` 就是
   这么写的（注释也点明"静止长度取初始真实距离"），所以这条缺陷一直没暴露。
   M6 浮体系泊金样（`m6_float_mooring`）按此口径构造。
-- **未修的理由**：修它要动 `linear_rows` 的 `Distance` 分支（位置偏置的方向与幅度），属求解器
+- **当时的处置**（⚠️ 事后证明判断有误，见本节末「已修」）：当时认为修它要动 `linear_rows` 的 `Distance` 分支（位置偏置的方向与幅度），属求解器
   核心；需要先有"改变长度"的判据与对照场景。本轮范围是加"可断裂"功能，不顺手改核心。
 - **可复现**：`tests/joint_break.rs` 头注记录了这个坑与第一版的失败轨迹。
 > ✅ **已修（2026-10-17）**：根因是 `linear_rows` 的 `Distance` 分支**冲量符号写反** —— `lambda` 算成 `-(v·n + bias)/k`，第一次迭代后 `v·n` 与偏置**同号** ⇒ 迭代发散（实测 `v·n` 序列 `0 → −7.2 → −21.6 → −50.4 → … → −914`，间距一步 0.8→0.0129、第二 tick 到 0 永停）。正解是 `(bias − v·n)/k`；改后间距单调收敛（`0.8 → 0.692 → 0.623 → … → 0.5012`）。回归判据 `tests/joint_break.rs::distance_rest_differs_from_initial_distance_converges`。全仓测试 0 失败；`m6_float_mooring` 只有「被拉住」档的 `v_y` 从 `+1.425e-6` 变 `−1.425e-6`（同量级、只翻符号，`y` 位模式不变），基线已随之更新。
@@ -3335,7 +3335,7 @@ world_ccd/sweep.rs::eval_hit  →  world.narrow.collide(.., &world.providers, ..
 
 逐 tick 的间距：`0.932001 → 0.079616 → 0.012897 → 0 → 0 → …`（永不回到 0.5）。
 
-两个线索（都还没修）：
+当时的两个猜测（**事后证明都不是根因** —— 真因是冲量符号写反，见本节末）：
 - **一步就冲过头**：`bias = -(len − rest)·bias_inv_dt`（`bias_inv_dt = baumgarte·inv_dt`），
   `len − rest = 0.432`，若 `baumgarte = 0.2`、`dt = 1/60` ⇒ 一步的目标位移约 `0.086 m`，
   实测却一步掉到 `0.0796` —— 看起来是**多迭代叠加**（同一子步内 `solve_joint` 被调多次，
