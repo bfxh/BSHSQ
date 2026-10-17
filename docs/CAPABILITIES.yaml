@@ -162,6 +162,16 @@ capabilities:
     evidence:
       - id: declaration_only
         note: crates/vxl-phys-core/src/interop.rs 的 ElementKind::Xpbd 只有定义、全仓零消费方（2026-10-08 核实）
+      - id: design_review_doc
+        note: >
+          **设计评审已开展（未决议）**：`docs/UNIFIED-SOLVER-REVIEW.md` 补齐了下面五项证据
+          （基于当前代码实测，非推理）。关键结论三条：① `ElementKind` 五个变体**全部**
+          零消费方（不只 `Xpbd`），只有 trait 声明；② 当前跨域耦合是“下一 tick 生效”
+          （`World::step` 的子步循环之后才跑 `domain_pass()`）；③ 各域残量口径互不可比
+          （刚体用速度残量、XPBD/PBF 用位置残量、FLIP 无残量）⇒ “统一收敛判据”无法在
+          FLIP 上定义。建议：**不立项**（除非出现具体的强耦合需求）；若确有需求，优先做
+          **针对性的双向耦合迭代**，而不是重写浂染引擎整体求解架构。代码**零改动**：
+          `xpbd_solver_gate` 仍绿，本条目的 status 与 implementation 不变。
       - id: gate
         note: >
           crates/vxl-phys/tests/xpbd_solver_gate.rs —— 把"零消费方"做成可执行门：
