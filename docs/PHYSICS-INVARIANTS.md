@@ -85,8 +85,9 @@
 **判据**：门禁必须能证明它**真的做了判定**。
 
 **现有防线**：
-- `scripts/gate_gold.sh` 的 `run_scene` — 检查输出里必有「金样基线 PASS」，
-  出现「跳过基线判定」即失败
+- `scripts/gate_gold.sh` 的 `run_scene` / `run_vxl_gold` — 检查输出里必有「金样基线 PASS」，
+  出现「跳过基线判定」即失败（两条路径都要查：Rapier 对照走 `run_scene`，vxl-only 走
+  `run_vxl_gold`；只查一条时另一条静默失效也看不出来）
 - `crates/vxl-phys/tests/default_tier_stability.rs` 的 `gate_is_sensitive_to_sweep_reduction`
   — **门的金丝雀**：把扫掠降到地板以下，读数必须明显不同，否则说明场景选得不够灵敏
 - `crates/vxl-phys/tests/xpbd_solver_gate.rs` — 未立项的架构不得悄悄接线
