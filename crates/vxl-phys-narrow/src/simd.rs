@@ -180,6 +180,7 @@ mod tests;
 /// 写回 4 lane 的 `sep_arr`；返回标量侧需要的 `(sep_arr, flags, degen)`。纯搬移，语义未改。
 ///
 /// SAFETY：只调用 x86_64 基线 SSE2 内建，入参均为长度 4 的本地数组（详见调用点的 SAFETY 注释）。
+#[cfg(target_arch = "x86_64")]
 fn sep4(
     lanes: ([f32; 4], [f32; 4], [f32; 4]),
     ha: Vec3,
