@@ -304,7 +304,8 @@ capabilities:
       - id: gold_sample
         note: >
           `examples/m6_wheeled_car.rs` + `scripts/gate_gold.sh`（配方 `180`）。判据：车身/前轮末态
-          `x, y` 的 `f32` 位模式（容差 `1e-3`）+ 行为断言 `x_car < 0`（确实往 −x 下坡走了）。
+          `x, y` 的 `f32` 位模式（容差 `1e-3`）+ 行为断言 `x_car < 0`（车身确实往 −x 方向走了
+          —— 靠**初速**，不是靠下坡；地面是水平的，理由见下方 `notes` ②）。
       - id: why_tolerance_not_bits
         note: >
           **这一项是本仓唯一不要求逐位的金样**，并且是被 CI 逼出来的结论：车是**接触驱动的混沌系统**，
