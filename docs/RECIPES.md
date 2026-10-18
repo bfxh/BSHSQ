@@ -918,14 +918,27 @@ p.write_text(t, encoding="utf-8", newline="\n")
 **扫法**（每次改文档或审金样时跑）：
 
 ```powershell
-# 1. 模块头声称有几条判据
-Select-String -Path crates/vxl-phys/examples/*.rs -Pattern "^//! .*判据"
-
-# 2. 代码里实际判了什么
-Select-String -Path crates/vxl-phys/examples/*.rs -Pattern "let ok|assert!|frozen\(|\.to_bits\(\)"
+# 对**单个**文件用，不要对 crates/**/examples/*.rs 批量扫
+Select-String -Path crates/vxl-phys/examples/m4_rope.rs -Pattern "^//! .*判据"
+Select-String -Path crates/vxl-phys/examples/m4_rope.rs -Pattern "let ok|assert!|frozen\(|\.to_bits\(\)"
 ```
 
-两者的**差集**就是嫌疑。2026-10-18 一轮扫出四例：
+差异就是嫌疑。
+
+### ⚠️ 这个扫法有适用边界（2026-10-18 实测，别当通用工具）
+
+**只对「模块头用 `「1」「2」「3」` 编号列出判据」的金样有效。**
+
+试过全仓批量扫 56 个 example，**误报一片**：`判据` 这个词在注释里太常见，正则无法区分
+
+- 「**本档的**判据是 X」（该查代码），与
+- 「**判据在** `tests/deep_penetration.rs`」（本来就指向别处，查代码当然对不上）
+
+扫出来的 10 多个"嫌疑"逐个看下来全是后者。**批量扫的结果不可信，只能定向查。**
+
+真正能批量做的是另一件事：**数一数模块头声称了几条判据、代码里有几个判定结构**，两者
+差得离谱（比如声称 4 条、代码里一个 `let ok` 都没有）才值得人眼去看。数量对不上是信号，
+数量对上不代表对。2026-10-18 一轮扫出四例：
 
 | 文档原文 | 实际 |
 |---|---|
