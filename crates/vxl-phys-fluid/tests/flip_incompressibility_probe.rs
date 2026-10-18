@@ -484,7 +484,7 @@ fn flip_warm_start_improves_fixed_budget_accuracy() {
 /// 旋转团四档见 `flip_rotation_probe.rs::diag_apic_rotation`；结论见 `src/config.rs` 的
 /// `flip_apic` doc。
 #[test]
-#[ignore]
+#[ignore = "APIC 开/关 × θ 的静水槽读数（仪表，只打印）；跑法见文件头"]
 fn diag_apic_hydrostatic() {
     eprintln!("== 静水槽（60 tick，80 次 CG）：APIC 开/关 × θ ==");
     eprintln!(
@@ -516,7 +516,7 @@ fn diag_apic_hydrostatic() {
 /// "网格投影造会聚流"（过密聚集在壁角/底面/贴邻对）与"纯几何起始条件"（均匀过密）。
 /// 跑法：`cargo test -p vxl-phys-fluid --test flip_incompressibility_probe -- --ignored --nocapture`
 #[test]
-#[ignore]
+#[ignore = "过密聚集的两种布局对拍（仪表，只打印）；跑法见该测试的 doc"]
 fn diag_over_density_layout() {
     eprintln!("== wcsph ==");
     let _ = run(FluidFamily::CpuSph, 0, 0.0, false, 60, true);
@@ -529,7 +529,7 @@ fn diag_over_density_layout() {
 /// `#[ignore]` 诊断（不进 CI）：FLIP 的**压力迭代收敛趋势**——静水支撑到底是受限于求解器
 /// 迭代数（⇒ 加迭代/CG 能治）还是卡在平台上（⇒ 公式本身有问题）。跑法同上。
 #[test]
-#[ignore]
+#[ignore = "压力迭代收敛趋势扫描（仪表，只打印）：判『受迭代数限制』还是『卡在平台』"]
 fn diag_pressure_iteration_convergence() {
     eprintln!("求解器  迭代数  over       over_in    sink       height_keep  ke");
     for it in [10u32, 20, 40, 80, 160, 320] {

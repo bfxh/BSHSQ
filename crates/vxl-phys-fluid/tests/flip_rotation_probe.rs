@@ -301,7 +301,7 @@ fn flip_apic_derived_c_buys_rotation() {
 /// `#[ignore]` 诊断（不进 CI）：旋转团台的四档原始读数；结论见 `src/config.rs` 的
 /// `flip_apic` doc 与 `src/flip.rs` 模块头 `## APIC` 节。
 #[test]
-#[ignore]
+#[ignore = "旋转团台四档原始读数（仪表，只打印）；结论见 src/flip.rs 的 APIC 节"]
 fn diag_apic_rotation() {
     eprintln!("== 旋转团（30 tick，ω = 2 rad/s，零重力/无边界）==");
     eprintln!(
