@@ -1,3 +1,5 @@
+> ⚠ 读法（2026-10-19 分片）：本文已按标题边界逐字复制到 `docs/slices/SURVEY-SOFT-CLOTH-AND-CONVERSION.pNN.md`（2 片，单片 ≤30k 估算 token）。定位先开 `docs/slices/SURVEY-SOFT-CLOTH-AND-CONVERSION.INDEX.md`，再点名取单片；**不要整份读本文**（≈51,679 估算 token，一旦进上下文就每轮重送）。分片与本文不一致时以本文为准。
+
 # 调研：XPBD/布料 · 体素↔多边形转换的物理 · 外部仓库对标（2026-09-26）
 
 > 触发：用户三问 —— ①XPBD 做了吗、布料是不是有问题；②"体素转多边形途中的物理"（要可开关、要能被大量东西挤爆、

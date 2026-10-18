@@ -1,3 +1,5 @@
+> ⚠ 读法（2026-10-19 分片）：本文已按标题边界逐字复制到 `docs/slices/OPEN-PROBLEMS.pNN.md`（4 片，单片 ≤30k 估算 token）。定位先开 `docs/slices/OPEN-PROBLEMS.INDEX.md`，再点名取单片；**不要整份读本文**（≈91,885 估算 token，一旦进上下文就每轮重送）。分片与本文不一致时以本文为准。
+
 # 未解问题台账（OPEN-PROBLEMS.md）
 
 > M1 剩余的全部开口问题。每条：**现状 → 已排除（链 EXPERIMENTS.md）→ 候选入口 →
