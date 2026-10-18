@@ -1,0 +1,71 @@
+name: rust-audit
+
+# Rust 审计闸门（与 ci.yml 互补，不重叠）：
+#   - cargo-audit（RUSTSEC 公告）：发现任何 advisory 直接红（真实门，SARIF 进 code scanning）；
+#   - cargo-geiger（unsafe 代码面）：ratchet 语义——当前 unsafe 函数数不得超过基线
+#     scripts/geiger-baseline.json，只许变好不许变差；新增 unsafe 须同步回落或显式上调基线。
+# ci.yml 静态层已覆盖 cargo-deny（许可/来源红线）+ cargo-machete（未用依赖），本文件不再重复。
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '23 3 * * 2'        # 每周二 03:23 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write        # cargo-audit SARIF 上传
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # ---- cargo-audit：RUSTSEC 公告（硬门） ----
+      - name: cargo-audit（RUSTSEC 公告）
+        uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  geiger:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 装 cargo-geiger@0.14.0（钉版本，与基线同款）
+        uses: taiki-e/install-action@30eab0fabba9ea3f522099957e668b21876aa39e # v2.66.6
+        with:
+          tool: cargo-geiger@0.14.0
+
+      # 虚拟清单需进成员目录跑；根二进制 vxl-phys-cli 依赖覆盖全 workspace 树。
+      - name: cargo-geiger（unsafe 闸门，ratchet）
+        working-directory: crates/vxl-phys-cli
+        env:
+          GEOUT: ${{ github.workspace }}/geiger.txt
+          GEBASE: ${{ github.workspace }}/scripts/geiger-baseline.json
+        run: |
+          cargo geiger > "$GEOUT" 2>&1 || true
+          python - <<'PY'
+          import json, re, sys, os
+          base = json.load(open(os.environ['GEBASE']))['unsafe_fns']
+          tot = 0
+          for ln in open(os.environ['GEOUT'], encoding='utf-8', errors='replace'):
+              m = re.match(r'\s*(\d+)/(\d+)\s+(\d+)/(\d+)\s+(\d+)/(\d+)\s+(\d+)/(\d+)\s+(\d+)/(\d+)\s', ln)
+              if m:
+                  tot += int(m.group(3))   # 第 2 对 = unsafe_fns/total_fns
+          print(f'GEIGER now={tot} baseline={base}')
+          if tot > base:
+              print(f'GEIGER-GATE FAIL: unsafe 函数数 {tot} > 基线 {base}，须回落或显式上调基线')
+              sys.exit(1)
+          print('GEIGER-GATE OK')
+          PY
