@@ -3,6 +3,7 @@ name = "vxl-phys-splat"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "vxl_phys 高斯喷溅域（渲染桥 + 物理代理 + 隐式等值面；见 docs/SPEC.md）"
 
 [dependencies]
 # 与其余 crate 同款：版本与 path 由根 `[workspace.dependencies]` 一笔给（那里的注释已说明
