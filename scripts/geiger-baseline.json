@@ -1,0 +1,7 @@
+{
+  "unsafe_fns": 680,
+  "measured_at": "2026-10-19",
+  "method": "cargo geiger 0.14.0，根二进制 vxl-phys-cli（虚拟清单需进成员目录跑），逐 crate 去重求和",
+  "crate_rows": 39,
+  "policy": "ratchet：当前 unsafe_fns 不得超过此基线；新增 unsafe 必须同步回落或显式上调基线（附理由）"
+}
