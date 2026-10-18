@@ -106,6 +106,7 @@ jobs:
         with:
           report-format: sarif
           report-path: gitleaks.sarif
+          config-path: .gitleaks.toml
           exit-code: '1'
 
       - name: 上传 Gitleaks SARIF
