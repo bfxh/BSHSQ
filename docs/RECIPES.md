@@ -438,7 +438,7 @@ cargo run --release -q -p vxl-phys --example arena_bench pyramid
 ```bash
 cd /d/KF/physarena
 npm run build:vxl && cp public/vendor/vxl/vxl_phys_wasm.wasm out/new.wasm   # 新构建
-cd "/d/KF/BSHSQ" && git stash push -- crates/vxl-phys-solver/src/lib.rs crates/vxl-phys/examples/arena_bench.rs
+cd "/d/KF/BSHSQ" && git stash push -- crates/vxl-phys-solver/src/lib.rs crates/vxl-phys/examples/arena_bench/main.rs
 cd /d/KF/physarena && npm run build:vxl && cp public/vendor/vxl/vxl_phys_wasm.wasm out/old.wasm  # 旧构建
 cd "/d/KF/BSHSQ" && git stash pop
 cd /d/KF/physarena && node scripts/vxl-simd-ab.mjs out/old.wasm out/new.wasm   # 3 轮交替 + 位指纹

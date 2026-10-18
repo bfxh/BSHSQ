@@ -2245,7 +2245,7 @@ crate 门 #13（`Tank`/7³ 水/半长 0.06）新读数 **1.04×ρVg**、侧向 *
 
 ### 仍未做：**波动会透传到体上（可见）**，且"加层数"不是干净旋钮（2026-09-22 实测）
 
-仪表 = `crates/vxl-phys/tests/float_quiet_probe.rs`（`#[ignore]`；轻盒 300 kg/m³ 漂稳 300 tick 后
+仪表 = `crates/vxl-phys/tests/float_quiet_probe/main.rs`（`#[ignore]`；轻盒 300 kg/m³ 漂稳 300 tick 后
 取窗口 180 tick）。**静止体的反作用波动（±0.8–1.6×ρVg）确实变成用户看得见的运动**：
 
 | 档 | y 峰峰 | \|v\| 峰峰 | \|ω\| 峰峰 | 力峰峰/ρVg |
@@ -2484,7 +2484,7 @@ crate 门 #13（`Tank`/7³ 水/半长 0.06）新读数 **1.04×ρVg**、侧向 *
 （被反复清零 ⇒ **永不入睡**）。流体里同体 `|ω| ≈ 0.98`（盒 0°）/ 0.46（球）。
 ⇒ **这是 rigid 域的缺陷**（干槽完全不涉及流体），也是"漂浮体自己转"这个可见症状的真身。
 
-**合格协议仪表**（`crates/vxl-phys/tests/float_quiet_probe.rs::steady_spin_with_valid_protocol`）：
+**合格协议仪表**（`crates/vxl-phys/tests/float_quiet_probe/main.rs::steady_spin_with_valid_protocol`）：
 ① 零冲击就位（无体仿真测水面 → 按吃水 `ρ_b/ρ_w·2half` 算平衡高度）；② 长静置 900 tick；
 ③ **窗口前自检**（`|v| < 0.01` 且 `|ω| < 0.01`，否则打印"本次读数无效"而不给数字）。
 **教训（我自己的）**：此前所有自旋读数都用"从 1.5 m 落下"的投放 ⇒ 重落/轻放两格**连符号都翻**

@@ -38,7 +38,7 @@ pub struct FluidConfig {
     /// **2b 边界粒子的层数**（默认 2；SPEC §4.8 的两层形态）。
     /// 2026-09-22 起可调：实测用于"层数 ↑ ⇒ 反作用波动 ↓"这条候选
     /// （波动会透传到体上——漂浮体 y 峰峰 19.9 mm、|ω| 峰峰 1.22 rad/s，见
-    /// `crates/vxl-phys/tests/float_quiet_probe.rs`）。
+    /// `crates/vxl-phys/tests/float_quiet_probe/main.rs`）。
     pub boundary_layers: u32,
     /// 重力（m/s²）。
     pub gravity: Vec3,
