@@ -11,16 +11,18 @@
 
 ## 数字（可复核）
 
+> 下表是 **2026-10-18** 的快照 —— 代码行数与提交数随每次提交变化，其余各项是结构性事实。
+
 | 项 | 值 | 怎么查 |
 |---|---|---|
-| 代码规模 | **50,399 行** `src` + **31,138 行**测试 + 14,867 行示例/工具 = **96404 行** | `crates/**` 的 `.rs` 行数 |
+| 代码规模 | **53,105 行** `src` + **30,167 行**测试 + **18,684 行**示例/工具 = **101956 行** | `git ls-files 'crates/*.rs'` 再 `xargs wc -l` 取总数；分段按 `crates/<crate>/src\|tests\|examples` 归类（`wc -l` 口径，含末行无换行的不计数） |
 | crate 数 | **23 个**，DAG 无环 | `ls crates/`，`Cargo.toml` 的 workspace 成员 |
 | 测试 | **763 个** | `cargo test --workspace -- --list` |
 | 金样（回归基线） | **14 项**，全部在 CI 阻断 | `scripts/gate_gold.sh` 的注册项 |
 | CI | **23 个 job**，覆盖 3 个编译器 × 2 个架构 | `.github/workflows/ci.yml` |
 | 本地门禁 | **28 道** | `python -X utf8 scripts/local_gate.py` |
 | 文档 | **47 份** + **10 条 ADR** | `docs/` |
-| 提交 | **164 个** | `git rev-list --count HEAD` |
+| 提交 | **193 个** | `git rev-list --count HEAD` |
 
 ### 性能（真实读数，不美化）
 

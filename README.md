@@ -132,8 +132,14 @@ RUSTFLAGS="--cfg loom" LOOM_MAX_PREEMPTIONS=3 cargo test -p vxl-phys-core --test
 | **静态纪律** | 「静态」×3（依赖/文档/文本）+ `棘轮门禁` | `cargo deny` + 强化 lint + 词汇禁令 + god 门棘轮（只准降） |
 | **性能** | `规模档 (10 万+10 万)` / `覆盖率` | 大场景不退化；覆盖率报告 |
 
-**本地全量等价物**：`python -X utf8 scripts/local_gate.py`（28 道门，打印 `LOCAL_RC=0`）。
+**本地的静态等价物**：`python -X utf8 scripts/local_gate.py`（28 道门，打印 `LOCAL_RC=0`）。
 门禁脚本一律要 `python -X utf8` + `PYTHONUTF8=1`。
+
+⚠️ **它不是"全套门禁"的等价物** —— 这 28 道门**全是静态文本/结构扫描**，不编译、不跑测试、
+不跑金样。实测过一次：往 Rust 字符串字面量里塞了嵌套双引号，代码根本编不过
+（`expected one of . ? ] or an operator`），而 28 道门**依然全绿**。
+推之前至少再跑 `cargo fmt --all -- --check` 与
+`cargo clippy --workspace --all-targets -- -D warnings`。
 
 
 ## 确定性承诺（§5）

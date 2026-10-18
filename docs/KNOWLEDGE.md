@@ -700,6 +700,11 @@ engine-dep / clone / unwrap / unsafe / linelen / usize / glob / todo / god / god
 cyc / nest / args / security / security-selftest / gate-selftest / gate-probe）。
 ⇒ 纯文档提交**唯一的** vocab/typos 把关是**人手动跑**。
 
+**同一串清单的另一个盲区（2026-10-18 实测）**：这 28 道门也**不含编译**。往 Rust 字符串
+字面量里塞嵌套双引号 ⇒ `cargo` 报 `expected one of . ? ] or an operator`，而
+`local_gate.py` **28/28 全绿**、`LOCAL_RC=0`。⇒ 「门禁全过」与「代码能编过」是两件事，
+别用前者替代后者。
+
 **处置**：改文档的提交，提交前手动跑这三条：
 
 ```powershell
