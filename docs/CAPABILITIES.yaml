@@ -1150,7 +1150,7 @@ capabilities:
           C2 慢速电梯（相对位移 −0.0000、vy 0.6000）、C3 快速电梯不吞载荷（埋入 0.0003 m）、
           C4 载荷链随动、C5 瞬移（运动学可、静态体不可挪 = 文档化边界）、C6 睡堆被唤醒带走
           （Δy 1.2005 m）、C7 岛划分（静态 7 / 运动学 1 = A 档代价）、C8 下行分离（慢 0.0000 /
-          快 −4.7533 vs 解析 −4.77）。另 crates/vxl-phys-core/tests/kinematic_body.rs 两条核心不变式。
+          快 −4.7533 vs 解析 −4.77）。另 crates/vxl-phys-core/tests/kinematic_body.rs 两条核心不变式；crates/vxl-phys/tests/kinematic_wake.rs 两条（K3 唤醒风暴判据，2026-10-19）：W1 静置支撑 × 睡堆 10 s 0 翻转（唤醒风暴 = 0）、W2 慢速支撑 8 cm/s 不穿过睡熟载荷（Δy 0.8014、残留埋入 0.0037；修前穿过 1.6 m 且 0 唤醒，见 OPEN-PROBLEMS P24）。
       - id: zero_generation
         note: >
           零换代（无运动学体的场景逐位不变）：determinism FINAL_HASH
@@ -1162,7 +1162,7 @@ capabilities:
       - id: not_done
         note: >
           K4 的 A/B 档开关未做（当前恒为 A 档并岛）；
-          K3 的定向唤醒旋钮/迟滞取值未单列（唤醒靠既有 SUBISLAND_WAKE_MULT 阈值规则达成）；
+          K3 的定向唤醒旋钮/迟滞取值未单列（唤醒靠既有 SUBISLAND_WAKE_MULT 阈值规则 + 运动学支撑的深度门达成；风暴判据已立 = kinematic_wake.rs W1/W2）；
           运动学体不触发破坏（destruction 仍只认动态体）；静态体仍不可挪（C5 的边界格）。
       - id: load_capacity
         note: >

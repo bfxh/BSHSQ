@@ -1,12 +1,10 @@
 //! **岛级休眠与唤醒**（§4.11 / §3 稳定性）—— `solver_impl` 的**子模块**。
 //!
 //! **为什么拆出来**：`solver_impl.rs` 受 god 门**文件行数棘轮**（阈值 800，它已经 824 行），而休眠族
-//! （`sleep_pass` + `sleep_pass_island` + `sleep_pass_whole`，~165 行）是一块独立关注点。选**子模块**
-//! 而不是 crate 级新文件，理由与 `narrow` 的 `mesh_mesh.rs`/`mesh_grid.rs` 相同：`solver/lib.rs` 只剩
-//! 0 行预算（99 行 / 基线 99）⇒ 加 `mod` 声明就顶棘轮；**子模块还能直接看见父模块的私有项**。
-//!
-//! ⚠️ 两处只为过门禁、语义零变化的写法：本文件**不用 glob 导入**（`glob-gate` 对**新文件**零基线）；
-//! 三个方法由 `fn` 改成 **`pub(crate) fn`**（子模块的私有项父模块看不见，调用方 `solve_phase` 在父模块）。
+//! （`sleep_pass` + `sleep_pass_island` + `sleep_pass_whole`，~165 行）是独立关注点。选子模块而非新文件
+//! 是因为 `solver/lib.rs` 只剩 0 行预算（加 `mod` 就顶棘轮），且**子模块能直接看见父模块私有项**。
+//! 语义零变化的两处写法：本文件不用 glob 导入（`glob-gate` 对新文件零基线）；三个方法由 `fn` 改成
+//! `pub(crate) fn`（父模块看不见子模块的私有项）。
 use crate::{ImpulseSolver, Island};
 use crate::{
     SLEEP_DIAG_DEEP, SLEEP_D_BODY_ALL, SLEEP_D_FAST, SLEEP_D_FAST_BODY, SLEEP_D_SLEPT,
@@ -17,15 +15,12 @@ use vxl_phys_narrow::Manifold;
 
 impl ImpulseSolver {
     /// 5) 岛级休眠与唤醒（§4.11 / §3 稳定性）。
-    ///    - 建岛阶段已只收「与清醒体连通」的岛（含被牵连的睡眠体），
-    ///      遗漏的睡眠体天然保持冻结（不解算不积分）；
+    ///    - 建岛阶段已只收「与清醒体连通」的岛（含被牵连的睡眠体），遗漏的睡眠体天然保持冻结；
     ///    - 清醒岛：任一成员 awake → 全岛同步为 awake（外部唤醒传播）；
-    ///    - 全员速度低于阈值持续 sleep_time → 岛内**原子**入睡（同帧全员睡），
-    ///      不存在"部分睡部分醒"状态，从机制上排除反复唤醒；
-    ///    - 无接触的孤立清醒动体 = 单成员岛，走同一套休眠判定。
-    ///
-    ///    无偏置趟不做休眠判定（同一子步内带偏置趟已判过；重复判定会让
-    ///    sleep_timer 每次子步双倍累积 ⇒ 入睡提前，属非本意行为改变）。
+    ///    - 全员速度低于阈值持续 sleep_time → 岛内**原子**入睡（同帧全员睡），不存在"部分睡部分醒"；
+    ///    - 无接触的孤立清醒动体 = 单成员岛，走同一套休眠判定；
+    ///    - 无偏置趟不做休眠判定（同一子步内带偏置趟已判过；重复判定会让 sleep_timer 每次子步
+    ///      双倍累积 ⇒ 入睡提前，属非本意行为改变）。
     pub(crate) fn sleep_pass(
         &mut self,
         bodies: &mut BodySet,
@@ -75,8 +70,12 @@ impl ImpulseSolver {
                 continue; // 双醒：无需唤醒；双睡：不在清醒岛内
             }
             let (s, w) = if sa { (b, a) } else { (a, b) };
+            // 运动学支撑的深度门（2026-10-19）：慢速下速度阈值永不成立 ⇒ 改用几何信号（`kinematic_wake.rs`）
+            let kin_deep = bodies.is_kinematic(w)
+                && m.points.iter().any(|p| p.depth > 0.5 * config.contact_skin);
             let rel = (bodies.linvel[w] - bodies.linvel[s]).length();
-            let hot = rel > SUBISLAND_WAKE_MULT * config.sleep_linear
+            let hot = kin_deep
+                || rel > SUBISLAND_WAKE_MULT * config.sleep_linear
                 || bodies.angvel(w).length() > SUBISLAND_WAKE_MULT * config.sleep_angular;
             let fast = rel > WAKE_GATE_FAST_MULT * config.sleep_linear;
             if wake_gate_k == 0 || fast {
