@@ -20,7 +20,7 @@
 | **声学传播（射线追踪音频 / 孔隙传声 / 介质体积）怎么落地、抄哪家、判据是什么** | **`SURVEY-ACOUSTIC-RAYTRACING.md`（新，2026-10-11）** |
 | **惯性续项 / 运动学体（电梯·传送带·移动地形）/ 黏性 / 摩擦 / 体积碰撞 / 穿墙怎么体检、缺在哪、抄哪家** | **`SURVEY-RIGID-HARD-CASES.md`（新，2026-10-12；含"把静态体当电梯用"的三条断链）** |
 | **极端工况（巨量堆叠 × 运动支撑 / 睡眠 / 岛与并行度）+ 弹力 / 空气密度 + 从 LSSMJ 能借什么** | **`SURVEY-EXTREMES-AND-BORROW.md`（新，2026-10-12；含 ⑥⑦ 实测与 LSSMJ 九腿/C22 判据）** |
-| **运动学体（电梯/传送带/移动地形）：立项首步（选型 A/B/C + 分片 K0–K6 + 判据 + 触点）—— K1/K2/K5 已落地（A 档并岛；各向异性方向 + 传送带 `belt`），K3 部分、K4 开关未做** | **`PLAN-kinematic.md`（2026-10-12；判据 `kinematic_contracts.rs` C1–C8、`friction_anisotropy_contracts.rs` A1–A4）** |
+| **运动学体（电梯/传送带/移动地形）：立项首步（选型 A/B/C + 分片 K0–K6 + 判据 + 触点）—— K1/K2/K3/K5 已落地（A 档并岛；各向异性方向 + 传送带 `belt`；K3 的唤醒风暴判据 2026-10-19 立，并修掉慢速支撑穿过睡熟载荷 P24），K4 开关未做** | **`PLAN-kinematic.md`（2026-10-12；判据 `kinematic_contracts.rs` C1–C8、`kinematic_wake.rs` W1/W2、`friction_anisotropy_contracts.rs` A1–A4）** |
 | 系统要什么（需求/档位/验收） | `SPEC.md`（V1.3，真源；**§3 性能、§4 真实度档、§6 并发**） |
 | 系统怎么搭（crate DAG、步进管线、验收映射） | `ARCHITECTURE-M0.md` |
 | M0 交付与门槛实测 | `M0-GATES.md` |
