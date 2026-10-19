@@ -429,7 +429,14 @@ capabilities:
           `vxl-phys/tests/wind_liquid.rs`（顺风 vs 零风 A/B）。**双向那一半（同日）**：
           `AeroConfig::air_mass` 默认 `0` = 运动学背景（不变慢）；有限值 = 动量槽
           （`v = wind + absorbed/air_mass`），判据含**动量闭合**与**总动能不增**（阻力只耗散）。
-          仍未做：空间尾流（均匀场 + 集中质量槽，不是逐点动量场）。
+          **空间尾流已落地（2026-10-19）**：`AeroState::wakes`（`vxl_phys_aero::wake`）是
+          沿风向的圆柱形速度亏损区（`1 − s/length` 沿程衰减 + `cos²` 横向衰减），
+          `wind_at(x)` 逐点求风，面元气动（逐面心）与介质采样（`sample(x)`）共用同一份场。
+          门面 API 走扩展 trait `AeroWakeExt`（`set_aero_wakes` / `aero_wind_at`）。
+          判据 `crates/vxl-phys/tests/aero_wake.rs`（7 条：空尾流逐位等于基准风 / 上游不受影响 /
+          沿程回升 / 横向衰减到 radius 外归零 / 强度线性 / 端到端风力降幅 >50% / 未开域拒绝 /
+          两跑逐位一致）。`wakes` 为空 ⇒ 与旧均匀风场逐位一致（16 金样 + determinism 不动）。
+          仍未做：尾流的**动量来源**（现在是宿主编排的几何，不是由上游体的阻力自动生成）。
     required_evidence:
       - implementation_path
       - tests

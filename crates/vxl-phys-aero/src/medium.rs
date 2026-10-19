@@ -16,15 +16,13 @@ use vxl_phys_core::interop::{MediumField, MediumSample};
 use vxl_phys_core::Vec3;
 
 impl MediumField for AeroState {
-    fn sample(&self, _x: Vec3) -> MediumSample {
+    fn sample(&self, x: Vec3) -> MediumSample {
         let cfg = self.cfg;
         if cfg.air_density <= 0.0 {
             return MediumSample::VACUUM;
         }
-        let mut velocity = Vec3::new(cfg.wind[0], cfg.wind[1], cfg.wind[2]);
-        if cfg.air_mass > 0.0 {
-            velocity += self.absorbed * (1.0 / cfg.air_mass);
-        }
+        // 基准风 + 动量槽 + **空间尾流**（`wakes` 为空 ⇒ 与旧口径逐位一致）。
+        let velocity = self.wind_at(x);
         MediumSample {
             density: cfg.air_density,
             velocity,

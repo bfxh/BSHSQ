@@ -29,13 +29,13 @@ pub use vxl_phys_solver::joints::{Joint, JointKind, JointSet};
 pub use vxl_phys_solver::{ccd, ccd_sweep_stats_take, warm_match_stats_take, ImpulseSolver};
 pub use vxl_phys_terrain::TerrainSet;
 
-// ── 按域拆出的子模块（子目录 src/）
 mod arenas;
 mod impact;
 pub mod prelude;
 mod props;
 mod providers;
 mod types;
+mod world_aero_wake;
 mod world_body;
 mod world_build;
 mod world_ccd;
@@ -46,9 +46,9 @@ mod world_soft;
 mod world_step;
 mod world_struct;
 pub(crate) use self::props::*;
-pub use self::world_kinematic::KinematicExt;
 pub use self::world_step::{conversion::VoxelConversionExt, destruction::DestructionExt};
-pub use self::{arenas::*, impact::*, providers::*, types::*, world_soft::*, world_struct::*}; // ↑ 子模块顶层条目再导出（impl-only 模块不入 glob，避免 unused）
+pub use self::{arenas::*, impact::*, providers::*, types::*, world_soft::*, world_struct::*};
+pub use self::{world_aero_wake::AeroWakeExt, world_kinematic::KinematicExt}; // ↑ 子模块顶层条目再导出（impl-only 模块不入 glob，避免 unused）
 
 #[cfg(test)]
 mod tests;

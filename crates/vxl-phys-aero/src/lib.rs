@@ -40,8 +40,11 @@ impl Default for AeroConfig {
 mod face;
 /// **空气作为 `MediumField`**（`medium.rs`）：气动域既能对面元施力，也能被介质消费者采样。
 mod medium;
+/// **空间尾流**（`wake.rs`）：障碍物下游的速度亏损区；`wakes` 为空 ⇒ 逐位等同均匀风场。
+mod wake;
 
 pub use face::{face_force, face_force_tri, face_force_with_lift};
+pub use wake::WakeSource;
 
 /// **气动域的运行态**（门面 `World` 的 `Option` 槽内容）：配置 + **逐体力/力矩快照**
 /// （`aero_pass` 每子步重写；判据经 `World::aero_force/aero_torque` 读到的就是
@@ -49,6 +52,8 @@ pub use face::{face_force, face_force_tri, face_force_with_lift};
 #[derive(Clone, Debug)]
 pub struct AeroState {
     pub cfg: AeroConfig,
+    /// **空间尾流源**（`wake.rs`）：空 = 均匀风场（默认档逐位不变）。
+    pub wakes: Vec<WakeSource>,
     /// 逐体力快照（与 `bodies` 同序；本子步施加的那份）。
     pub forces: Vec<Vec3>,
     /// 逐体力矩快照（关于**体原点**；与 `bodies.torque` 同口径）。
@@ -60,5 +65,5 @@ pub struct AeroState {
 
 #[rustfmt::skip]
 impl AeroState {
-    pub fn new(cfg: AeroConfig) -> Self { Self { cfg, forces: Vec::new(), torques: Vec::new(), absorbed: Vec3::ZERO } }
+    pub fn new(cfg: AeroConfig) -> Self { Self { cfg, wakes: Vec::new(), forces: Vec::new(), torques: Vec::new(), absorbed: Vec3::ZERO } }
 }
