@@ -8,7 +8,7 @@
 use crate::{ImpulseSolver, Island};
 use crate::{
     SLEEP_DIAG_DEEP, SLEEP_D_BODY_ALL, SLEEP_D_FAST, SLEEP_D_FAST_BODY, SLEEP_D_SLEPT,
-    SLEEP_D_WAIT, SLEEP_D_WAIT_MAX_MS, SUBISLAND_SLEEP, SUBISLAND_WAKE_MULT, WAKE_GATE_FAST_MULT,
+    SLEEP_D_WAIT, SLEEP_D_WAIT_MAX_MS, SUBISLAND_SLEEP,
 };
 use vxl_phys_core::{BodySet, PhysConfig, Vec3};
 use vxl_phys_narrow::Manifold;
@@ -70,15 +70,8 @@ impl ImpulseSolver {
                 continue; // 双醒：无需唤醒；双睡：不在清醒岛内
             }
             let (s, w) = if sa { (b, a) } else { (a, b) };
-            // 运动学支撑的深度门（2026-10-19）：慢速下速度阈值永不成立 ⇒ 改用几何信号（`kinematic_wake.rs`）
-            let kin_deep = bodies.is_kinematic(w)
-                && m.points.iter().any(|p| p.depth > 0.5 * config.contact_skin);
-            let rel = (bodies.linvel[w] - bodies.linvel[s]).length();
-            let hot = kin_deep
-                || rel > SUBISLAND_WAKE_MULT * config.sleep_linear
-                || bodies.angvel(w).length() > SUBISLAND_WAKE_MULT * config.sleep_angular;
-            let fast = rel > WAKE_GATE_FAST_MULT * config.sleep_linear;
-            if wake_gate_k == 0 || fast {
+            let (kin_deep, hot, fast) = super::wake_signal::wake_signal(bodies, m, w, s, config);
+            if kin_deep || wake_gate_k == 0 || fast {
                 // 现行（或强撞直通）：任一 hot 邻居立即唤醒
                 if hot {
                     bodies.awake[s] = true;

@@ -4,10 +4,10 @@
 //! scatter / warm 回写 / 休眠」八个 helper（纯搬移，探针位置与状态写入序逐条保持）。
 use super::*;
 
-// 休眠族拆成**子模块**（理由见 `solver_impl/sleep.rs` 头注：`solver/lib.rs` 只剩 0 行预算，
-// crate 级新文件要加 `mod` 声明；子模块还能看见父模块的私有项）。
-#[path = "solver_impl/sleep.rs"]
+#[path = "solver_impl/sleep.rs"] // 休眠族；拆子模块的理由见该文件头注
 mod sleep;
+#[path = "solver_impl/wake_signal.rs"] // 唤醒判据；`sleep.rs` 受文件行数棘轮
+mod wake_signal;
 impl ImpulseSolver {
     pub fn new(skin: f32) -> Self {
         Self {
