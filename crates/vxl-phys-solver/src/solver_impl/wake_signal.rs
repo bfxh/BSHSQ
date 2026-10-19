@@ -7,6 +7,11 @@ use crate::{SUBISLAND_WAKE_MULT, WAKE_GATE_FAST_MULT};
 use vxl_phys_core::{BodySet, PhysConfig};
 use vxl_phys_narrow::Manifold;
 
+/// 运动学体的"非零运动"死区（m/s）。运动学速度是**宿主给的确定输入**，不是求解噪声 ⇒
+/// 不需要 `SUBISLAND_WAKE_MULT` 那层滞回（滞回是为动态接触的闪烁体准备的）。这个死区只挡
+/// 浮点尘埃（`set_kinematic_target` 反算出的 1e-9 级残余），不挡任何真实驱动。
+const KIN_MOTION_EPS: f32 = 1e-6;
+
 /// 唤醒信号 `(kin_deep, hot, fast)`。
 ///
 /// - `kin_deep`：运动学支撑的**深度门**（慢速下速度阈值永不成立）。几何信号不是抖动 ⇒ 它必须
@@ -15,6 +20,8 @@ use vxl_phys_narrow::Manifold;
 /// - `hot`：相对运动取**接触点**速度（只对运动学体）：自转支撑的质心线速与角速都可以低于阈值，
 ///   而载荷所在半径处切向线速度并不低（W4：0.05 rad/s × 2 m）。动态体之间保持质心口径，
 ///   否则非运动学场景换代（实测 1:1 均匀堆冻结哈希即变）。
+///   运动学体**任何非零**接触点相对速度都算 hot（W5）：滞回只该防抖动，宿主的驱动是确定量
+///   —— 0.01 rad/s 慢转 10 s 也是 0.2 m 真实弧长，按 0.08 m/s 判"不算动"就是静默穿透。
 /// - `fast`：强撞直通（不经接触数门）。
 pub(crate) fn wake_signal(
     bodies: &BodySet,
@@ -37,9 +44,12 @@ pub(crate) fn wake_signal(
     } else {
         (bodies.linvel[w] - bodies.linvel[s]).length()
     };
-    let hot = kin_deep
-        || rel > SUBISLAND_WAKE_MULT * config.sleep_linear
-        || bodies.angvel(w).length() > SUBISLAND_WAKE_MULT * config.sleep_angular;
+    let hot = if kin {
+        kin_deep || rel > KIN_MOTION_EPS
+    } else {
+        rel > SUBISLAND_WAKE_MULT * config.sleep_linear
+            || bodies.angvel(w).length() > SUBISLAND_WAKE_MULT * config.sleep_angular
+    };
     (
         kin_deep,
         hot,

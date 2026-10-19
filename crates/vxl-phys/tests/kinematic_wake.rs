@@ -96,6 +96,30 @@ fn slow_support_does_not_tunnel_through_sleeping_load() {
     assert!(bury < 0.02, "残留埋入不得超皮肤带，实得 {bury}");
 }
 
+/// **W5 极慢自转（0.01 rad/s @ r = 2 m ⇒ 切向 0.02 m/s）也必须唤醒**。
+///
+/// 这条钉住判据的**口径**而不是某个数值：运动学速度是宿主给的确定输入，不是求解噪声。
+/// 按 `2×sleep_linear = 0.08 m/s` 判"不算动"是错的 —— 0.02 m/s × 10 s = 0.2 m 真实弧长，
+/// 载荷会被静默留在原地。滞回只该给动态接触的闪烁体用。
+#[test]
+fn very_slow_spinning_support_still_wakes() {
+    let (flips, _awake_end, disp, radius, bury) =
+        sleeping_cube_on_spinning_platform(0.01, 600, PhysConfig::default());
+    println!(
+        "[W5 自转 0.01 rad/s × 10 s] 翻转 {flips} 次、位移 {disp:.4} m（弧长 0.2）、半径 {radius:.4} m、埋入 {bury:.4} m"
+    );
+    assert!(
+        flips >= 1,
+        "极慢自转支撑也必须唤醒载荷（0.02 m/s 是真实位移，不是抖动）"
+    );
+    assert!(disp > 0.1, "载荷应被带着走（弧长 ≈ 0.2），实得 {disp}");
+    assert!(
+        (radius - 2.0).abs() < 0.5,
+        "载荷不得滑离原半径（2.0），实得 {radius}"
+    );
+    assert!(bury < 0.02, "残留埋入不得超皮肤带，实得 {bury}");
+}
+
 /// 睡熟的单盒 + 运动学平台（**只有 1 条流形**）；返回 `(翻转次数, 末态醒着数, Δy, 埋入)`。
 fn sleeping_cube_on_platform(speed: f32, ticks: u32, cfg: PhysConfig) -> (u32, usize, f32, f32) {
     let mut w = World::new(cfg);
