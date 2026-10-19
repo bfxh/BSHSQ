@@ -3,7 +3,7 @@
 //! 为什么单独成文件：`solver_impl/sleep.rs` 受 god 门**文件行数棘轮**（基线 190，只准减），
 //! 判据本身是一个自洽的关注点（"什么算一次值得唤醒的接触"），搬出来既让 `sleep.rs` 回到基线，
 //! 也让判据可以单独读、单独改。
-use crate::{SUBISLAND_WAKE_MULT, WAKE_GATE_FAST_MULT};
+use crate::{Island, SUBISLAND_WAKE_MULT, WAKE_GATE_FAST_MULT};
 use vxl_phys_core::{BodySet, PhysConfig};
 use vxl_phys_narrow::Manifold;
 
@@ -11,6 +11,44 @@ use vxl_phys_narrow::Manifold;
 /// 不需要 `SUBISLAND_WAKE_MULT` 那层滞回（滞回是为动态接触的闪烁体准备的）。这个死区只挡
 /// 浮点尘埃（`set_kinematic_target` 反算出的 1e-9 级残余），不挡任何真实驱动。
 const KIN_MOTION_EPS: f32 = 1e-6;
+
+/// **入睡否决**：若 `m` 一侧是正在运动的运动学体、另一侧是动态体，返回该动态体。
+///
+/// 为什么需要：没有它时，被慢速支撑带着走的载荷会「睡 → 被叫醒 → 速度低于 `sleep_linear`
+/// → 又睡」反复抖动（P24 实测 0.35–1.2 次/秒/体）。运动学体的驱动是**确定输入**，接触点在动
+/// 就意味着载荷**正在被搬运**，与"静止到可以睡"互斥 —— 每 tick 把它的入睡计时清零即可。
+///
+/// 只看运动学体自己的点速度（睡着的动态体速度恒 0）：即便载荷已被带到同速，也必须保持清醒，
+/// 否则它一睡就停止被模拟、平台会在它底下滑过去。
+pub(crate) fn carried_by_moving_kinematic(bodies: &BodySet, m: &Manifold) -> Option<usize> {
+    let (a, b) = (m.a as usize, m.b as usize);
+    let (ka, kb) = (bodies.is_kinematic(a), bodies.is_kinematic(b));
+    if ka == kb {
+        return None;
+    }
+    let (kin, d) = if ka { (a, b) } else { (b, a) };
+    let pos = bodies.position[kin];
+    let moving = m
+        .points
+        .iter()
+        .any(|p| bodies.velocity_at(kin, p.point - pos).length() > KIN_MOTION_EPS);
+    moving.then_some(d)
+}
+
+/// 收集本岛**被正在运动的运动学支撑托着**的动态体（入睡否决名单）。
+pub(crate) fn carried_bodies(
+    bodies: &BodySet,
+    island: &Island,
+    manifolds: &[Manifold],
+) -> Vec<usize> {
+    let mut out: Vec<usize> = Vec::new();
+    for &mi in &island.manifs {
+        if let Some(d) = carried_by_moving_kinematic(bodies, &manifolds[mi]) {
+            out.push(d);
+        }
+    }
+    out
+}
 
 /// 唤醒信号 `(kin_deep, hot, fast)`。
 ///

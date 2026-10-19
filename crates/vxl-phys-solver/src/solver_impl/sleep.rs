@@ -90,11 +90,17 @@ impl ImpulseSolver {
                 self.wake_streak[s] = 0;
             }
         }
+        // 入睡否决：被**正在运动的运动学支撑**托着 = 正在被搬运，不许入睡（详见判据模块）。
+        let carried = super::wake_signal::carried_bodies(bodies, island, manifolds);
         for &bi in &island.bodies {
             let i = bi as usize;
             if !bodies.awake[i] || bodies.is_kinematic(i) {
                 // 睡着的：本轮不动它（上面的唤醒已判过）；运动学体：**永不由引擎入睡**
                 // （速度是宿主输入，它没有"静止"的语义）—— 见 `PLAN-kinematic.md` §3.3。
+                continue;
+            }
+            if carried.contains(&i) {
+                bodies.sleep_timer[i] = 0.0;
                 continue;
             }
             let lin = bodies.linvel[i].length();
