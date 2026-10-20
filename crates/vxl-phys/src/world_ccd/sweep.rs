@@ -100,7 +100,12 @@ pub(crate) fn clamp_flagged(world: &mut World, dt: f32) {
 /// 一个候选目标在采样时刻的位置：`q(t) = q1 − v_j·(dt − t)`（静态/沉睡 ⇒ `v_j = 0`）。
 struct Target {
     id: usize,
+    /// tick 末位置（采样时按速度倒退）。
     q1: Vec3,
+    /// tick 末姿态与角速度：**转动目标**的采样也要插值（2026-10-20）。
+    /// `omega == 0` ⇒ 姿态一个字节都不写（既有场景逐位不变）。
+    rot1: Quat,
+    omega: Vec3,
     vel: Vec3,
 }
 
@@ -149,10 +154,16 @@ fn swept_aabb(world: &World, i: usize, sc: &Scan, skin: f32, swing: f32) -> Aabb
 
 /// 采样时刻 `t` 的姿态（纯函数；`ω = 0` ⇒ 原样 `q1`；`t ≥ dt` ⇒ `q1`，不经归一化）。
 fn q_at(sc: &Scan, t: f32) -> Quat {
-    if sc.omega == Vec3::ZERO || t >= sc.dt {
-        sc.q1
+    q_back(sc.q1, sc.omega, sc.dt - t)
+}
+
+/// 从 `q1`（时刻 `dt` 的姿态）按角速度往回退 `age` 秒。`ω = 0` 或 `age ≤ 0` ⇒ 原样返回
+/// （不经 `normalize`，免得末位扰动）。
+fn q_back(q1: Quat, omega: Vec3, age: f32) -> Quat {
+    if omega == Vec3::ZERO || age <= 0.0 {
+        q1
     } else {
-        sc.q1.integrate_angular(-sc.omega, sc.dt - t)
+        q1.integrate_angular(-omega, age)
     }
 }
 
@@ -189,12 +200,19 @@ fn gather(world: &mut World, i: usize, swept: Aabb) -> (Vec<(u32, u32)>, Vec<Tar
         let ju = j as usize;
         let (a, b) = if ju < i { (j, i as u32) } else { (i as u32, j) };
         pairs.push((a, b));
+        let moving = world.bodies.is_dynamic_or_kinematic(ju);
         targets.push(Target {
             id: ju,
             q1: world.bodies.position[ju],
+            rot1: world.bodies.rot(ju),
+            omega: if moving {
+                world.bodies.angvel(ju)
+            } else {
+                Vec3::ZERO
+            },
             // 目标的速度：**运动学体也算**（移动的墙/平台必须在相对运动里带上自己的速度，
             // 否则"移动目标必穿"这条又会回来 —— 见 `ROUTE.md` 的 CCD 三处修复）。
-            vel: if world.bodies.is_dynamic_or_kinematic(ju) {
+            vel: if moving {
                 world.bodies.linvel[ju]
             } else {
                 Vec3::ZERO
@@ -321,6 +339,11 @@ fn place_targets(world: &mut World, sc: &Scan, targets: &[Target], t: f32) {
         if tg.vel != Vec3::ZERO {
             world.bodies.position[tg.id] = tg.q1 - tg.vel * (sc.dt - t);
         }
+        if tg.omega != Vec3::ZERO {
+            world
+                .bodies
+                .set_rot(tg.id, q_back(tg.rot1, tg.omega, sc.dt - t));
+        }
     }
 }
 
@@ -415,6 +438,9 @@ fn eval_hit(world: &mut World, i: usize, pairs: &[(u32, u32)], t: f32) -> Option
 fn restore_targets(world: &mut World, targets: &[Target]) {
     for tg in targets {
         world.bodies.position[tg.id] = tg.q1;
+        if tg.omega != Vec3::ZERO {
+            world.bodies.set_rot(tg.id, tg.rot1);
+        }
     }
 }
 
@@ -489,4 +515,76 @@ pub(crate) fn sweep(world: &mut World, i: usize, dt: f32) {
     let hit = scan(world, i, &sc, &pairs, &targets);
     restore_targets(world, &targets);
     resolve(world, i, &sc, &targets, hit);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{place_targets, q_back, restore_targets, Scan, Target};
+    use crate::{KinematicExt, PhysConfig, Quat, Shape, Vec3, World};
+
+    /// **转动目标**：`place_targets` 必须按 `q1 ⊖ ω·age` 插值，`restore_targets` 必须逐位还原。
+    /// 关掉插值（或漏写 `rot1`）时，第一条断言会在"姿态根本没动"上失败 —— 这是本判据的判别力。
+    #[test]
+    fn place_targets_interpolates_target_rotation_and_restores_bits() {
+        let cfg = PhysConfig {
+            gravity: Vec3::ZERO,
+            ..PhysConfig::default()
+        };
+        let mut w = World::new(cfg);
+        let bar = w.add_kinematic(
+            Shape::Box {
+                half: Vec3::new(1.0, 0.02, 0.02),
+            },
+            Vec3::ZERO,
+            Quat::IDENTITY,
+        );
+        let id = bar as usize;
+        let omega = Vec3::new(0.0, 2.0, 0.0);
+        w.bodies.set_angvel(id, omega);
+        let rot1 = w.bodies.rot(id);
+        let tg = Target {
+            id,
+            q1: w.bodies.position[id],
+            rot1,
+            omega,
+            vel: Vec3::ZERO,
+        };
+        let sc = Scan {
+            p0: Vec3::ZERO,
+            p1: Vec3::ZERO,
+            v: Vec3::ZERO,
+            omega: Vec3::ZERO,
+            q1: Quat::IDENTITY,
+            dt: 0.5,
+            sub: 0.1,
+            steps: 5,
+        };
+        place_targets(&mut w, &sc, std::slice::from_ref(&tg), 0.25);
+        let want = q_back(rot1, omega, 0.25);
+        let got = w.bodies.rot(id);
+        assert!(
+            (got.x - want.x).abs() < 1e-6
+                && (got.y - want.y).abs() < 1e-6
+                && (got.z - want.z).abs() < 1e-6
+                && (got.w - want.w).abs() < 1e-6,
+            "采样姿态没有按角速度插值：got {got:?} want {want:?}"
+        );
+        restore_targets(&mut w, std::slice::from_ref(&tg));
+        let back = w.bodies.rot(id);
+        assert_eq!(
+            [
+                back.x.to_bits(),
+                back.y.to_bits(),
+                back.z.to_bits(),
+                back.w.to_bits()
+            ],
+            [
+                rot1.x.to_bits(),
+                rot1.y.to_bits(),
+                rot1.z.to_bits(),
+                rot1.w.to_bits()
+            ],
+            "还原后姿态必须与 tick 末逐位相同"
+        );
+    }
 }
