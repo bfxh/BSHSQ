@@ -113,11 +113,20 @@ pub fn needs_ccd(bodies: &BodySet, i: usize, config: &PhysConfig, dt: f32) -> bo
     travel >= ext * config.ccd_extent_ratio
 }
 
+/// 每采样允许的位移（m）：默认 `0.5·ext`；细采样档压到 `min(0.5·ext, skin)`（P21）。
+pub fn sample_reach(ext: f32, config: &PhysConfig) -> f32 {
+    let half = ext * 0.5;
+    if !config.ccd_fine_sample || !config.contact_skin.is_finite() || config.contact_skin <= 0.0 {
+        return half;
+    }
+    half.min(config.contact_skin)
+}
+
 /// 本 tick 扫描段数（≥1，确定性）。
 pub fn step_count(bodies: &BodySet, i: usize, config: &PhysConfig, dt: f32) -> u32 {
     let v = max_point_speed(bodies, i);
     let travel = v * dt;
     let ext = min_half_extent(&bodies.shape[i]).max(1e-4);
-    let steps = (travel / (ext * 0.5)).ceil() as u32;
+    let steps = (travel / sample_reach(ext, config)).ceil() as u32;
     steps.clamp(1, config.ccd_max_steps.max(1))
 }

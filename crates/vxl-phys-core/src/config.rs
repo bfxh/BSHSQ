@@ -141,6 +141,9 @@ pub struct PhysConfig {
     pub ccd_extent_ratio: f32,
     /// §4.12 CCD 单 tick 最大扫描段数（确定性上限）。
     pub ccd_max_steps: u32,
+    /// **细采样档（默认关，A/B）**：每采样位移压到 `min(0.5·最小半长, skin)` ⇒ 薄目标的首个
+    /// 闭合采样不再整段跳过皮肤带（P21）；代价是快速体段数 ×(ext/skin)，默认关 ⇒ 逐位不变。
+    pub ccd_fine_sample: bool,
     /// **滚动阻力系数**（单位**米** = 等效力臂，0 = 关；默认 0 ⇒ 零换代）。
     ///
     /// 口径：接触面上绕**滚动方向**的一维阻力矩，上限 `roll_resistance · Σpn`
@@ -260,6 +263,7 @@ impl Default for PhysConfig {
             ccd_speed_threshold: 10.0,
             ccd_extent_ratio: 0.5,
             ccd_max_steps: 64,
+            ccd_fine_sample: false,
             friction: FrictionModel::Coulomb { mu: 0.5 },
             restitution: 0.0,
             restitution_threshold: 1.0,

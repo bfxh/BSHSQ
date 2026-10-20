@@ -70,7 +70,7 @@ fn clamp_one(world: &mut World, i: usize, dt: f32) {
         0.0
     };
     let point = world.bodies.linvel[i].length() + spin;
-    let v_max = budget * (ext * 0.5) / dt;
+    let v_max = budget * ccd::sample_reach(ext, &world.config) / dt;
     if point > v_max && point > 0.0 {
         let s = v_max / point;
         world.bodies.linvel[i] *= s;

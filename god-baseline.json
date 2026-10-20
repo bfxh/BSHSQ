@@ -101,9 +101,9 @@
       "max_type_members": 23
     },
     "crates/vxl-phys-core/src/config.rs": {
-      "file_lines": 376,
+      "file_lines": 380,
       "max_fn_lines": 48,
-      "max_type_members": 35
+      "max_type_members": 36
     },
     "crates/vxl-phys-core/src/grid.rs": {
       "file_lines": 112,
@@ -1011,7 +1011,7 @@
       "max_type_members": 0
     },
     "crates/vxl-phys-solver/src/ccd.rs": {
-      "file_lines": 124,
+      "file_lines": 133,
       "max_fn_lines": 22,
       "max_type_members": 0
     },

@@ -71,12 +71,13 @@ fn counters_stay_zero_when_ccd_is_off() {
 
 /// ③ 动-动档：运动学旋翼（ω=20 rad/s）× 60 m/s 弹体，旋翼初始角扫 24 档（每档 15°）。
 /// 返回 `(采样数, 命中数, 二分迭代数, 命中样本最深穿透, 命中段号之和)`。
-fn dyn2_sweep() -> (u64, u64, u64, f32, u64) {
+fn dyn2_sweep(fine: bool) -> (u64, u64, u64, f32, u64) {
     let mut tot = (0u64, 0u64, 0u64, 0.0f32, 0u64);
     for k in 0..24 {
         let cfg = PhysConfig {
             gravity: Vec3::ZERO,
             max_linear_velocity: 5000.0,
+            ccd_fine_sample: fine,
             ..PhysConfig::default()
         };
         let mut w = World::new(cfg);
@@ -121,7 +122,7 @@ fn dyn2_sweep() -> (u64, u64, u64, f32, u64) {
 /// ⚠️ 改 CCD（尤其动目标侧）会让这些数变 ⇒ 必须**一起更新**并按 ADR-0004 记账。
 #[test]
 fn dyn2_intra_tick_baseline_is_pinned() {
-    let (samples, hits, refine, deepest, step_sum) = dyn2_sweep();
+    let (samples, hits, refine, deepest, step_sum) = dyn2_sweep(false);
     eprintln!("dyn2: samples={samples} hits={hits} refine={refine} step_sum={step_sum} deepest={deepest:.5}");
     assert_eq!(
         (samples, hits, refine, step_sum),
@@ -132,4 +133,55 @@ fn dyn2_intra_tick_baseline_is_pinned() {
         (deepest - 0.15948).abs() < 1e-4,
         "命中样本最深穿透（P20 的关键读数）实测 {deepest}，基线 0.15948"
     );
+}
+
+/// **P21 细采样档的仪表**（`--ignored`，只打印不断言）：同一动-动档在
+/// `ccd_fine_sample = false/true` 下的「首命中深度 / 段数 / 命中数」。
+/// 用来回答"要采多细才够"，不参与 CI 判定。
+/// 静态薄墙 × 快盒：P21 的典型形态（薄目标 + 快体整段跳过皮肤带）。
+fn wall_sweep(fine: bool) -> (u64, u64, u64, f32, u64) {
+    let cfg = PhysConfig {
+        gravity: Vec3::ZERO,
+        ccd_fine_sample: fine,
+        ..PhysConfig::default()
+    };
+    let mut w = World::new(cfg);
+    w.add_static(
+        Shape::Box {
+            half: Vec3::new(0.005, 1.0, 1.0),
+        },
+        Vec3::ZERO,
+        Quat::IDENTITY,
+    );
+    let b = w.add_dynamic(
+        Shape::Box {
+            half: Vec3::splat(0.5),
+        },
+        Vec3::new(-3.0, 0.0, 0.0),
+        Quat::IDENTITY,
+        1000.0,
+    ) as usize;
+    w.bodies.linvel[b] = Vec3::new(80.0, 0.0, 0.0);
+    let _ = ccd_sweep_stats_take();
+    for _ in 0..20 {
+        w.step();
+    }
+    ccd_sweep_stats_take()
+}
+
+#[test]
+#[ignore = "P21 细采样 off/on 读数（只打印）"]
+fn diag_fine_sampling() {
+    for fine in [false, true] {
+        let (samples, hits, refine, deepest, step_sum) = wall_sweep(fine);
+        eprintln!(
+            "wall fine={fine}: samples={samples} hits={hits} refine={refine} deepest={deepest:.5} step_sum={step_sum}"
+        );
+    }
+    for fine in [false, true] {
+        let (samples, hits, refine, deepest, step_sum) = dyn2_sweep(fine);
+        eprintln!(
+            "fine={fine}: samples={samples} hits={hits} refine={refine} deepest={deepest:.5} step_sum={step_sum}"
+        );
+    }
 }
