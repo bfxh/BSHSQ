@@ -72,7 +72,7 @@ fn check_pair(cpu: &[vxl_phys::Manifold], slot: &Slot, a: u32, b: u32) -> bool {
         println!("对 ({a},{b})：卡上未接手（NOT_HANDLED）⇒ 本探针无效");
         return false;
     }
-    let found = cpu.iter().find(|m| (m.a as u32, m.b as u32) == (a, b));
+    let found = cpu.iter().find(|m| (m.a, m.b) == (a, b));
     let pts: &[ContactPoint] = match found {
         Some(m) => &m.points[..],
         None => &[],
@@ -84,9 +84,8 @@ fn check_pair(cpu: &[vxl_phys::Manifold], slot: &Slot, a: u32, b: u32) -> bool {
         return false;
     }
     let mut same = true;
-    for k in 0..cnt {
+    for (k, cp) in pts.iter().enumerate() {
         let (p, d, f) = slot.point(k);
-        let cp = pts[k];
         if p != [cp.point.x, cp.point.y, cp.point.z]
             || d.to_bits() != cp.depth.to_bits()
             || f != cp.feature
@@ -103,7 +102,7 @@ fn check_pair(cpu: &[vxl_phys::Manifold], slot: &Slot, a: u32, b: u32) -> bool {
         }
     );
     if !same {
-        for k in 0..cnt {
+        for (k, cp) in pts.iter().enumerate() {
             let (p, d, f) = slot.point(k);
             println!(
                 "    卡上 {k}: ({:.6},{:.6},{:.6}) d={d:e} f={f:#x}",
@@ -111,7 +110,7 @@ fn check_pair(cpu: &[vxl_phys::Manifold], slot: &Slot, a: u32, b: u32) -> bool {
             );
             println!(
                 "    CPU  {k}: ({:.6},{:.6},{:.6}) d={:e} f={:#x}",
-                pts[k].point.x, pts[k].point.y, pts[k].point.z, pts[k].depth, pts[k].feature
+                cp.point.x, cp.point.y, cp.point.z, cp.depth, cp.feature
             );
         }
     }
