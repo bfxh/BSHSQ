@@ -350,7 +350,10 @@ capabilities:
           2026-10-20 **已同步**：`narrow.wgsl` 的并列带种子改成与 CPU `select/band.rs` 相同的
           「带内坐标 (x,z) 字典序最小点 + 最远点贪心 + `min_sep` 去重」（`tie_tol = 5e-4`、带内大于 4 才铺开）。
           GPU 只有 `boxes_pair`（盒×盒 SAT 裁剪）经 `select_and_emit` 选点；球对是单点直发。
-          本机 `gpu_narrow_probe` 通过，但该场景未触发种子分支（同步前后读数逐字相同）⇒ 分支本身仍未被门覆盖。
+          本机两条探针：`gpu_narrow_probe`（941 体 / 4605 对，配对 max|Δpoint| 1.9e-6 ≤ 1.55e-5）与
+          `gpu_band_probe`（平放叠盒、上层偏航 6.1°+侧倾 0.02°、CPU 实测 `band=8`）。后者在种子退回
+          「带首」时转红、在坐标定序时逐位一致 ⇒ 该分支确被走到；但 CI 仍不覆盖（`--exclude vxl-phys-gpu`），
+          只能靠本机探针守。
       - id: no_auto_gate
         note: >
           无自动门。CI 用 `cargo test --workspace --exclude vxl-phys-gpu`（headless 运行器无 GPU），
