@@ -124,7 +124,9 @@ step typos 0 /c/vxl-wl-tools/typos.exe .
 # 真实性基准门（R1–R7）：跑 bench/realism-probe，与基线比关键不变量。
 # 为什么它能进 CI 而计时门不能：这七个量**机器无关**（2026-10-09 跨 Windows/Linux 逐字一致）；
 # 体数扫描（bench/sweep_scale.py）是 E-REF 上的报告项，不在本门里判。
-step bench 0 bash scripts/gate_bench.sh .
+# bench 步改 **strict**（2026-10-20）：基线在 Windows 与 ubuntu 上已两次逐字对齐 ⇒ 本地与 CI 同尺。
+# 代价：任何改变 R1–R10 读数的改动都要同步重冻 `bench/baselines/realism.jsonl`（这正是两次 CI 红的根因）。
+step bench 0 bash scripts/gate_bench.sh . --strict
 # 感官输出门（声音/震动 S1，`docs/ROUTE.md` §3.2）：CLI 两跑逐字一致 + 预算上界 + 基线对拍。
 # 与 crate 内 `tests/sense_contracts.rs`（库侧三条契约，随 workspace 测试在 CI 三工具链跑）
 # 是两侧同一套判据：库侧判行为、脚本侧判工具链产物。
