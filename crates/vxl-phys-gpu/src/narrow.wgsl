@@ -522,10 +522,19 @@ fn select_and_emit(
         band = i + 1u;
     }
     if (band > 4u) {
-        // 铺开：带首入，其后取「到已选集最近距离最大」且不重复者。
-        kept_pt[0] = pt[0];
-        kept_dep[0] = dep[0];
-        kept_ft[0] = ft[0];
+        // 铺开：**种子 = 带内坐标 (x,z) 字典序最小点**（与 CPU 2026-10-20 口径一致；
+        // 以带首为种子会让深度并列时的四点集随浮点噪声抖动），其后取「到已选集最近距离最大」者。
+        var seed = 0u;
+        for (var i = 1u; i < band; i = i + 1u) {
+            let c = pt[i];
+            let s0 = pt[seed];
+            if (c.x < s0.x || (c.x == s0.x && c.z < s0.z)) {
+                seed = i;
+            }
+        }
+        kept_pt[0] = pt[seed];
+        kept_dep[0] = dep[seed];
+        kept_ft[0] = ft[seed];
         kn = 1u;
         loop {
             if (kn >= 4u) {

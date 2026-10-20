@@ -347,10 +347,10 @@ capabilities:
     evidence:
       - id: source_sync
         note: >
-          截至 2026-10-20 **未同步**：`narrow.wgsl` 是 2026-10-19 的「带首 + 到已选集最远」贪心
-          并列带（`tie_tol = 5e-4`、带内大于 4 才铺开），而 CPU `select/band.rs` 已改为
-          「带内 x/z 四极值点 + `min_sep` 去重」⇒ 同一盒对两侧可能选到不同四点集。
+          2026-10-20 **已同步**：`narrow.wgsl` 的并列带种子改成与 CPU `select/band.rs` 相同的
+          「带内坐标 (x,z) 字典序最小点 + 最远点贪心 + `min_sep` 去重」（`tie_tol = 5e-4`、带内大于 4 才铺开）。
           GPU 只有 `boxes_pair`（盒×盒 SAT 裁剪）经 `select_and_emit` 选点；球对是单点直发。
+          本机 `gpu_narrow_probe` 通过，但该场景未触发种子分支（同步前后读数逐字相同）⇒ 分支本身仍未被门覆盖。
       - id: no_auto_gate
         note: >
           无自动门。CI 用 `cargo test --workspace --exclude vxl-phys-gpu`（headless 运行器无 GPU），
