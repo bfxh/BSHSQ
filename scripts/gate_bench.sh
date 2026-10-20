@@ -25,6 +25,11 @@ for a in "$@"; do
   esac
 done
 
+# ⚠️ ROOT 必须**绝对化**：下面 `cd "$ROOT/bench/realism-probe"` 之后 `$PROBE_DIR/target`
+# 若仍是相对路径，会在 probe 目录里再套一层 `bench/realism-probe/target`（踩过：一次
+# `git add -A` 把 118 个构建产物带进提交）。`cd && pwd` 同时校验目录存在。
+ROOT="$(cd "$ROOT" && pwd)"
+
 # ⚠️ Windows 的 App Execution Alias 会在 PATH 里放一个 `python3` 桩（调用即返回 49）⇒
 # 必须**试跑**一次再选，不能只看 `command -v`。
 PY=""
