@@ -185,3 +185,55 @@ fn diag_fine_sampling() {
         );
     }
 }
+
+/// **S2 目标子步化**（`ccd_target_substep`，默认关）的仪表：自旋薄片档 off/on。
+fn dyn2_sweep_sub(on: bool, fine: bool) -> (u64, u64, u64, f32, u64) {
+    let mut tot = (0u64, 0u64, 0u64, 0.0f32, 0u64);
+    for k in 0..24 {
+        let cfg = PhysConfig {
+            gravity: Vec3::ZERO,
+            max_linear_velocity: 5000.0,
+            ccd_target_substep: on,
+            ccd_fine_sample: fine,
+            ..PhysConfig::default()
+        };
+        let mut w = World::new(cfg);
+        let blade = w.add_kinematic(
+            Shape::Box {
+                half: Vec3::new(0.6, 0.4, 0.02),
+            },
+            Vec3::ZERO,
+            Quat::from_axis_angle(Vec3::Y, (k as f32 * 15.0).to_radians()),
+        );
+        w.bodies
+            .set_angvel(blade as usize, Vec3::new(0.0, 20.0, 0.0));
+        let b = w.add_dynamic(
+            Shape::Box {
+                half: Vec3::splat(0.1),
+            },
+            Vec3::new(-6.0, 0.0, 0.0),
+            Quat::IDENTITY,
+            1000.0,
+        ) as usize;
+        w.bodies.linvel[b] = Vec3::new(60.0, 0.0, 0.0);
+        let _ = ccd_sweep_stats_take();
+        for _ in 0..300 {
+            w.step();
+        }
+        let (s, h, r, d, st) = ccd_sweep_stats_take();
+        tot = (tot.0 + s, tot.1 + h, tot.2 + r, tot.3.max(d), tot.4 + st);
+    }
+    let _ = ccd_sweep_stats_take();
+    tot
+}
+
+#[test]
+#[ignore = "S2 子步化 off/on 读数（只打印）"]
+fn diag_target_substep() {
+    for (on, fine) in [(false, false), (true, false), (true, true)] {
+        let (samples, hits, refine, deepest, step_sum) = dyn2_sweep_sub(on, fine);
+        eprintln!(
+            "substep={on} fine={fine}: samples={samples} hits={hits} refine={refine} deepest={deepest:.5} step_sum={step_sum}"
+        );
+    }
+}

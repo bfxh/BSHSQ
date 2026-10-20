@@ -144,6 +144,10 @@ pub struct PhysConfig {
     /// **细采样档（默认关，A/B）**：每采样位移压到 `min(0.5·最小半长, skin)` ⇒ 薄目标的首个
     /// 闭合采样不再整段跳过皮肤带（P21）；代价是快速体段数 ×(ext/skin)，默认关 ⇒ 逐位不变。
     pub ccd_fine_sample: bool,
+    /// **快转目标子步化（默认关，A/B）**：运动学体每子步角位移 > `skin` 时，姿态按
+    /// `N = ceil(角位移/skin)` 份推进，每份后跑一趟窄相 + 位置级推出 ⇒ 重叠不再在两次解算
+    /// 之间形成（P18/P21 的 S2；上界实测 deepest 0.15948 → 0.03952）。
+    pub ccd_target_substep: bool,
     /// **滚动阻力系数**（单位**米** = 等效力臂，0 = 关；默认 0 ⇒ 零换代）。
     ///
     /// 口径：接触面上绕**滚动方向**的一维阻力矩，上限 `roll_resistance · Σpn`
@@ -264,6 +268,7 @@ impl Default for PhysConfig {
             ccd_extent_ratio: 0.5,
             ccd_max_steps: 64,
             ccd_fine_sample: false,
+            ccd_target_substep: false,
             friction: FrictionModel::Coulomb { mu: 0.5 },
             restitution: 0.0,
             restitution_threshold: 1.0,

@@ -1,7 +1,9 @@
 //! world_ccd：从 lib.rs 按域拆出（纯搬移，语义未改）。
 use super::*;
 
+pub(crate) mod spin;
 pub(crate) mod sweep;
+pub(crate) use spin::{spin_advance, spin_prepass};
 
 impl World {
     /// 选择性 CCD（§4.12）：保守推进采样。
