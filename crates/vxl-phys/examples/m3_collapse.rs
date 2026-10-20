@@ -46,7 +46,7 @@ fn frozen(ticks: usize, seeds: usize) -> Option<Frozen> {
         debris: 32,
         dyn_n: 32,
         awake: 0,
-        hash: 0x22ca32fb3d285c1f2d6a9979a3bc6577,
+        hash: 0x9ed3c5853e65fbf8960e3673f0e798e8,
     })
 }
 

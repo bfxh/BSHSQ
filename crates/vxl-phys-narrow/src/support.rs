@@ -315,7 +315,7 @@ fn hull_pair_heightfield(
             }
         }
     }
-    if np.ws.cand.is_empty() || !crate::select::select_contacts(np) {
+    if np.ws.cand.is_empty() || !crate::select::select_contacts(np, false) {
         return;
     }
     let deepest = np.ws.cand[0];

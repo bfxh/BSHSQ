@@ -103,7 +103,7 @@ pub(crate) fn capsule_ab(
     }
     np.ws.cand.clear();
     np.ws.cand.extend_from_slice(&local);
-    if !crate::select::select_contacts(np) {
+    if !crate::select::select_contacts(np, false) {
         return;
     }
     out.push(Manifold {
@@ -195,7 +195,7 @@ pub(crate) fn capsule_ba(
     }
     np.ws.cand.clear();
     np.ws.cand.extend_from_slice(&local);
-    if !crate::select::select_contacts(np) {
+    if !crate::select::select_contacts(np, false) {
         return;
     }
     out.push(Manifold {

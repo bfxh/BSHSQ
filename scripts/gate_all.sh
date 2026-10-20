@@ -162,8 +162,8 @@ acquire_timed
 #   场景里有可分辨的不对称旋转体 ⇒ 换代。`m0_gates` 两档与 `m3_collapse` **逐位未变**——那些
 #   场景的体是立方体/各向同性 ⇒ 走"各向同性早退"）
 step determinism 0 cargo run --release -q -p vxl-phys --example determinism
-if ! grep -q "FINAL_HASH=0x8c5c8fc941281fd6563ad7fdc7cf8b6c" "${out}/gate_determinism.log"; then
-    echo "❌ determinism 哈希与基线不符（期望 0x8c5c8fc941281fd6563ad7fdc7cf8b6c）——日志尾：" >&2
+if ! grep -q "FINAL_HASH=0x6b578a3730000f5aeb4c00cee0a7e249" "${out}/gate_determinism.log"; then
+    echo "❌ determinism 哈希与基线不符（期望 0x6b578a3730000f5aeb4c00cee0a7e249）——日志尾：" >&2
     tail -n 10 "${out}/gate_determinism.log" >&2
     exit 4
 fi
@@ -177,8 +177,10 @@ fi
 # 压力哈希 2026-10-13 换代两笔（同日）：
 # ① 旋转扫掠：0xc23b81902a74b977c8e74e114cf9737a → 0x8e53107f61c83474016cc0203dbe8014（健康读数未动）
 # ② 薄壳 TOI：→ 0xbc8a7d25bbedbcee4abf8ec398ae930c（健康读数同样未动）
-if ! grep -q "0xbc8a7d25bbedbcee4abf8ec398ae930c" "${out}/gate_m0_gates.log"; then
-    echo "❌ m0_gates 压力哈希与基线不符（期望 0xbc8a7d25bbedbcee4abf8ec398ae930c）——日志尾：" >&2
+# ③ **2026-10-20（P20 选点：并列带种子改坐标定序）**：→ 0x1b733f54d538a7ee72eb482ed120b927
+#    （健康读数：末态深穿透 110（旧 119）、最大深度 0.531；门槛档 0.5003 / 翻醒 3）
+if ! grep -q "0x1b733f54d538a7ee72eb482ed120b927" "${out}/gate_m0_gates.log"; then
+    echo "❌ m0_gates 压力哈希与基线不符（期望 0x1b733f54d538a7ee72eb482ed120b927）——日志尾：" >&2
     tail -n 10 "${out}/gate_m0_gates.log" >&2
     exit 6
 fi

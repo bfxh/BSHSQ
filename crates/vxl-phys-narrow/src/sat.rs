@@ -447,5 +447,5 @@ pub(crate) fn clip(np: &mut DefaultNarrowPhase, normal_ab: Vec3, src: AxisSrc) -
     np.probe.cand_pts += np.ws.cand.len() as u64;
 
     // 去重 + 取最深 ≤4 点（确定性排序见 select_contacts）。
-    crate::select::select_contacts(np)
+    crate::select::select_contacts(np, true)
 }

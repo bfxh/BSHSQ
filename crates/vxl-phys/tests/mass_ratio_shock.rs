@@ -70,9 +70,14 @@ fn heavy_on_light_ratio_30_does_not_interpenetrate() {
 /// 守不住东西）。常量取自 2026-10-09 修法落地时的实测值，且已用"把收敛门短路回
 /// `base`"复核过：关掉自适应预算时本哈希不变 ⇒ 均匀岛走的确实是旧路径。
 /// 若将来谁让自适应预算在均匀岛上也触发，本测试会红。
+///
+/// ⚠️ **2026-10-20 换代**（P20 选点）：`select.rs` 在「深度并列带」内取四极值点
+/// ⇒ 所有刚体接触流形的点集改变 ⇒ 本场景轨迹必然换代（`0xd017fe49… → 0x9ac10535…`）。
+/// 本测试守的是「自适应预算不在均匀岛触发」这个**性质**，不是某个特定轨迹 ⇒ 换代时更新常量。
+/// 复核方法不变：把收敛门短路回 `base` 应得到与当前常量相同的哈希。
 #[test]
 fn uniform_stack_is_bit_identical_to_frozen_hash() {
-    const FROZEN_UNIFORM_HASH: u128 = 0xd017_fe49_21aa_70a1_03fe_3926_9ab7_c56e;
+    const FROZEN_UNIFORM_HASH: u128 = 0x9ac1_0535_91c3_8501_0bc0_b69a_f022_579f;
     let hash = uniform_hash();
     println!("[均匀 1:1] 末态哈希 {hash:#034x}");
     assert_eq!(

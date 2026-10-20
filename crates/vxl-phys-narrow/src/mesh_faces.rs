@@ -80,7 +80,7 @@ pub(crate) fn mesh_vs_shape(np: &mut DefaultNarrowPhase, q: &Sampler<'_>, out: &
     };
     collect_vertex(np, q, n_dom);
     collect_extra(&extra, n_dom, &mut np.ws.cand);
-    if np.ws.cand.is_empty() || !select_contacts(np) {
+    if np.ws.cand.is_empty() || !select_contacts(np, false) {
         return;
     }
     out.push(Manifold {

@@ -465,7 +465,8 @@ fn boxes_pair(
 }
 
 /// 选点：**稳定**插入排序（深度降序 → x → y → z 升序，与 CPU 的 `sort_by` 同键同序）
-/// + 贪心去重（`min_sep` 内视为同点）+ 截断 ≤4 —— 与 CPU `select_contacts` 逐条对应。
+/// + **并列带铺开**（`TIE_TOL` 内且带内 >4 时取「到已选集最近距离最大」者）+ 贪心去重
+/// （`min_sep` 内视为同点）+ 截断 ≤4 —— 与 CPU `select_contacts` 逐条对应（2026-10-19 同步 P20）。
 /// ⚠️ 比较用普通 `<`（非 `total_cmp`）：两者只在 NaN 与 ±0.0 上不同，而这里的量都是有限非零差异；
 /// 真出现 ±0.0 平局时会落到下一个键，判据（逐对容差比 CPU）会立刻暴露。
 fn select_and_emit(
@@ -511,6 +512,52 @@ fn select_and_emit(
     var kept_ft: array<u32, 4>;
     let min2 = prm.min_sep * prm.min_sep;
     var kn = 0u;
+    // 并列带长度（连续前缀，不链式）；与 CPU 的 `TIE_TOL` 同值。
+    let tie_tol = 5e-4;
+    var band = 0u;
+    for (var i = 0u; i < cn; i = i + 1u) {
+        if (dep[0] - dep[i] > tie_tol) {
+            break;
+        }
+        band = i + 1u;
+    }
+    if (band > 4u) {
+        // 铺开：带首入，其后取「到已选集最近距离最大」且不重复者。
+        kept_pt[0] = pt[0];
+        kept_dep[0] = dep[0];
+        kept_ft[0] = ft[0];
+        kn = 1u;
+        loop {
+            if (kn >= 4u) {
+                break;
+            }
+            var best = 0u;
+            var best_d = -1.0;
+            var found = false;
+            for (var i = 0u; i < band; i = i + 1u) {
+                var nearest = 3.4e38;
+                for (var j = 0u; j < kn; j = j + 1u) {
+                    let dd = kept_pt[j] - pt[i];
+                    nearest = min(nearest, dot(dd, dd));
+                }
+                if (nearest < min2) {
+                    continue;
+                }
+                if (nearest > best_d) {
+                    best_d = nearest;
+                    best = i;
+                    found = true;
+                }
+            }
+            if (!found) {
+                break;
+            }
+            kept_pt[kn] = pt[best];
+            kept_dep[kn] = dep[best];
+            kept_ft[kn] = ft[best];
+            kn = kn + 1u;
+        }
+    }
     for (var i = 0u; i < cn; i = i + 1u) {
         if (kn >= 4u) {
             break;

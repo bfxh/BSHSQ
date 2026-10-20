@@ -109,7 +109,7 @@ pub(crate) fn mesh_vs_mesh(
         let fbase = if vside == 0 { 0 } else { na as u32 };
         mesh_collect(np, vside, mside, mesh, grid, sgn, band, n_dom, fbase);
     }
-    if np.ws.cand.is_empty() || !crate::select::select_contacts(np) {
+    if np.ws.cand.is_empty() || !crate::select::select_contacts(np, false) {
         return;
     }
     out.push(Manifold {

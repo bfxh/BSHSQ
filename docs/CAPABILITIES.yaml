@@ -31,7 +31,7 @@
 #    编辑后用解析器验一遍：
 #      python -c "import yaml;yaml.safe_load(open('docs/CAPABILITIES.yaml',encoding='utf-8'))"
 version: 1
-updated: "2026-10-12"
+updated: "2026-10-20"
 
 capabilities:
   # ── 面元力矩：刚体侧与布料侧是两件事，分开登记（文档点名的例子） ──
@@ -338,6 +338,33 @@ capabilities:
     notes: >
       实现缺口（不是设计边界）。⚠️ 立项前必须先答"CI 怎么守"：本仓 CI runner 无 GPU 适配器，
       GPU 用例在 CI 里跳过 ⇒ 做出来也无自动门（这是 issue #30 同族的验证路径问题）。
+
+  - id: PHY-SCOPE-GPU-NARROW-SELECT
+    title: GPU 窄相接触点选点与 CPU 同步（并列带铺开）
+    scope: included
+    implementation: partial
+    implementation_path: crates/vxl-phys-gpu/src/narrow.wgsl
+    evidence:
+      - id: source_sync
+        note: >
+          截至 2026-10-20 **未同步**：`narrow.wgsl` 是 2026-10-19 的「带首 + 到已选集最远」贪心
+          并列带（`tie_tol = 5e-4`、带内大于 4 才铺开），而 CPU `select/band.rs` 已改为
+          「带内 x/z 四极值点 + `min_sep` 去重」⇒ 同一盒对两侧可能选到不同四点集。
+          GPU 只有 `boxes_pair`（盒×盒 SAT 裁剪）经 `select_and_emit` 选点；球对是单点直发。
+      - id: no_auto_gate
+        note: >
+          无自动门。CI 用 `cargo test --workspace --exclude vxl-phys-gpu`（headless 运行器无 GPU），
+          `tests/dispatch_2d.rs` 只校验内核源码里的字面量；逐对数值对照只能在本机跑
+          `examples/gpu_narrow_probe`（RTX 4060 Ti / Vulkan 实测过）。
+    required_evidence:
+      - implementation_path
+      - ci_verification_path
+    decision_id: null
+    owner: maintainer
+    notes: >
+      实现缺口只剩验证路径：CPU 侧由 determinism 哈希与 16 个金样守着，GPU 侧没有任何读数门。
+      改选点规则时必须同时改 `narrow.wgsl` 的 `tie_tol`，否则 CPU/GPU 流形会分岔
+      （这类不一致在 CI 里看不见）。
 
   # ── 范围边界（用户 2026-10-08 口述）：本仓做"物理"与"域间作用"，
   #    表示转换本身不在本仓（那是转换/渲染侧的事） ──
