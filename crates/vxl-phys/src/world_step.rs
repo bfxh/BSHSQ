@@ -346,9 +346,9 @@ impl World {
         // 6.0) CCD 预算收口：**位置积分之前**限速（否则回扫窗口不等于真实位移，见 sweep.rs）。
         crate::world_ccd::sweep::clamp_flagged(self, dt);
         // S2（默认关）：快转运动学体的姿态按子步推进，积分时不转，积分后分 N 份补转并逐份推离。
-        let spins = crate::world_ccd::spin_prepass(self, dt);
+        let (spins, pre) = crate::world_ccd::spin_prepass(self, dt);
         Integrator::integrate_positions(&mut self.bodies, dt);
-        crate::world_ccd::spin_advance(self, dt, &spins);
+        crate::world_ccd::spin_advance(self, dt, &spins, &pre);
         self.timings.integrate_pos_us += vxl_phys_core::probe::us(t0);
         stabilization_pass(self, dt);
         // 7) 选择性 CCD（§4.12）：对高速体回扫本子步位移，命中即钳位 + 清法向速度。

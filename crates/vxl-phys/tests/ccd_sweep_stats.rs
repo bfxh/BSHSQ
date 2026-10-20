@@ -237,3 +237,24 @@ fn diag_target_substep() {
         );
     }
 }
+
+/// **S2 定向推出**（2026-10-21）：`push_out` 合法线退化时按「积分前所在侧」定方向。
+///
+/// 原状：动体中心正落在叶片中面时 `n` 的符号无意义（`n·rel = 0`），相邻子步推向相反侧 ⇒
+/// 净位移 ≈ 0，盒留在叶片里 ⇒ 自旋档 deepest 卡在 **0.08478**（≥ 4×skin）。
+/// 修后：从哪侧进来就推回哪侧（位移 `sep + depth`）⇒ deepest **0.01711**（< skin 0.02）、
+/// 命中 126→**99**、精化 1008→**792**；默认关档（本文件 ③）读数不变。
+#[test]
+fn dyn2_target_substep_push_side_is_pinned() {
+    let (samples, hits, refine, deepest, step_sum) = dyn2_sweep_sub(true, false);
+    eprintln!("substep: samples={samples} hits={hits} refine={refine} step_sum={step_sum} deepest={deepest:.5}");
+    assert_eq!(
+        (samples, hits, refine, step_sum),
+        (291642, 99, 792, 686),
+        "S2 的推出定向变了 ⇒ 先看 push_out 的「所在侧」判定，再按 ADR-0004 更新本行"
+    );
+    assert!(
+        deepest <= 0.02,
+        "自旋档 deepest 必须落在皮肤带内（0.02），实测 {deepest}"
+    );
+}

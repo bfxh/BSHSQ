@@ -15,14 +15,18 @@ pub(crate) struct SpinSave {
 
 /// **积分前**挑出"每子步角位移 > skin"的运动学体并暂时清零其角速度（位置积分不转它们）。
 /// 返回的计划交给 [`spin_advance`] 在积分后按 N 份补上。
-pub(crate) fn spin_prepass(world: &mut World, dt: f32) -> Vec<SpinSave> {
+pub(crate) fn spin_prepass(world: &mut World, dt: f32) -> (Vec<SpinSave>, Vec<Vec3>) {
     if !world.config.ccd_target_substep || !dt.is_finite() || dt <= 0.0 {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
     let skin = world.config.contact_skin;
     if !skin.is_finite() || skin <= 0.0 {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
+    // 积分前的位置快照：`push_out` 用它决定「从哪一侧进 blades 的」，避免法线退化时来回推。
+    let pre: Vec<Vec3> = (0..world.bodies.len())
+        .map(|k| world.bodies.position[k])
+        .collect();
     let mut out = Vec::new();
     for i in 0..world.bodies.len() {
         if !world.bodies.is_kinematic(i) {
@@ -45,11 +49,11 @@ pub(crate) fn spin_prepass(world: &mut World, dt: f32) -> Vec<SpinSave> {
         });
         world.bodies.set_angvel_raw(i, Vec3::ZERO);
     }
-    out
+    (out, pre)
 }
 
 /// **积分后**把停下不转的运动学体按 `N` 份补转，每份后做一趟窄相 + 位置级推出。
-pub(crate) fn spin_advance(world: &mut World, dt: f32, spins: &[SpinSave]) {
+pub(crate) fn spin_advance(world: &mut World, dt: f32, spins: &[SpinSave], pre: &[Vec3]) {
     for s in spins {
         world.bodies.set_angvel_raw(s.id, s.omega);
         for k in 1..=s.steps {
@@ -57,7 +61,7 @@ pub(crate) fn spin_advance(world: &mut World, dt: f32, spins: &[SpinSave]) {
             world
                 .bodies
                 .set_rot(s.id, s.q0.integrate_angular(s.omega, t));
-            resolve_spin(world, s.id);
+            resolve_spin(world, s.id, pre);
         }
     }
 }
@@ -66,7 +70,7 @@ pub(crate) fn spin_advance(world: &mut World, dt: f32, spins: &[SpinSave]) {
 ///
 /// 目的不是"求一个正确的冲量"，而是**不让重叠留到下一个子步**：本函数只在子步化档里被调用，
 /// 次数 = ΣN，且只对邻近动体做（中心距预筛）。关节/传导约束不在这里处理（P17 的投影另有入口）。
-fn resolve_spin(world: &mut World, i: usize) {
+fn resolve_spin(world: &mut World, i: usize, pre: &[Vec3]) {
     let skin = world.config.contact_skin;
     let pi = world.bodies.position[i];
     let ri = vxl_phys_solver::ccd::bounding_radius(&world.bodies.shape[i]);
@@ -99,12 +103,12 @@ fn resolve_spin(world: &mut World, i: usize) {
             &mut world.ccd_manifolds,
             world.jobs.as_ref(),
         );
-        push_out(world, i);
+        push_out(world, i, pre);
     }
 }
 
 /// 把 `ccd_manifolds` 里与 `i` 重叠的动体推出去（[`resolve_spin`] 的单趟）。
-fn push_out(world: &mut World, i: usize) {
+fn push_out(world: &mut World, i: usize, pre: &[Vec3]) {
     for m in world.ccd_manifolds.iter() {
         let other = if m.a == i as u32 { m.b } else { m.a } as usize;
         let depth = m.points.iter().map(|p| p.depth).fold(f32::MIN, f32::max);
@@ -112,7 +116,19 @@ fn push_out(world: &mut World, i: usize) {
             continue;
         }
         let n = if m.a == i as u32 { m.normal } else { -m.normal };
-        world.bodies.position[other] += n * depth;
+        let before = world.bodies.position[other];
+        // 法线退化（动体中心正落在目标中面上）时，`n` 的符号没有意义 ⇒ 按**积分前所在侧**定方向：
+        // 从 -n 侧进来的，就推回 -n 侧（`sep + depth` 才能穿回原位，而不是只推 `depth` 留在里面）。
+        let sep = (before - world.bodies.position[i]).dot(n);
+        let came = pre
+            .get(other)
+            .map_or(sep, |p| (*p - world.bodies.position[i]).dot(n));
+        let push = if came * sep < 0.0 {
+            -n * (sep.abs() + depth)
+        } else {
+            n * depth
+        };
+        world.bodies.position[other] += push;
         world.bodies.wake(other);
     }
 }
