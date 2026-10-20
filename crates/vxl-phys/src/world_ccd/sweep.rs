@@ -422,7 +422,12 @@ fn eval_hit(world: &mut World, i: usize, pairs: &[(u32, u32)], t: f32) -> Option
     let v_pt = world
         .bodies
         .velocity_at(i, point - world.bodies.position[i]);
-    let v_rel = v_pt - world.bodies.linvel[other];
+    // 目标侧也取**接触点速度**（`v + ω×r`）：自旋目标的表面在朝动体压过来时，只看它的
+    // 质心速度会漏判（P20 的另一半）。静态/沉睡目标 `ω = 0` ⇒ 与旧的 `linvel` 逐位相同。
+    let v_other = world
+        .bodies
+        .velocity_at(other, point - world.bodies.position[other]);
+    let v_rel = v_pt - v_other;
     let vn = n_into_body.dot(v_rel);
     (vn < 0.0).then_some(Hit {
         t,
