@@ -345,7 +345,7 @@ impl World {
         let t0 = vxl_phys_core::probe::start();
         // 6.0) CCD 预算收口：**位置积分之前**限速（否则回扫窗口不等于真实位移，见 sweep.rs）。
         crate::world_ccd::sweep::clamp_flagged(self, dt);
-        // S2（默认关）：快转运动学体的姿态按子步推进，积分时不转，积分后分 N 份补转并逐份推离。
+        // S2（默认开）：快转运动学体的姿态按子步推进，积分时不转，积分后分 N 份补转并逐份推离。
         let (spins, pre) = crate::world_ccd::spin_prepass(self, dt);
         Integrator::integrate_positions(&mut self.bodies, dt);
         crate::world_ccd::spin_advance(self, dt, &spins, &pre);
