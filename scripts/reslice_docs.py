@@ -7,6 +7,8 @@
 p01 的首行**不做锚点断言**」，其余口径与 `verify.py` **逐条对齐**：
 
 - 原文 = `docs/<NAME>.md`（`newline=''` 读取，**不转行尾**）
+- `--check` 比较时**归一行尾**（CRLF ≡ LF）⇒ 只因行尾不同不判漂移（假红）；
+  **写盘**仍按原文行尾写（保持「文件行尾与原文同构」这条不变量）
 - 分片 = 1 行 HTML 注释头 + 原文逐行副本；文件行尾与原文**同构**（CRLF/LF 不许混）
 - 边界 = p02..pNN 的**旧首行**（标题行）在新原文里的唯一命中；p01 从第 1 行起
 - 估算 token = `round(CJK 字符数 + 其它字符数/4)`（`verify.py::est`）
@@ -64,13 +66,26 @@ def read_text(path):
     return open(path, encoding="utf-8", newline="").read()
 
 
-def write_text(path, text):
+def write_text(path, text, eol="\n"):
+    """写盘：`text` 是 **LF 空间**的文本 ⇒ 按 `eol` 转成目标行尾。
+
+    为什么要转：仓内 canonical blob 是 LF，但本机 `core.autocrlf=true`
+    ⇒ 检出的工作树是 CRLF ⇒ 「文件行尾与原文同构」这条不变量要求分片跟着原文走。
+    """
+    out = text.replace("\n", eol) if eol != "\n" else text
     with open(path, "w", encoding="utf-8", newline="") as f:
-        f.write(text)
+        f.write(out)
+
+
+def norm_eol(text):
+    """把 CRLF / 裸 CR 归一成 LF（**只用于比较**）⇒ 行尾不同不算漂移。"""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def split_lines(raw):
-    lines = raw.split("\n")
+    """切成行（**内部一律 LF**）：先归一 CRLF，否则每行都带结尾 `\r`
+    ⇒ 后续 `join` + 补 eol 会产出 `\r\r\n`（实测在 Windows worktree 里假红）。"""
+    lines = raw.replace("\r\n", "\n").split("\n")
     if lines and lines[-1] == "":
         lines.pop()
     return lines
@@ -165,6 +180,9 @@ def build(name, doc_lines, starts, eol):
     total = len(starts)
     for i, st in enumerate(starts):
         en = (starts[i + 1] - 1) if i + 1 < len(starts) else len(doc_lines)
+        # ⚠️ **不要 rstrip**：权威 `verify.py` 的口径是
+        # `want = '\n'.join(doc[st-1:en]) + tail_nl` ⇒ 片末行若是空行，
+        # `join` 产生的尾换行**必须保留**（去掉就会与原文差一行 ⇒ verify.py 判红）。
         body = "\n".join(doc_lines[st - 1 : en])
         head = slice_head(name, i + 1, total, st, en)
         tok = est(body)
@@ -175,7 +193,8 @@ def build(name, doc_lines, starts, eol):
                 end=en,
                 body=body,
                 tok=tok,
-                text=head + eol + body + eol,
+                # LF 空间拼（行尾在 write_text 时统一转成原文的 eol ⇒ 「行尾与原文同构」不变）
+                text=head + "\n" + body + "\n",
             )
         )
     return out
@@ -301,7 +320,8 @@ def process(name, check_only):
     if not idx_text.endswith("\n"):
         idx_text += "\n"
 
-    new_doc_text = eol.join(new_doc_lines) + (eol if raw.endswith("\n") else "")
+    # 原文回写：同样在 LF 空间拼（写盘时统一转 eol）
+    new_doc_text = "\n".join(new_doc_lines) + ("\n" if raw.replace("\r\n", "\n").endswith("\n") else "")
 
     files = {doc: new_doc_text, idx_path: idx_text}
     for s in slices:
@@ -310,7 +330,8 @@ def process(name, check_only):
     if check_only:
         bad = 0
         for p, t in files.items():
-            if read_text(p) != t:
+            # 行尾归一化后比较：内容漂移仍红；只是 CRLF/LF 不同不红（假红，见函数注释）。
+            if norm_eol(read_text(p)) != norm_eol(t):
                 bad += 1
                 print(f"✗ 漂移: {os.path.relpath(p, ROOT)}")
         if bad:
@@ -322,7 +343,7 @@ def process(name, check_only):
         return 0
 
     for p, t in files.items():
-        write_text(p, t)
+        write_text(p, t, eol)
     print(
         f"已写入 {len(files)} 个文件；{name} 原文 {len(new_doc_lines)} 行；"
         f"边界 {starts}；整篇估算 {total_num}"
