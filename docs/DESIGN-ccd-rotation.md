@@ -48,7 +48,7 @@ clamp_flagged(dt_sub) → integrate_positions(dt_sub) → stabilization → ccd_
 - **裁决：无效，代码已回退（未合并）**。原因与 §1 的归因一致：重叠在采样开始前就存在，
   「深度在增长」只会更早撞上同一个深重叠，不可能把 deepest 压下去。⇒ **C1 取消，直接做 C2**。
 
-### S2 · 自旋/运动学目标下沉到子步（**已落地，默认关**：`ccd_target_substep`）
+### S2 · 自旋/运动学目标下沉到子步（**已落地，默认开**：`ccd_target_substep`，2026-10-21 提为默认档）
 对 `|ω|·r·dt_sub > skin` 的运动学/动态目标，把它的**姿态更新**按 `skin` 分辨率再切（内部子步，
 不增加求解器轮次），让窄相在子步末看到的重叠 ≤ 皮肤带。
 - 触点：`world_step.rs`（子步内目标推进处）、`world_kinematic.rs`（运动学姿态推进）、`sweep.rs::gather`（目标摆幅）。
@@ -86,9 +86,27 @@ clamp_flagged(dt_sub) → integrate_positions(dt_sub) → stabilization → ccd_
   就推回 `-n` 侧，位移取 `sep + depth`（只推 `depth` 会停在另一侧里面）。读数：
   self-spin 档 deepest **0.08478 → 0.01711**（**< skin 0.02**）、命中 126→**99**、精化 1008→**792**、
   采样 290996→291642（+0.2%）；默认关档 **逐位不变**（268706/126/1008/517）。
-  钉子：`ccd_sweep_stats::dyn2_target_substep_push_side_is_pinned`（pins 291642/99/792/686 + `deepest ≤ 0.02`）。
+  钉子：`ccd_sweep_stats::default_tier_target_substep_is_pinned`（pins 291642/99/792/686 + `deepest ≤ 0.02`）。
+- **提为默认档（2026-10-21）**：S2 不再是 A/B 档，`PhysConfig::default().ccd_target_substep = true`
+  ⇒ 默认档实测就给「deepest 0.01711 / 命中 99 / 精化 792 / 采样 291642」这组数。
+  ① **服从 CCD 总开关**：本件只在 `ccd_speed_threshold` 有限（CCD 开档）时生效 ⇒ "CCD 关 = 无穿透保证"
+  的口径不被破掉，CCD 关档用户不白付子步化的钱、也看不到位置级推出（判据
+  `vxl-phys` 内部单测 `ccd_substep_gate`：`default_tier_engages_s2` / `s2_off_engages_nothing` /
+  `ccd_off_disengages_s2`，直接打在 `spin_prepass` 排不排计划上，不靠场景碰巧重叠）。
+  ② **两套口径都留着**：P20 的对照基线（`ccd_sweep_stats` ③）显式固定在 S2 **关**档
+  （268706/126/1008/517），默认档由 `default_tier_target_substep_is_pinned` 单独钉住 ⇒ 改任一侧
+  都会被看见。
+  ③ **代价**（采样/命中/精化）：采样 +8.5%（268706 → 291642）、命中 −21%（126 → 99）、
+  精化 −21%（1008 → 792）、deepest −89%（0.15948 → 0.01711）。
+  **墙钟**（release，2 万动体，台架 `examples/s2_cost_probe.rs`）：**普通场景 −3.2%（噪声级）**、
+  **旋翼场景（8 旋翼） +12.2%**（2.702 → 3.031 ms/tick）。这两个数是**改完两处代价缺陷之后**的：
+  ① 预通道改成"先扫快转体、无则直接返回"（原来每子步拷全体位置 ⇒ 10 万体场景每子步 1.2 MB）；
+  ② 候选收集改成"每个旋翼每子步只收一次"（原来每子步每份各扫一遍全体体 ⇒ 旋翼场景 **+135%**）。
+  ④ **已知偏差（记账）**：分份积分让快转运动学体的**末姿态**与关档相差约 1 ulp
+  （`t = dt·k/N` 的舍入），并且重叠体多一次位置级推出 ⇒ 默认档对"快转运动学体"不是逐位中性的
+  （其余场景逐位不变：没有运动学体 ⇒ 预通道空转、零读数差异）。
 - 判据（修订）：自旋档 deepest **≤ 0.09 m**（现状 0.08478 过；上界 0.04 需同时细分动体，另立）。
-- 回退：`ccd_target_substep = false`（默认即关，逐位不变已验：off 档 268706/126/1008/517 与基线一致）。
+- 回退：`ccd_target_substep = false`（关档逐位不变已验：off 档 268706/126/1008/517 与基线一致）。
 
 ### S3 · TGS-Soft 转动响应（终局）
 把 CCD 命中后的响应从"平动非弹性停"升级为**接触点冲量 + 软约束**（与离散求解器同一套法向/切向参数），

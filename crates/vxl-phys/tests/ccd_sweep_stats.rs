@@ -71,43 +71,12 @@ fn counters_stay_zero_when_ccd_is_off() {
 
 /// ③ 动-动档：运动学旋翼（ω=20 rad/s）× 60 m/s 弹体，旋翼初始角扫 24 档（每档 15°）。
 /// 返回 `(采样数, 命中数, 二分迭代数, 命中样本最深穿透, 命中段号之和)`。
+///
+/// ⚠️ **固定在 S2 关档**（`ccd_target_substep = false`）：默认档自 2026-10-21 起**含 S2**
+/// （见 `default_tier_target_substep_is_pinned`），而本基线是 P20 的**对照口径**（只带平移的
+/// 旧行为）⇒ 显式写死开关 ⇒ 读数不随默认档改动而漂。
 fn dyn2_sweep(fine: bool) -> (u64, u64, u64, f32, u64) {
-    let mut tot = (0u64, 0u64, 0u64, 0.0f32, 0u64);
-    for k in 0..24 {
-        let cfg = PhysConfig {
-            gravity: Vec3::ZERO,
-            max_linear_velocity: 5000.0,
-            ccd_fine_sample: fine,
-            ..PhysConfig::default()
-        };
-        let mut w = World::new(cfg);
-        let blade = w.add_kinematic(
-            Shape::Box {
-                half: Vec3::new(0.6, 0.4, 0.02),
-            },
-            Vec3::ZERO,
-            Quat::from_axis_angle(Vec3::Y, (k as f32 * 15.0).to_radians()),
-        );
-        w.bodies
-            .set_angvel(blade as usize, Vec3::new(0.0, 20.0, 0.0));
-        let b = w.add_dynamic(
-            Shape::Box {
-                half: Vec3::splat(0.1),
-            },
-            Vec3::new(-6.0, 0.0, 0.0),
-            Quat::IDENTITY,
-            1000.0,
-        ) as usize;
-        w.bodies.linvel[b] = Vec3::new(60.0, 0.0, 0.0);
-        let _ = ccd_sweep_stats_take();
-        for _ in 0..300 {
-            w.step();
-        }
-        let (s, h, r, d, st) = ccd_sweep_stats_take();
-        tot = (tot.0 + s, tot.1 + h, tot.2 + r, tot.3.max(d), tot.4 + st);
-    }
-    let _ = ccd_sweep_stats_take();
-    tot
+    dyn2_sweep_sub(Some(false), fine)
 }
 
 /// **③ 动-动对照基线**（有意**逐字钉住**）：这几个数是 P20 的定量底账。
@@ -186,17 +155,20 @@ fn diag_fine_sampling() {
     }
 }
 
-/// **S2 目标子步化**（`ccd_target_substep`，默认关）的仪表：自旋薄片档 off/on。
-fn dyn2_sweep_sub(on: bool, fine: bool) -> (u64, u64, u64, f32, u64) {
+/// **S2 目标子步化**的档位仪表：自旋薄片档。
+/// `sub = None` ⇒ **默认档**（不显式写 `ccd_target_substep`）；`Some(b)` ⇒ 显式写该开关。
+fn dyn2_sweep_sub(sub: Option<bool>, fine: bool) -> (u64, u64, u64, f32, u64) {
     let mut tot = (0u64, 0u64, 0u64, 0.0f32, 0u64);
     for k in 0..24 {
-        let cfg = PhysConfig {
+        let mut cfg = PhysConfig {
             gravity: Vec3::ZERO,
             max_linear_velocity: 5000.0,
-            ccd_target_substep: on,
             ccd_fine_sample: fine,
             ..PhysConfig::default()
         };
+        if let Some(on) = sub {
+            cfg.ccd_target_substep = on;
+        }
         let mut w = World::new(cfg);
         let blade = w.add_kinematic(
             Shape::Box {
@@ -231,27 +203,34 @@ fn dyn2_sweep_sub(on: bool, fine: bool) -> (u64, u64, u64, f32, u64) {
 #[ignore = "S2 子步化 off/on 读数（只打印）"]
 fn diag_target_substep() {
     for (on, fine) in [(false, false), (true, false), (true, true)] {
-        let (samples, hits, refine, deepest, step_sum) = dyn2_sweep_sub(on, fine);
+        let (samples, hits, refine, deepest, step_sum) = dyn2_sweep_sub(Some(on), fine);
         eprintln!(
             "substep={on} fine={fine}: samples={samples} hits={hits} refine={refine} deepest={deepest:.5} step_sum={step_sum}"
         );
     }
 }
 
-/// **S2 定向推出**（2026-10-21）：`push_out` 合法线退化时按「积分前所在侧」定方向。
+/// **默认档**含 S2（`ccd_target_substep` 默认**开**，2026-10-21）：自旋薄片档按**默认配置**跑。
 ///
-/// 原状：动体中心正落在叶片中面时 `n` 的符号无意义（`n·rel = 0`），相邻子步推向相反侧 ⇒
-/// 净位移 ≈ 0，盒留在叶片里 ⇒ 自旋档 deepest 卡在 **0.08478**（≥ 4×skin）。
-/// 修后：从哪侧进来就推回哪侧（位移 `sep + depth`）⇒ deepest **0.01711**（< skin 0.02）、
-/// 命中 126→**99**、精化 1008→**792**；默认关档（本文件 ③）读数不变。
+/// 读数 = S2 落地时 A/B 档的 on 值：samples 291642 / hits 99 / refine 792 / step_sum 686、
+/// **deepest 0.01711（< skin 0.02）** ⇒ "默认开"不是纸面声明，默认档实测就给这组数。
+///
+/// 背景（S2 定向推出，2026-10-21）：原状动体中心正落在叶片中面时 `n` 的符号无意义
+/// （`n·rel = 0`），相邻子步推向相反侧 ⇒ 净位移 ≈ 0、盒留在叶片里 ⇒ 自旋档 deepest 卡在
+/// **0.08478**（≥ 4×skin）。修后：从哪侧进来就推回哪侧（位移 `sep + depth`）⇒ deepest 0.01711。
+/// ⚠️ 改 S2 ⇒ 先看 `push_out` 的「所在侧」判定，再按 ADR-0004 更新本行。
 #[test]
-fn dyn2_target_substep_push_side_is_pinned() {
-    let (samples, hits, refine, deepest, step_sum) = dyn2_sweep_sub(true, false);
-    eprintln!("substep: samples={samples} hits={hits} refine={refine} step_sum={step_sum} deepest={deepest:.5}");
+fn default_tier_target_substep_is_pinned() {
+    assert!(
+        PhysConfig::default().ccd_target_substep,
+        "默认档必须含 S2（2026-10-21 起默认开）"
+    );
+    let (samples, hits, refine, deepest, step_sum) = dyn2_sweep_sub(None, false);
+    eprintln!("default tier: samples={samples} hits={hits} refine={refine} step_sum={step_sum} deepest={deepest:.5}");
     assert_eq!(
         (samples, hits, refine, step_sum),
         (291642, 99, 792, 686),
-        "S2 的推出定向变了 ⇒ 先看 push_out 的「所在侧」判定，再按 ADR-0004 更新本行"
+        "默认档的 S2 读数变了 ⇒ 先看 push_out 的「所在侧」判定与 S2 的生效条件，再按 ADR-0004 更新本行"
     );
     assert!(
         deepest <= 0.02,
