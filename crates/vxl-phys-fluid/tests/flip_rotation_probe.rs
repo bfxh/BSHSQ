@@ -2,7 +2,8 @@
 //! 无边界 ⇒ 末态绕 y 角动量 `L_y` 的损失**只可能来自 P2G/G2P 那一趟三线性传输**。
 //!
 //! 主判据 = `flip_apic_derived_c_buys_rotation`（**正结果**：`C` 每子步从**粒子场**现算
-//! ⇒ APIC 把旋转保住；`flip_apic` 仍是默认 `false` 的 A/B 实验档，理由是近静场代价）。
+//! ⇒ APIC 把旋转保住；`flip_apic` 默认开，但默认 `flip_ratio = 0.95 > θ_max` ⇒ 门控关、
+//! 默认档逐位等于 FLIP/PIC）。
 //!
 //! 完整推导与读数表**不在此复制**，见 `src/config.rs` 的 `flip_apic` doc 与 `src/flip.rs`
 //! 模块头 `## APIC` 节。
@@ -207,8 +208,9 @@ fn rot_case(ratio: f32, apic: bool, ticks: usize) -> Rot {
 /// ③ **场更接近刚体**：APIC 的 `rot_err` 必须明显低于 PIC（实测 0.429 vs 0.864）；
 /// ④ **不搅乱**：`θ = 0.95` 开 APIC 不得把角动量搞坏（**门控落盘后该档 ≡ FLIP**，见 G1；
 ///    门控前实测反升 0.866 → 1.073 ⇒ 门控把这笔红利连同代价一起收掉）；
-/// ⑤ **默认关**：`flip_apic` 默认 `false`（off 路径逐字节不动；开档是 A/B 实验档——
-///    静水槽代价 `ke` +18%、`sink` +15%、`over_in` −61%，见 `docs/OPEN-PROBLEMS.md` P23）；
+/// ⑤ **默认开、默认档逐位不变**：`flip_apic` 默认 `true`，但默认 `flip_ratio = 0.95 > θ_max`
+///    ⇒ 门控关 ⇒ 默认档逐位等于 FLIP/PIC（静水槽代价 `ke` +18%、`sink` +15%、`over_in` −61%
+///    只属 `θ ≥ 0.8` 段，门控后不可达，见 `docs/OPEN-PROBLEMS.md` P23）；
 /// ⑥ **A/B 档也逐位复现**：同档跑两遍读数逐位相同（含 `digest`）。
 ///
 /// 读数由本测试自己打印（`--nocapture`），同见 `diag_apic_rotation`。
@@ -275,10 +277,11 @@ fn flip_apic_derived_c_buys_rotation() {
         flip_apic.l_keep,
         flip.l_keep
     );
-    // ⑤ 默认关：off 路径逐字节不动是本仓的硬不变量（A/B 档要开得显式设 true）。
+    // ⑤ 默认开、默认档逐位不变：默认 θ = 0.95 > θ_max ⇒ 门控关 ⇒ 仍走纯 FLIP/PIC。
+    let default_cfg = FluidConfig::default();
     assert!(
-        !FluidConfig::default().flip_apic,
-        "`flip_apic` 默认值被翻成 true 了 ⇒ 所有近静场会付 P23 里记的那笔代价"
+        default_cfg.flip_apic && default_cfg.flip_ratio > 0.5,
+        "`flip_apic` 默认档变了：期望「开关默认开 + 默认 θ 超门限 ⇒ 门控关」"
     );
     // ⑥ 表面完整性（阈值同主表）+ A/B 档逐位复现。
     for (n, r) in [

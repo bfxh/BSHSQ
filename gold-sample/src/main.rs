@@ -14,7 +14,9 @@
 //!   + 参照体检查点位姿表（容差表雏形：末态 max |Δpos|）。
 
 use rapier3d::prelude::*;
-use vxl_phys::{FrictionModel, Material, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{
+    BodyBuildExt, DiagExt, FrictionModel, Material, PhysConfig, Quat, Shape, Vec3, World,
+};
 
 struct Scene {
     layers: usize,

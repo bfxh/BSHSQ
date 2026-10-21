@@ -9,7 +9,9 @@
 //! 双环境复现）⇒ 可以直接做 CI 判据。
 //!
 //! 参考基线：`bench/baselines/realism.jsonl`；门脚本：`scripts/gate_bench.sh`。
-use vxl_phys::{Joint, JointKind, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{
+    BodyBuildExt, DiagExt, FluidExt, Joint, JointKind, PhysConfig, Quat, Shape, Vec3, World,
+};
 use vxl_phys_core::Mat3;
 
 const G: f32 = 9.81;
@@ -475,9 +477,8 @@ fn full_support_count(spacing: f32, h: f32) -> usize {
 
 /// 粒子所在格坐标（与 `UniformGrid::bin_of` 同公式，钳边）。
 fn bin_of(ng: &vxl_phys_fluid::NeighborGrid<'_>, p: Vec3) -> (u32, u32, u32) {
-    let f = |o: f32, v: f32, n: u32| -> u32 {
-        (((v - o) * ng.inv).floor().max(0.0) as u32).min(n - 1)
-    };
+    let f =
+        |o: f32, v: f32, n: u32| -> u32 { (((v - o) * ng.inv).floor().max(0.0) as u32).min(n - 1) };
     (
         f(ng.min.x, p.x, ng.dims.0),
         f(ng.min.y, p.y, ng.dims.1),
@@ -556,7 +557,13 @@ fn split_density_stats(
             s_surf_n += 1;
         }
     }
-    let per = |s: f64, m: u64| if m > 0 { s / m as f64 / rho0 as f64 } else { 0.0 };
+    let per = |s: f64, m: u64| {
+        if m > 0 {
+            s / m as f64 / rho0 as f64
+        } else {
+            0.0
+        }
+    };
     (
         n,
         n_int,
@@ -607,7 +614,9 @@ fn fluid_volume_split(ticks: usize) {
     let _ = ticks;
     for tick in 0..ticks {
         w.step();
-        let Some((s, ..)) = w.fluids().first() else { return };
+        let Some((s, ..)) = w.fluids().first() else {
+            return;
+        };
         let rho0 = s.config().rest_density;
         let d = s.densities();
         let pos = s.positions();
@@ -645,4 +654,3 @@ fn main() {
     misc::destruction_trigger_tick(120);
     misc::stack_load_steadiness(3);
 }
-

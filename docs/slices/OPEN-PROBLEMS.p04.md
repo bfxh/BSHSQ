@@ -1,4 +1,4 @@
-<!-- 分片 04/04：本文的连续切片副本，原文未改。源第 2563-3544 行。索引：OPEN-PROBLEMS.INDEX.md -->
+<!-- 分片 04/04：本文的连续切片副本，原文未改。源第 2563-3548 行。索引：OPEN-PROBLEMS.INDEX.md -->
 ## P8 — `sat` 的面轴断言与自身契约矛盾 ✅ **已清（2026-09-22）**
 
 `crates/vxl-phys-narrow/src/lib.rs` 的 `sat()` 里原文（T3 盒对快路径提交 `9883dbc` 引入）：
@@ -792,7 +792,11 @@ world_ccd/sweep.rs::eval_hit  →  world.narrow.collide(.., &world.providers, ..
 **θ 门控（2026-10-21 已落盘）**：`flip/affine.rs` 新增 `APIC_MAX_THETA = 0.5` 与
 `apic_allowed(cfg)`（`cfg.flip_apic && cfg.flip_ratio <= APIC_MAX_THETA`；`NaN` 视为关），
 `flip.rs` 的 `p2g` 只改**一行**取它 ⇒ 门控只作用在 **APIC 分支内部**，默认档
-（`flip_apic = false`）**逐位不变**（三哈希 + 16 金样契约零换代）。
+（`flip_ratio = 0.95 > 0.5` ⇒ 门控关）**逐位不变**（三哈希 + 16 金样契约零换代）。
+
+**出口①落地（2026-10-22，C2）**：`flip_apic` 默认翻 **`true`**，判据⑤同步改成
+「默认开 + 默认 `θ` 超门限 ⇒ 门控关」⇒ **默认配置仍逐位等于纯 FLIP/PIC**（三哈希零换代）；
+要红利的场景把 `flip_ratio` 调到 ≤ 0.5 即可，不必再显式开开关。
 
 **门控落盘后的隔离复跑（2026-10-21，`t_rot_theta` / `t_tank_theta` 单独跑 `diag_apic_theta_scan`）**：
 `θ = 0.8` / `θ = 0.95` 两档 `apic=false` 与 `apic=true` 的读数**逐位相同**

@@ -956,3 +956,49 @@ XPBD 各约束族（边/弯/塑/撕裂/自摩擦/自碰撞/气动/刚体接触�
 **逐位不变**：`0x6b578a3730000f5aeb4c00cee0a7e249`（determinism）/
 `0xa50eaa7229f1b39dada0741822795627`（m0_gates）/
 `220153979919752808011342471829159370844`（m1_islands）。
+
+
+## 2026-10-22 · **默认值翻转的安全性判据 = 默认参数是否落在门控关段**
+
+`flip_apic` 从默认 `false` 翻成 `true`（C2/出口①）。这笔改动能零风险落地，**不是因为"测过一
+遍没事"**，而是因为门控给出的结构保证：`apic_allowed = flip_apic && flip_ratio <= 0.5`，而
+`flip_ratio` 默认 `0.95` ⇒ **默认配置里 APIC 分支不可达** ⇒ 逐位不变是**由参数空间**推出来的，
+不依赖读数是否恰好没变。
+
+可迁移的判据（比"默认关最安全"更强）：
+
+1. **默认值 + 门控** 是两件事。默认值决定"用户不配置时走哪条路"，门控决定"那条路在什么参数域
+   可达"。要翻默认值，先问：**默认参数是否落在门控关段**？是 ⇒ 翻转对默认档零影响，风险只剩
+   "门控本身坏了"（⇒ 用 G1 那种**逐位相同**的断言钉住，而不是用近似相等）。
+2. **"默认开"不等于"默认生效"**。文档必须同时写清两者（`默认开 + 默认 θ 落关段`），否则下一个人
+   会把"开了"读成"生效了"，然后在默认场景上找一个根本不存在的性能回退。
+3. **探针读默认值 = 隐藏耦合**。`flip_incompressibility_probe` 的 `run()` 原先取
+   `FluidConfig::default().flip_apic`，理由是"表跟着默认走"；默认一翻，`θ = 0` 那一档的"PIC 基线"
+   就悄悄变成了 APIC（θ = 0 在门控内，APIC 生效）⇒ 基线失去意义。**修法不是改断言，是把 OFF 档
+   显式钉死**（`apic: false`），因为那张表的语义就是"旧口径基线"。教训：**诊断表里的"基线列"
+   必须显式指定口径，不能继承全局默认**。
+
+## 2026-10-22 · **`cargo check --workspace` 看不见 workspace 成员外的消费方**
+
+三处 god 债务拆成扩展 trait 后，仓内 `cargo check --workspace --all-targets`、
+`cargo test --workspace`（219 个测试二进制）、`local_gate.py`（29 道门）全绿，但
+`bash scripts/gate_all.sh` 在 **bench** 一步红：`bshsq-realism-probe` 有 **28 个**
+`no method named …` —— `add_static`/`add_dynamic`/`add_voxel`/`add_fluid`/`add_joint`/
+`manifolds`/`fluids`/`apply_impact_destruction` 全搬进了 `BodyBuildExt`/`DiagExt`/
+`FluidExt`/`DestructionOpsExt`，而它只 `use vxl_phys::{…, World}`；金样门（独立 target
+`C:/vxl-wl-target-gold`）随后在 `gold-sample` 上红同样 5 处。
+
+**根因**：`bench/realism-probe` 与 `gold-sample` **不在 `[workspace] members` 里**
+（各自独立 Cargo.toml，`cargo` 的 workspace 命令一律不扫）⇒ 任何"只跑 cargo check/test
++ local_gate"的验收都**结构上看不到**它们，而它们恰恰是行为门与金样门的执行体。
+
+**判据与修法**：
+
+1. 动了**公开方法面**（拆 trait / 改签名 / 改模块路径）时，验收必须包含
+   `bash scripts/gate_all.sh` 全量，不能只跑 workspace 面。
+2. 修法是**补 trait 导入**（`use vxl_phys::{BodyBuildExt, DiagExt, …}`），不是把方法搬回
+   `World`——trait 化本身是对的方向，缺的只是消费方 import。
+3. 这两个 crate 各自的 `cargo fmt` 也不在 workspace 的 `cargo fmt --all` 覆盖内 ⇒ 改动后
+   要在各自目录跑 `cargo fmt --all`，否则金样门的 `gold_fmt` 会红（实测踩到）。
+4. 结构选项（未做）：把两者加入 workspace members ⇒ `cargo check --workspace` 从此覆盖。
+   代价是它们的外部依赖（如 `rapier3d`）要进 workspace 依赖面，需单独评估。

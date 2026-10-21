@@ -1,7 +1,7 @@
 //! misc：R8/R9/R10（睡眠位置代价 / 破坏触发步精度 / 堆叠层间载荷）——从 `main.rs` 按域拆出
 //! （**纯搬移，输出逐字不变**）。拆的理由：`probe.rs` 已顶到 god 门 file_lines 阈值 800。
 use super::{pct_sorted, G};
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DestructionOpsExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// R10 —— **多体堆叠的层级载荷方差**（评审 §1.5 标 MISSING 的那条）。
 ///
@@ -223,10 +223,7 @@ pub(super) fn sleep_position_error(ticks: usize) {
     }
     devs.sort_by(f32::total_cmp);
     angs.sort_by(f32::total_cmp);
-    let slept = ids
-        .iter()
-        .filter(|&&i| !a.bodies.awake[i as usize])
-        .count();
+    let slept = ids.iter().filter(|&&i| !a.bodies.awake[i as usize]).count();
     println!(
         "{{\"probe\":\"R8_sleep_position_error\",\"ticks\":{ticks},\"dynamic\":{n_dyn},\
          \"slept_a\":{slept},\"pos_dev_max_m\":{:.5},\"pos_dev_p99_m\":{:.5},\

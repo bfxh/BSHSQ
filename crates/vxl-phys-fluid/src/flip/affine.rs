@@ -31,7 +31,7 @@ pub(super) const APIC_MAX_THETA: f32 = 0.5;
 
 /// **APIC 是否允许生效** ＝ 开关开着 **且** `θ ≤ APIC_MAX_THETA`。
 ///
-/// 门控只作用在 **APIC 分支内部** ⇒ 默认档（`flip_apic = false`）逐位不变，
+/// 门控只作用在 **APIC 分支内部** ⇒ 默认档（`flip_ratio = 0.95 > θ_max`）逐位不变，
 /// 三份确定性契约（逐位复现/保存恢复/状态继承）原样成立。`θ` 为 `NaN` 时比较为假 ⇒ 视为关。
 #[inline]
 pub(super) fn apic_allowed(cfg: &FluidConfig) -> bool {

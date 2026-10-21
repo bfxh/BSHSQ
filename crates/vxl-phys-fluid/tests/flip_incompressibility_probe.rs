@@ -143,9 +143,9 @@ fn digest(f: &FluidSystem) -> u64 {
 /// 读一份场景（族 + 压力迭代 + FLIP 混合比），几何/种子/dt 与 PBF 档**逐字相同**。
 /// `diag` = 打印末态过密**空间分布**（只给 `#[ignore]` 诊断用；正常判据不动）。
 ///
-/// **APIC 取 `FluidConfig::default()` 的档**（不写死）：默认一旦改动，本表跟着走 ⇒ 既有判据
-/// 永远裁在"当前默认配置"上，不会留一个跟默认脱节的影子档。APIC 开的 A/B 对照显式走
-/// `run_cfg`（旋钮见 `Knobs`，`apic = true`；见 `diag_apic_hydrostatic`）。
+/// **APIC 固定取关档**（A/B 的 OFF 路径）：本表是「旧口径基线」，`θ = 0` 那一档必须是**纯 PIC**
+/// ⇒ 不能跟着默认值走（默认已翻 `true`，θ = 0 时 APIC 会生效，PIC 基线就没意义了）。
+/// APIC 开档的对照显式走 `run_cfg`（旋钮见 `Knobs`，`apic = true`；见 `diag_apic_hydrostatic`）。
 fn run(
     family: FluidFamily,
     pressure_iters: u32,
@@ -158,7 +158,7 @@ fn run(
         pressure_iters,
         flip_ratio,
         cg,
-        apic: FluidConfig::default().flip_apic,
+        apic: false,
     };
     run_cfg(family, knobs, ticks, diag)
 }
@@ -518,7 +518,8 @@ fn diag_apic_hydrostatic() {
 /// 而 APIC 的**红利**在另一头（θ = 0 的旋转团，`flip_rotation_probe.rs::diag_apic_theta_scan`
 /// 那张表）⇒ 「**θ 门控**」（APIC 只在 θ ≤ θ_max 生效）能不能用，取决于代价与红利**随 θ 是否
 /// 分得开**。本诊断出代价侧那张表（θ ∈ {0, 0.25, 0.5, 0.8, 0.95} × APIC 开/关）。
-/// **只打印、不断言**（仪表）；`flip_apic` 默认关 ⇒ 本诊断**不改**默认档任何读数。
+/// **只打印、不断言**（仪表）；`flip_apic` 默认开但默认 `θ = 0.95` 落在关段 ⇒ 本诊断
+/// **不改**默认档任何读数。
 ///
 /// 跑法：`cargo test -p vxl-phys-fluid --test flip_incompressibility_probe -- --ignored --nocapture`
 #[test]
