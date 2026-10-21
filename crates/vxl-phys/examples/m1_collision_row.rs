@@ -26,7 +26,7 @@
 
 use std::time::Instant;
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, PhysConfig, Quat, Shape, Vec3, World};
 
 const TICKS: u32 = 120;
 const LIMIT_MS: f64 = 1.5;

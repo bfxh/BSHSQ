@@ -20,7 +20,7 @@
 
 use std::time::Instant;
 
-use vxl_phys::{KinematicExt, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, KinematicExt, PhysConfig, Quat, Shape, Vec3, World};
 
 const BODIES: usize = 20_000;
 const WARMUP: u32 = 20;

@@ -14,7 +14,7 @@
 //! 修好（根因是约束行的冲量符号写反，迭代在发散；回归判据见本文件末尾的
 //! `distance_rest_differs_from_initial_distance_converges`）。
 // 新文件：glob 门对新增文件零基线 ⇒ 显式导入（不用 `use vxl_phys::*`）。
-use vxl_phys::{Joint, JointKind, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, Joint, JointKind, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 静态锚点 + 动态球（`rest` = 初始距离 0.5），给球朝外的初速度 `speed` 制造约束力。
 fn scene(speed: f32, force: f32) -> (World, u32, u32) {

@@ -1,6 +1,6 @@
 //! 取数件：`quiet` / `quiet_shaped` / `run_yaw` —— 各量一个场景，返回标量读数 —— 同上拆出。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, FluidExt, PhysConfig, Quat, Shape, Vec3, World};
 
 use crate::scene::{tank, water};
 use crate::stats::yaw_of;

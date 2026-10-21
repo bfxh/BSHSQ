@@ -1,6 +1,6 @@
 //! 场景工厂：场景名 → 世界；跑 tick 并回读末态（纯搬移自 `lib.rs`，无语义改动）。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, PhysConfig, Quat, Shape, SoftExt, Vec3, World};
 use vxl_phys_soft::{ClothSheet, Stiffness};
 
 /// 场景名 → 世界（每个场景自带地面与若干体，全确定性布局）。

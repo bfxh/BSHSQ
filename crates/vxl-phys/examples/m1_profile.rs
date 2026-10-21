@@ -3,7 +3,7 @@
 
 use std::time::Instant;
 
-use vxl_phys::{HeightField, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, HeightField, PhysConfig, Quat, Shape, Vec3, World};
 
 fn main() {
     let threads: usize = std::env::args()

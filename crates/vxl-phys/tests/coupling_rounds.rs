@@ -2,9 +2,9 @@
 //! 「新增域忘登记即红」。
 //!
 //! 机制：本文件持有**声明式轮次表**（`ROUNDS`）与**引擎内部豁免表**（`ENGINE_PASSES`）；
-//! `include_str!` 扫描 `world_step.rs` / `world_soft.rs` 两个**编排文件**里所有
-//! `self.<name>_pass(` 形状的调用点（步进/子步/域轮次的调用点都在这两个文件 ⇒ 新域的
-//! 调用点必然被扫到），两向断言：
+//! `include_str!` 扫描 `world_step.rs` / `world_soft.rs` / `world_soft_ext.rs` 三个
+//! **编排文件**里所有 `self.<name>_pass(` 形状的调用点（步进/子步/域轮次的调用点都在这三个
+//! 文件 ⇒ 新域的调用点必然被扫到），两向断言：
 //! - 扫描集 − 豁免集 == 登记表（**新域不登记 ⇒ 红**）；
 //! - 登记表 ∪ 豁免集 ⊆ 扫描集（**改名/删域后表留尸 ⇒ 红**）。
 //!
@@ -71,6 +71,11 @@ fn coupling_rounds_are_declared_and_not_stale() {
 
     let mut found = scanned_passes(include_str!("../src/world_step.rs"));
     found.extend(scanned_passes(include_str!("../src/world_soft.rs")));
+    // `world_soft_ext.rs`（2026-10-21）：`World` 的软体域扩展 trait 落地时，**软体的管线组装
+    // （`domain_pass` → `fluid_pass` / `rope_pass` / `cloth_pass` 三个调用点）**从
+    // `world_soft.rs` 搬到了这里 ⇒ 扫描面必须跟着搬，否则「新域不登记即红」这条判据
+    // **静默失效**（扫不到 ⇒ 集合变小 ⇒ 断言红，但方向反了：会误报"表留尸"）。
+    found.extend(scanned_passes(include_str!("../src/world_soft_ext.rs")));
     let declared: BTreeSet<String> = ROUNDS.iter().map(|s| (*s).to_string()).collect();
     let engine: BTreeSet<String> = ENGINE_PASSES.iter().map(|s| (*s).to_string()).collect();
     let coupling: BTreeSet<String> = found.difference(&engine).cloned().collect();

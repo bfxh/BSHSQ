@@ -12,7 +12,7 @@
 
 use std::time::Instant;
 
-use vxl_phys::{HeightField, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, HeightField, PhysConfig, Quat, Shape, Vec3, World};
 
 const WARMUP_TICKS: u32 = 10;
 const GATE_TICKS: u32 = 600;

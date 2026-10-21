@@ -16,7 +16,7 @@
 //! 运行：`cargo run --release -p vxl-phys --example m5_dam_break -- [ticks]`
 //! 门禁配方：`400`（见 `scripts/gate_gold.sh`）。
 // 新文件：`glob-gate` 对新增文件零基线 ⇒ 显式导入（不用 `use vxl_phys::*`）。
-use vxl_phys::World;
+use vxl_phys::{BodyBuildExt, FluidExt, World};
 use vxl_phys_core::{PhysConfig, Vec3};
 
 const GATE_TICKS: usize = 400;

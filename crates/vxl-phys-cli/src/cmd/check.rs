@@ -1,10 +1,10 @@
 //! `check` 子命令：同场景跑两遍、逐观测点比对哈希（CI 自检；纯搬移自 `lib.rs`）。
 
 use crate::scene::scene;
+use vxl_phys::DiagExt;
 use vxl_phys_replay::Recorder;
 
-/// 跑两遍同一场景，逐观测点比对 `state_hash`（`Recorder` 是公共 API 里最小的"观测点"容器）。
-/// 不一致 ⇒ `Err`（CLI 退出码 2 ⇒ 可直接当 CI 门用）。
+/// 跑两遍同一场景，逐观测点比对 `state_hash`（`Recorder` 是公共 API 里最小的"观测点"容器）。  不一致 ⇒ `Err`（CLI 退出码 2 ⇒ 可直接当 CI 门用）。
 pub(super) fn check(name: &str, ticks: usize, json: bool) -> Result<String, String> {
     let period = 60u64;
     let sample = |name: &str| -> Result<(Recorder, u128), String> {

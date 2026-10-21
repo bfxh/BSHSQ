@@ -16,7 +16,7 @@
 
 use std::cmp::Ordering;
 
-use vxl_phys::{Vec3, World};
+use vxl_phys::{DiagExt, Vec3, World};
 
 use crate::{gain_of, material_of, priority_of, SenseConfig, SenseStats};
 
@@ -64,7 +64,7 @@ pub(crate) fn reduce_slides(
     //    `slot`（体号 → 归约槽）是数组直查 ⇒ 无 HashMap（确定性第一层）。
     let mut slot: Vec<u32> = vec![u32::MAX; world.bodies.len()];
     let mut agg: Vec<Agg> = Vec::new();
-    for m in world.manifolds() {
+    for m in DiagExt::manifolds(world) {
         let (a, b) = (m.a as usize, m.b as usize);
         let Some(body) = slide_body(world, a, b) else {
             continue;

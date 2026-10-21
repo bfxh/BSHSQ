@@ -15,7 +15,7 @@
 //!
 //! 运行：`cargo run --release -p vxl-phys-gpu --example gpu_facade_probe -- [ticks] [--adapter K]`
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, FluidExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_fluid::{FluidConfig, FluidSystem};
 use vxl_phys_gpu::pipeline::{GpuFluidStepper, Packet, PacketCfg};
 

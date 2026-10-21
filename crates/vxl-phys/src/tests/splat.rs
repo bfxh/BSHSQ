@@ -2,7 +2,7 @@
 //!
 //! 2026-10-05 从 967 行的 `tests.rs` 按域拆出（纯搬移，只补显式 `use`）。
 
-use crate::{Aabb, PhysConfig, Quat, Shape, Vec3, World};
+use crate::{Aabb, BodyBuildExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// **M3 喷溅域**：盒落在一团高斯喷溅上并停住（隐式场 σ(p) = Σ 核；
 /// 接触走统一提供者通道 `contacts_box`）。

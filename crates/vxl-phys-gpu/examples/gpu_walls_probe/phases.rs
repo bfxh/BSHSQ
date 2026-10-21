@@ -7,7 +7,7 @@
 
 use super::diag::{band_profile, bottom_mean_y, chain_sim, chain_sim_full, Sim};
 use super::{flat, make_cfg, tank, water, SPACING};
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, FluidExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_core::interop::ProviderColliders;
 use vxl_phys_fluid::{FluidConfig, FluidSystem};
 use vxl_phys_gpu::pipeline::{GpuFluidStepper, Packet, PacketCfg};

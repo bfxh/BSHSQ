@@ -13,7 +13,7 @@
 //! S1 的两条契约照旧继承（**零干扰**：驱动器只吃 `&[Cue]`，结构上碰不到物理末态；**确定性**：
 //! 帧流逐字可对拍，且驱动量取 `max` ⇒ **与同 tick 的 cue 顺序无关**）。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_sense::{
     haptic_jsonl, Cue, HapticConfig, HapticDriver, HapticFrame, SenseConfig, SenseExt, SlideCue,
 };

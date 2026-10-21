@@ -9,7 +9,9 @@
 //!
 //! 用法：`cargo run --release -p vxl-phys-gpu --example gpu_band_probe`
 //! 无适配器 ⇒ 退出码 2（未判定，不是通过）。
-use vxl_phys::{ContactPoint, DefaultNarrowPhase, NarrowPhase, Quat, Shape, Vec3, World};
+use vxl_phys::{
+    BodyBuildExt, ContactPoint, DefaultNarrowPhase, NarrowPhase, Quat, Shape, Vec3, World,
+};
 use vxl_phys_core::interop::NoProviders;
 use vxl_phys_core::schedule::ScopedPool;
 use vxl_phys_gpu::narrow::{NarrowTier, Slot, BODY_WORDS, KIND_BOX, NOT_HANDLED};

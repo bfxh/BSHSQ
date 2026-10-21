@@ -9,7 +9,10 @@
 //! cargo run -q --release -p vxl-phys --example p19_mesh_shell_shapes_probe
 //! PROBE_V=61 cargo run -q --release -p vxl-phys --example p19_mesh_shell_shapes_probe
 //! ```
-use vxl_phys::{ccd_sweep_stats_take, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{
+    ccd_sweep_stats_take, BodyBuildExt, DiagExt, NarrowTierExt, PhysConfig, Quat, Shape, Vec3,
+    World,
+};
 
 const TICKS: u32 = 60;
 

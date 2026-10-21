@@ -15,7 +15,7 @@
 //!
 //! 放**集成测试**而非 `src/tests/mesh_carve.rs` 内联：后者受 god 门行数棘轮管，新文件只判阈值。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DestructionOpsExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 关重力，弹体从 `GAP` 处以 12 m/s 沿 +x 撞一块厚体素块；返回 `(首次触发 tick, 碎块总数)`。
 fn run(substeps: u32, threshold: f32) -> (usize, usize) {

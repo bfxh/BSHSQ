@@ -4,7 +4,7 @@
 //! 没有 GPU（既有口径：`cargo test --workspace --exclude vxl-phys-gpu`）。本层能钉住的是
 //! **接进来就不改数值**的那条契约：批处理的结果必须与逐个标量调用**逐位相同**。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, ImpactExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::{
     jsonl, AcousticConfig, AcousticGeometry, AcousticStats, AcousticsExt, Listener, Portal,
     SoundPath, BANDS,

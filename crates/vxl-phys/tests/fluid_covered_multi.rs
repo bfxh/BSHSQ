@@ -7,7 +7,7 @@
 //! 与"只有流体 0"**逐位一致**——2a 让位正确时，远处流体的存在不改变体的任何受力
 //! （它自己的 2a 循环因 AABB 不相交而空过，2b 反作用各流体独立）。
 //! **修前必红**（体多收 ≈ρVg 量级的 2a 浮力）：这条同时是 C4 缺陷的取证。
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 水槽：5×5 格地板 + 中心围堰 ⇒ 0.5 m 内腔（与 `fluid_boundary.rs` 门同款）。
 fn tank(w: &mut World) -> u32 {

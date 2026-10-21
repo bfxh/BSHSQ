@@ -15,7 +15,9 @@
 //! PROBE_SHAPE=cylinder PROBE_FIXED_PLATE=1 cargo run -q --release -p vxl-phys --example p19_body_side_probe
 //! PROBE_V=9 PROBE_SCAN=1 PROBE_FIXED_PLATE=1 cargo run -q --release -p vxl-phys --example p19_body_side_probe
 //! ```
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{
+    BodyBuildExt, DiagExt, MeshExt, NarrowTierExt, PhysConfig, Quat, Shape, Vec3, World,
+};
 
 /// 撞击体的"沿 +X 尺寸"基线（盒半长 = 球半径 = 圆柱/锥半径；胶囊的轴是 +Y ⇒ 只有半径）。
 const HALF: f32 = 0.5;

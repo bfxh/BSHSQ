@@ -18,7 +18,7 @@
 //! （`+0.057`）、**720 起完全入睡**（`v_y` 精确 `0`，且 720 与 1200 的 `y` 逐位相同）
 //! ⇒ 取 720 才钉的是"浮到平衡"，而不是"某一瞬间的相位"。见 `scripts/gate_gold.sh`。
 // 新文件：`glob-gate` 对新增文件零基线 ⇒ 显式导入（不用 `use vxl_phys::*`）。
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, FluidExt, PhysConfig, Quat, Shape, Vec3, World};
 
 const GATE_TICKS: usize = 720;
 

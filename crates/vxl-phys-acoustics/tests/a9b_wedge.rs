@@ -7,7 +7,7 @@
 //! （`Ω = 0` 时与 `wedge: None` **逐位相同**、默认（不给频率）忽略楔角、`Ω = π` 把路径能量**清零**、
 //! 有界性、零干扰、确定性）。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, ImpactExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::utd::{WedgeFrame, WEDGE_FACTOR_MAX};
 use vxl_phys_acoustics::{
     jsonl, AcousticConfig, AcousticGeometry, AcousticsExt, Edge, Listener, PathKind, SoundPath,

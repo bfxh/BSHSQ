@@ -10,7 +10,7 @@
 //! `restitution = 1`、限速 1e9——仓内探针真在用）；③ 病态值整张回落到默认档；④ 收口后的
 //! "u32::MAX 档"能正常推进（旧实现在此**不返回**）。
 
-use vxl_phys::{PhysConfig, Preset, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, PhysConfig, Preset, Quat, Shape, Vec3, World};
 
 #[test]
 fn default_and_presets_pass_through_untouched() {

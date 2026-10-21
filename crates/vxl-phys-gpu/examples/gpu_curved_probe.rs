@@ -13,7 +13,7 @@
 //!
 //! 运行：`cargo run --release -p vxl-phys-gpu --example gpu_curved_probe`
 
-use vxl_phys::{PhysConfig, Vec3, World};
+use vxl_phys::{BodyBuildExt, PhysConfig, ProviderExt, Vec3, World};
 use vxl_phys_core::interop::{InteropContact, ProviderColliders};
 use vxl_phys_fluid::FluidSystem;
 use vxl_phys_terrain::mesh::TriMesh;

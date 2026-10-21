@@ -18,7 +18,7 @@
 //!
 //! **边界**：只钉上述合同性质，不声称完整气动建模（风场空间变化等仍是线化档的登记边界）。
 // 新文件：`glob-gate` 对新增文件零基线 ⇒ 显式导入（不用 `use vxl_phys::*`）。
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{AeroExt, BodyBuildExt, MeshExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_aero::AeroConfig;
 
 /// ⊥ 板（板在 y=0 平面），|风| = 5。

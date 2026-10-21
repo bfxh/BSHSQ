@@ -14,7 +14,7 @@
 //! 必然穿的对齐相位，反面的"被相位接住"写在头注里），②③ 是 F-15 修好的（限速到预算覆盖
 //! 得了的速度；目标集含运动体 + 相对运动判据），④ 静态墙对照。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 薄墙（0.1 m 厚）+ 远端的球（z = −40）。`wall_moves` ⇒ 墙是**动态体**并以 50 m/s 迎面开来。
 fn scene(speed: f32, ccd: bool, max_vel: f32, wall_moves: bool) -> (World, usize, usize) {

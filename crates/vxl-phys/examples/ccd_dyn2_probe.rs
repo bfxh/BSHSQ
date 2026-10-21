@@ -15,7 +15,9 @@
 //!
 //! 跑法：`cargo run --release -q -p vxl-phys --example ccd_dyn2_probe`
 
-use vxl_phys::{ccd_sweep_stats_take, KinematicExt, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{
+    ccd_sweep_stats_take, BodyBuildExt, KinematicExt, PhysConfig, Quat, Shape, Vec3, World,
+};
 
 /// 旋翼半尺寸（薄板：0.6 × 0.4 × 0.02）。
 const BLADE: Vec3 = Vec3::new(0.6, 0.4, 0.02);

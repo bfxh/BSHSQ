@@ -24,7 +24,7 @@
 //!
 //! 运行：`cargo run --release -p vxl-phys --example a1_acoustic_gold -- [ticks]`
 //! 门禁配方：`40`（见 `scripts/gate_gold.sh`）。
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, ImpactExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::{
     jsonl, AcousticConfig, AcousticGeometry, AcousticsExt, Listener, PathKind, SoundPath, BANDS,
 };

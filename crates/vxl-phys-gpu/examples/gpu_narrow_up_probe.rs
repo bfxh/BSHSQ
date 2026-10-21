@@ -10,7 +10,7 @@
 
 use std::time::Instant;
 
-use vxl_phys::{BroadPhase, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, BroadPhase, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_core::narrow_tier::{flat_pairs, pack_bodies, BODY_WORDS, SLOT_BYTES, SLOT_WORDS};
 use vxl_phys_gpu::narrow::{prof, prof_snapshot, NarrowTier, Slot};
 

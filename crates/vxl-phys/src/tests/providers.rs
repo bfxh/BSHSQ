@@ -3,7 +3,7 @@
 //! 2026-10-05 从 967 行的 `tests.rs` 按域拆出（纯搬移，只补显式 `use`）。
 
 use super::{cube_hull_points, ground_world};
-use crate::{PhysConfig, Quat, Shape, Vec3, World};
+use crate::{BodyBuildExt, FluidExt, HullExt, PhysConfig, Quat, Shape, Vec3, World};
 
 #[test]
 fn box_falls_and_rests_on_heightfield() {

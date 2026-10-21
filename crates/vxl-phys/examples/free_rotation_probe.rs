@@ -10,7 +10,7 @@
 //! cargo run -q --release -p vxl-phys --example free_rotation_probe
 //! PROBE_TICKS=12000 cargo run -q --release -p vxl-phys --example free_rotation_probe
 //! ```
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_core::Mat3;
 
 fn ticks() -> usize {

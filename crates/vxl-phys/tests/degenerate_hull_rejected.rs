@@ -12,7 +12,7 @@
 //! 四条：① 单点/共线 ⇒ 入口 panic；② 平板（一条零边）⇒ **放行**（仓内既有用例）；
 //! ③ 立方体 ⇒ 放行；④ 空 / 只含嵌套复合体 ⇒ 入口 panic。
 
-use vxl_phys::{CompoundChild, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{CompoundChild, HullExt, PhysConfig, Quat, Shape, Vec3, World};
 
 fn world() -> World {
     World::new(PhysConfig::default())

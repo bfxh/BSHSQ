@@ -8,7 +8,7 @@
 //!    不穿透、速度收敛、水平不漂；
 //! ② **关档金丝雀**：`dynamics = None` ⇒ 核**逐位不动**（默认档不被改动）；
 //! ③ **确定性**：开档场景两跑逐位一致。
-use crate::{PhysConfig, Vec3, World};
+use crate::{BodyBuildExt, PhysConfig, Vec3, World};
 use vxl_phys_splat::dynamics::SplatDynamics;
 use vxl_phys_splat::{GaussianSplatField, Splat};
 

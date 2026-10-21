@@ -11,7 +11,7 @@
 //! - ② 高速盒撞上去后，睡体**必须醒来**（`awake == true`）且**被推动**（位置变化）；
 //! - ③ 醒来发生在**接触后若干 tick 内**（不是"最后勉强醒了"）。
 
-use vxl_phys::{HeightField, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, HeightField, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 静置盒（体 0）跑到入睡；返回 `(world, 睡体的体号, 撞击体的体号, 睡体初始 x)`。
 fn scene(wake_gate_k: u32, iters: u32, settled_hold: u32) -> (World, usize, usize, f32) {

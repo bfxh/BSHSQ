@@ -281,7 +281,7 @@ pub(crate) fn fill_health(rep: &mut HealthReport, world: &World) {
 mod tests {
     // 显式导入（同文件顶部的理由：glob 门棘轮）。
     use super::{add_force, dropped_force_writes, fluid_reaction_ledger, is_receptor, ledger_of};
-    use crate::{Integrator, PhysConfig, Quat, Shape, Vec3, World};
+    use crate::{BodyBuildExt, Integrator, PhysConfig, Quat, Shape, Vec3, World};
     use vxl_phys_core::mass::mass_props;
     use vxl_phys_core::BodySet;
 

@@ -20,7 +20,7 @@ use vxl_phys_core::{Aabb, Quat, Shape, Vec3};
 use vxl_phys_destruction::impact_tiers::budget_cap;
 use vxl_phys_destruction::FragmentBudget;
 
-use crate::VoxelConversionExt;
+use crate::{ProviderExt, VoxelConversionExt};
 
 /// **公开路径的默认预算**（`World::fracture_voronoi` 用它）：破坏管线的默认档 `B1K`。
 pub(crate) const DEFAULT_BUDGET: FragmentBudget = FragmentBudget::B1K;

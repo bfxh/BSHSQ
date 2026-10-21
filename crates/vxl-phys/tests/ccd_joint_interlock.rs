@@ -14,7 +14,7 @@
 //! ✅ **2026-10-13 已修**（`joints/project.rs`：CCD 之后按关节连通分量做**位置级投影**）：
 //! 上表"开档"那行现在是 **`sep_p99 = 0.00986`、`>5cm = 0.000%`**（与关档同一量级）。
 //! 本文件因此从"缺陷快照"变成**回归判据**：两档都必须过 R6 门。
-use vxl_phys::{Joint, JointKind, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, Joint, JointKind, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_core::Mat3;
 
 /// 10 节球铰链（照抄 `bench/realism-probe` 的 R6 场景，`ccd` 是显式阈值）。

@@ -29,7 +29,7 @@
 //! ⑥ 的球/胶囊要求那块板**显式标 `MeshSemantics::Shell`**（单页薄壳无内外；默认 `Solid` = 实体口径，
 //! 是 `rest_height_contract` 要的那一支）—— 不标仍会直穿，那是**用法**（薄壳得说出来），不是缺口。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, MeshExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 动态盒半长（1 m 立方；最小半长 0.5 ⇒ 段长上限 0.25 ⇒ 旧停位精度就是 0.25）。
 const HALF: f32 = 0.5;

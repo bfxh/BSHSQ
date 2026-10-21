@@ -5,7 +5,7 @@
 //! ⑤ 认出来的棱直接能驱动 A4 绕射（与独立参照的**暴力扫棱**一致）。
 
 use std::collections::BTreeSet;
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, ImpactExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::{
     AcousticConfig, AcousticGeometry, AcousticStats, AcousticsExt, Edge, EdgeDetect, Listener,
     PathKind, SoundPath,

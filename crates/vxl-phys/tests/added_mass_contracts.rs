@@ -7,7 +7,7 @@
 //! 场景 = **"冻结蜂蜜"**（同 `viscous_medium_contracts.rs`：流体自身零重力 + 数值黏度全 0
 //! ⇒ 粒子基本不动、采样静态精确）⇒ 体的加速度就是**解析值**：
 //! `a = (m − ρ_med·V)·g / (m + m_a)`。
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, PhysConfig, Quat, Shape, Vec3, World};
 
 const R: f32 = 0.05;
 /// 体密度 1146 ⇒ `m ≈ 0.600 kg`；介质 ρ0 = 1000 ⇒ `ρV ≈ 0.5236`（净重 `0.076 kg` 量级）。

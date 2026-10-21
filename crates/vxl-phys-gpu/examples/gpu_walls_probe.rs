@@ -16,7 +16,7 @@
 //!
 //! 运行：`cargo run --release -p vxl-phys-gpu --example gpu_walls_probe -- [--adapter K]`
 
-use vxl_phys::{PhysConfig, Vec3, World};
+use vxl_phys::{BodyBuildExt, PhysConfig, ProviderExt, Vec3, World};
 use vxl_phys_fluid::{FluidConfig, FluidSystem};
 use vxl_phys_gpu::pipeline::{Packet, PacketCfg, WallSide, WallStage};
 

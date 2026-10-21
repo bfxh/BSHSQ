@@ -16,7 +16,7 @@
 //! ⚠️ 场景**铸装**（`PLAN-0.3.md` §4.2）：水块按沉降后几何直接就位 `[8,8,8]@0.05`
 //! 对 0.5 m 盆腔，**任何"带落差入盆"的水块**都会触发顶心喷泉并把断言变成在测失控粒子。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, FluidExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 水槽：5×5 格（外沿 2.5 m）地板 + **中心一格**围堰 ⇒ 内腔 0.5×0.5 m。
 /// 与 `tests/fluid_coupling.rs`（2a 门）同款场景，便于对照。

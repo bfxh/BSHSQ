@@ -17,7 +17,7 @@
 //! ⚠️ 场景**铸装**（`PLAN-0.3.md` §4.2）：水块按沉降后几何直接就位，避免"带落差入盆"的顶心喷泉。
 //! ⚠️ 本文件不许出现 `unwrap` / `expect` / `.clone()`（新文件零基线）。
 
-use vxl_phys::{PhysConfig, Vec3, World};
+use vxl_phys::{BodyBuildExt, PhysConfig, SoftExt, Vec3, World};
 use vxl_phys_fluid::{FluidConfig, FluidSystem};
 use vxl_phys_soft::{ClothSheet, Stiffness};
 

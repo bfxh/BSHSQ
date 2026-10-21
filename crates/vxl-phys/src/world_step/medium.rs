@@ -12,8 +12,7 @@
 //! "收集→提交"同型。**关档不收集/不提交 ⇒ 与旧单向逐位一致**。
 //! （显式导入，不用 `use super::*`——glob-gate：新文件零通配。）
 use crate::props::cross_section_area;
-use crate::world_step::coupling;
-use crate::{Aabb, ProviderEntry, Providers, Vec3, World};
+use crate::{world_step::coupling, Aabb, ProviderEntry, Providers, Vec3, World};
 
 /// 段①阻力系数（与 `medium_pass` 段②同值；分开声明以免跨函数依赖）。
 const DRAG_CD: f32 = 1.0;
@@ -161,6 +160,7 @@ impl Providers {
 #[cfg(test)]
 mod tests {
     use super::{cross_section_area, splat_body_drag, Vec3, World, DRAG_CD};
+    use crate::BodyBuildExt;
     use vxl_phys_core::{PhysConfig, Quat, Shape};
 
     /// 单核场（原点、σ=0.5）+ 一枚动态盒（`(0, 0.2, 0)`）：`p` 处 ∇σ 精确 ∥ −y（轴上）。

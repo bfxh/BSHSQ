@@ -17,7 +17,7 @@
 //! 新文件只判阈值——这是仓内加测试的既定通道（`tests/debris_mass.rs` 头注同款说明）。
 
 use vxl_phys::core::Quat;
-use vxl_phys::{DestructionExt, PhysConfig, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DestructionExt, DiagExt, PhysConfig, Shape, Vec3, World};
 use vxl_phys_destruction::impact_tiers::TierCurve;
 use vxl_phys_destruction::{DestructionConfig, FractureDepth, FragmentBudget};
 

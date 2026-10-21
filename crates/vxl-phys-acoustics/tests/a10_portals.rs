@@ -8,7 +8,7 @@
 //!
 //! 外加：`neck_cells = 0` 时永不分裂（整个连通空域并成一房）。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, ImpactExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::{
     AcousticConfig, AcousticGeometry, AcousticStats, AcousticsExt, Listener, Portal, PortalDetect,
     VoxelOccupancy,

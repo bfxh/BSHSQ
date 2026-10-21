@@ -4,7 +4,7 @@
 //! 库仑是"上限 `μ·pn`"（与法向压力相关、与速度无关 ⇒ 速度**线性**衰减）；
 //! 油膜是"与切向相对速度成正比"（`F_t = −k·v_t`、**与压力无关** ⇒ 速度**指数**衰减）。
 //! 两条判据的形状差异（指数 vs 线性）就是本档的**指纹**：同一个体、同一条滑道，只换旋钮。
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 滑道：静态地板（顶面 y = 0）+ 一个 1×1×1 m 的滑块（密度 1000 ⇒ m = 1000 kg）躺在地上。
 /// 返回 `(World, 滑块号)`；滑块初速 = `+x`。

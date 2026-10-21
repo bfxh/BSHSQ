@@ -21,6 +21,7 @@
 //! 运行：`cargo run --release -p vxl-phys --example m4_cantilever -- [ticks]`
 //! 门禁配方：`600`（见 `scripts/gate_gold.sh`）。
 // 新文件：`glob-gate` 对新增文件零基线 ⇒ 显式导入（不用 `use vxl_phys::*`）。
+use vxl_phys::SoftExt;
 use vxl_phys::World;
 use vxl_phys_core::{PhysConfig, Vec3};
 use vxl_phys_soft::{ClothSheet, Stiffness};

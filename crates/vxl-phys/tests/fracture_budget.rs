@@ -8,7 +8,7 @@
 //! 返回值如实给本次生成数。判据四条：① 超量输入下**顶满**预算（非空洞）；② 生成体数 ==
 //! 返回值；③ 截断后换一组种子**还能**提取（几何没丢、可分片）；④ 空种子集不造体。
 
-use vxl_phys::{PhysConfig, Vec3, World};
+use vxl_phys::{BodyBuildExt, DestructionOpsExt, PhysConfig, Vec3, World};
 
 /// 32³ 格的实心体素块（域 = 8 m 立方、格 0.25 m）——**足够大**，让 1024 个种子也远超预算。
 fn solid_volume() -> vxl_phys_terrain::voxel::VoxelVolume {

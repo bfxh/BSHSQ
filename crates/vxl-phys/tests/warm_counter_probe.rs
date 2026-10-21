@@ -1,12 +1,12 @@
 //! 判别探针：引擎路径（`World::step`）上暖启动计数到底动不动？
-//!
 //! 背景：`crates/vxl-phys/tests/compound_warm.rs` 在复合体场景里读到三个分支全 0，
 //! 曾归因为"只有串行构建器计数"；但 `build_constraint` 只有一个调用点（并行驱动内）
 //! ⇒ 该归因被推翻。本文件用**单盒**（非复合体、非睡眠）作对照：若单盒也全 0，
 //! 则缺口是**普遍**的（引擎路径无读数）；若单盒有读数，则问题**只在复合体**那条路。
 
 use vxl_phys::{
-    warm_match_stats_take, FrictionModel, Material, PhysConfig, Quat, Shape, Vec3, World,
+    warm_match_stats_take, BodyBuildExt, DiagExt, FrictionModel, HullExt, Material, PhysConfig,
+    Quat, Shape, Vec3, World,
 };
 
 fn run_case(compound: bool) -> (u64, u64, u64, usize, usize) {

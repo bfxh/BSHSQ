@@ -10,7 +10,7 @@
 //! **与默认路径并存**：`World::apply_impact_destruction`（定半径球弹坑）**一字未动**；本文件是
 //! **opt-in 的另一条**，所以默认档逐位不变（四哈希门都不走这条路径）。
 
-use crate::{Quat, Shape, Vec3, VoxelConversionExt, World};
+use crate::{ProviderExt, Quat, Shape, Vec3, VoxelConversionExt, World};
 
 use vxl_phys_destruction::impact_tiers::{
     budget_cap, depth_rounds, impulse_level, sites_within_budget, TierCurve, REF_IMPULSE,

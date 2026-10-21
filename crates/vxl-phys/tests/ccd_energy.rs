@@ -12,7 +12,7 @@
 //! | ② 斜撞 45° | **切线动能必须原样留着**（KE 10.0e6 → **5.0e6** = 只剩切向，不许当正撞吃干净） |
 //! | ③ 记录档：自旋细杆顶墙 | P18 的已知缺口（转动冲量缺席 ⇒ KE 853.7 → 932.5，**×1.092**，只判上界） |
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 动能（平动 + 转动）。
 fn ke(w: &World, i: usize) -> f32 {

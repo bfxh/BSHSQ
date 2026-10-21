@@ -1,6 +1,6 @@
 //! 场景件（本探针自己的水箱 / 水块 / 姿态）—— 从 `float_quiet_probe.rs` 拆出（god 门 800 行硬线）。
 
-use vxl_phys::{Quat, Vec3, World};
+use vxl_phys::{BodyBuildExt, Quat, Vec3, World};
 
 pub(crate) fn tank(w: &mut World) -> u32 {
     let mut vol =

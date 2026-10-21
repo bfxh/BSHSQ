@@ -19,7 +19,7 @@
 
 use std::time::Instant;
 
-use vxl_phys::{HeightField, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, HeightField, PhysConfig, Quat, Shape, Vec3, World};
 
 const SIDE: usize = 20;
 const LAYERS: usize = 25;

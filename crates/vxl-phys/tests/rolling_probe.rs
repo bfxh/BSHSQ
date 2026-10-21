@@ -1,6 +1,4 @@
-//! 滚动探针：**多面化圆柱的"打摆"到底有多大？**（先算账，再决定要不要上解析接触）。
-//!
-//! 机理：圆柱碰撞体是 16 边内接棱柱（`CYLINDER_SEGMENTS = 16`），相邻**侧面法线相差
+//! 滚动探针：**多面化圆柱的"打摆"到底有多大？**（先算账，再决定要不要上解析接触）。 机理：圆柱碰撞体是 16 边内接棱柱（`CYLINDER_SEGMENTS = 16`），相邻**侧面法线相差
 //! 360°/16 = 22.5°、相对竖直的最大偏角 11.25°** ⇒ 滚动时接触法线在面与面之间跳变，
 //! 中心高度跟着起伏 `r·(1 − cos 11.25°)`。同半径**球**（解析支撑）作为对照基线。
 //!
@@ -8,7 +6,9 @@
 //! - `法线偏角max`：圆柱应 ≈11°、球应 ≈0°；
 //! - `y 起伏`：圆柱应 ≈7.7 mm（r=0.4）、球应 ≈0。
 
-use vxl_phys::{FrictionModel, Material, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{
+    BodyBuildExt, DiagExt, FrictionModel, Material, PhysConfig, Quat, Shape, Vec3, World,
+};
 
 /// 让 `shape` 在盒地板上以"纯滚动"初条件前进，返回 (法线相对竖直的最大偏角, y 起伏)。
 fn roll(shape: Shape, radius: f32) -> (f32, f32) {

@@ -21,7 +21,7 @@
 //! 消融、判别矩阵与修法候选见 `docs/EXPERIMENTS.md`「静置叠体」节。
 //! 跑法：`... --example m0_flip_forensics min [偏航度] [iters] [substeps] [stab] [hold] [maxcorr] [ticks]`
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 唤醒判据的两个倍数：硬编码自 `vxl-phys-solver/src/cfg.rs`（`SUBISLAND_WAKE_MULT` /
 /// `WAKE_GATE_FAST_MULT`，都是 `pub(crate)`，外部取不到）。

@@ -6,6 +6,7 @@
 //! ⚠️ 改这里的任何字面量 = 改判据的输入（容差按场景尺度放宽、覆盖面自检按族计数）。
 
 use super::*;
+use vxl_phys::{BodyBuildExt, HullExt};
 
 /// 场景里的**边角对**（给覆盖面断言用；索引即体号）。
 pub(super) struct Edge {
@@ -47,8 +48,7 @@ pub(super) fn floor_of(w: &mut World, side: usize) {
     }
 }
 
-/// 三层咬合球阵：间距 0.75 < 半径和 0.8 ⇒ 正交邻居**重叠**、对角邻居**分离**
-/// ⇒ 同一批对里既有接触也有"接手但无接触"（两条臂都跑得到）。返回**首颗球的体号**。
+/// 三层咬合球阵：间距 0.75 < 半径和 0.8 ⇒ 正交邻居**重叠**、对角邻居**分离** ⇒ 同一批对里既有接触也有"接手但无接触"（两条臂都跑得到）。返回**首颗球的体号**。
 pub(super) fn balls_of(w: &mut World, side: usize, layers: usize) -> u32 {
     let first = w.bodies.len() as u32;
     for ly in 0..layers {

@@ -20,7 +20,7 @@
 //! 对应修复：`crates/vxl-phys/src/world_body.rs` 的三处 `spawn_box_debris_vel` /
 //! `carve_sphere` / `fracture_voronoi` 反解密度（`d = (1e-3 / V).max(density).max(1e-3)`）。
 
-use vxl_phys::{PhysConfig, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DestructionOpsExt, PhysConfig, Shape, Vec3, World};
 
 /// 建「恰好 ext × hgt × ext」的体素柱 → 全部提取为碎块 → 逐碎块核对
 /// `质量 == density × 体积`（碎块都是盒 ⇒ `V = 8·hx·hy·hz`）。

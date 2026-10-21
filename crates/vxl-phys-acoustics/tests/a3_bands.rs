@@ -4,7 +4,7 @@
 //! 三条硬指标：① **退化档**（三带同参）与单频带口径**逐位相同**；② **高频更闷** —— 逐带严格
 //! 单调，且与解析式对拍；③ 确定性 + 零干扰（`jsonl` 也含 `bands`）。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, ImpactExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::{
     jsonl, AcousticConfig, AcousticGeometry, AcousticMedium, AcousticStats, AcousticsExt,
     LayeredMedium, Listener, Medium, PathKind, SoundPath, BANDS,

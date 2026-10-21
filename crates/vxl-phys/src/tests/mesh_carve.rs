@@ -2,7 +2,7 @@
 //!
 //! 2026-10-05 从 967 行的 `tests.rs` 按域拆出（纯搬移，只补显式 `use`）。
 
-use crate::{PhysConfig, Quat, Shape, Vec3, World};
+use crate::{BodyBuildExt, DestructionOpsExt, DiagExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// **网格域（M3 扩展）**：盒落在三角网格地面上并停住（薄壳接触；
 /// 8 顶点 + 6 面心采样 ⇒ 底四角多点接触）。

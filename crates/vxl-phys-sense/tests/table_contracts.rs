@@ -16,7 +16,7 @@
 //! **计数棘轮**（新文件新增即红，存量在 `scripts/*.baseline.json`）。所以"理应成功"一律用 `?`
 //! 传播（测试函数返回 `Result`），失败信息由 `Debug` 给出。
 
-use vxl_phys::{core::MaterialId, Material, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{core::MaterialId, BodyBuildExt, Material, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_sense::{
     jsonl, jsonl_banked, map_banks, slide_jsonl_banked, write_jsonl_banked, BankId, Cue,
     MaterialSlot, SenseConfig, SenseExt, SlideCue, SoundTable, TableError,

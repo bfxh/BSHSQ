@@ -12,7 +12,7 @@
 //! ③ 关档（不 `set_aero`）⇒ 默认档逐位不变由 `determinism`/金样门守（本文件不重复跑）。
 //!
 //! ⚠️ 本文件不许出现 `unwrap` / `expect` / `panic!` / `.clone()`（新文件零基线）。
-use vxl_phys::{PhysConfig, Vec3, World};
+use vxl_phys::{AeroExt, BodyBuildExt, FluidExt, PhysConfig, Vec3, World};
 use vxl_phys_aero::AeroConfig;
 use vxl_phys_fluid::{FluidConfig, FluidSystem};
 

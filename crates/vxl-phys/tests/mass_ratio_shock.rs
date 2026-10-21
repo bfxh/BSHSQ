@@ -8,7 +8,7 @@
 //! ① r = 30 必须**站住**（位置误差 < 0.08 m，末态无深穿透）；
 //! ② 均匀场景（质量比 1）**逐位不变**——这是"零换代"的可执行形式：把质量比门关掉
 //!    （`mass_ratio_shock_min` 抬到无穷）时本测试的第二条会红，说明它确实在守东西。
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 两盒叠放：下盒 1000 kg，上盒 1000·r kg，跑 `ticks`。返回（末态位置误差, 最大深度）。
 fn stack(r: f32, ticks: usize) -> (f32, f32) {

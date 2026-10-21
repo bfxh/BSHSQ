@@ -5,7 +5,7 @@
 //! ② 散射增益与闭式口径对拍、且对系数**线性**；③ **Lambertian**（同距离下绕离法向就变弱）；
 //! ④ 腿被挡就没有；⑤ 逐带、预算、确定性。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, ImpactExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::{
     jsonl, AcousticConfig, AcousticGeometry, AcousticMedium, AcousticStats, AcousticsExt, Listener,
     PathKind, SoundPath, BANDS,

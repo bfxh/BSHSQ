@@ -7,7 +7,7 @@
 //! 桥的原生 example → 引擎级重现（本文件）→ 根因＝窄相相交支的 EPA + 支撑平面（`EXPERIMENTS.md`
 //! R/R.1/R.2）。修复后本测试转为常开回归门。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 回归门（2026-09-20 解除 ignore）：曾因"静止期向下漂移 ⇒ 穿地"被标 ignore。根因在
 /// **相交支**——EPA 对光滑支撑不适定 + 对方取**支撑平面**（大盒配微倾法线给出数十米偏移），

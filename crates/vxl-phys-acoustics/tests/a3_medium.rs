@@ -6,7 +6,7 @@
 //!
 //! 场景：地板（只有声学几何、没有碰撞体）+ 一发冲击当声源；介质按 `y` 分层。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, ImpactExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::{
     jsonl, AcousticConfig, AcousticGeometry, AcousticMedium, AcousticStats, AcousticsExt,
     LayeredMedium, Listener, Medium, PathKind, SoundPath, BANDS,

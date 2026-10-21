@@ -14,7 +14,7 @@
 //! 直接就位——`[8,8,8]@0.05` 对 0.5 m 盆腔（与门禁/`showcase` 同款量级）。任何"带落差入盆"
 //! 都会触发 WCSPH 驻留瞬态"顶心喷泉"，把水抛出去，演示与断言都会失效。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, FluidExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 四盒密度（< 1000 应浮、> 1000 应沉）。
 const DENSITIES: [f32; 4] = [300.0f32, 700.0, 1200.0, 2000.0];

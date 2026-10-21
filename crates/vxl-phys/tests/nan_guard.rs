@@ -12,7 +12,7 @@
 //! 四条：① 一具脏体不污染邻居；② `inv_mass` 不变（不是隐形墙）、`nan_bodies` 归零；
 //! ③ 给回有限速度 ⇒ 该体照常参与（不是永久隔离）；④ 位置/姿态脏同样被有限化。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 5 箱（每箱 0.25 m、间距 0.5 m，互不接触——污染只能经由世界状态传播）。
 fn stack() -> (World, Vec<usize>) {

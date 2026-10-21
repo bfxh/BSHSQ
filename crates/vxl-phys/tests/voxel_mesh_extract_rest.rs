@@ -6,7 +6,7 @@
 //! 两路口径不同（体素 `depth = skin − sdf` vs 网格薄壳 `depth = skin − dist`），
 //! 差值阈值 = 首测值 + 余量（先量后写，PLAN I3；首测读数见断言注释）。
 
-use vxl_phys::World;
+use vxl_phys::{BodyBuildExt, ProviderExt, World};
 use vxl_phys_core::{PhysConfig, Quat, Shape, Vec3};
 use vxl_phys_terrain::mesh::TriMesh;
 use vxl_phys_terrain::voxel::{surface_mesh, VoxelVolume};

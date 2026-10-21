@@ -2,7 +2,7 @@
 //! 把软体域的布片推进接进 `step()` 管线。深判据在软体侧 `cloth_minimal.rs`；
 //! 这里只钉**接线**：不注册布片 ⇒ 逐位不变（默认档）；注册 ⇒ 与软体侧单跑同结果（确定性）。
 
-use vxl_phys::*;
+use vxl_phys::{SoftExt, *};
 use vxl_phys_core::{PhysConfig, Vec3};
 use vxl_phys_soft::{ClothSheet, Stiffness};
 

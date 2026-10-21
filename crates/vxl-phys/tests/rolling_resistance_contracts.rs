@@ -12,7 +12,7 @@
 //! 口径来源：R1/R2/R3 的解析式由"球纯滚动 + 阻力矩 `μ_r·N`"推出（见各判据头注）；
 //! 实现见 `vxl-phys-solver/src/island.rs::solve_rolling`（与 Rapier 的 twist 行同构，轴取滚动方向）。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// θ 度的坡（绕 z 转；+x 为下坡方向）+ 坡上半径 `r` 的球；`roll` 是滚动阻力系数（米）。
 fn slope_scene(theta_deg: f32, r: f32, roll: f32) -> (World, usize) {

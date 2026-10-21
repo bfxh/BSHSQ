@@ -13,7 +13,7 @@
 //!
 //! 运行：`cargo run --release -p vxl-phys-gpu --example gpu_broad_probe [--adapter K]`
 
-use vxl_phys::{BroadPhase, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, BroadPhase, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_broad::{shape_aabb, GridBroadPhase};
 use vxl_phys_gpu::broad::broad_on_adapter;
 

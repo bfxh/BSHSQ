@@ -13,7 +13,7 @@
 
 use std::time::Instant;
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 建碎片雨：`clusters` 簇 × 3 体；簇间无接触，簇内也留 ≥2m 空隙。
 fn build(clusters: usize, threads: usize) -> World {

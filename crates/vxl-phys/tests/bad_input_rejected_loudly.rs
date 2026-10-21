@@ -8,7 +8,7 @@
 //! 本轮覆盖两条已复现项：
 //! - **F-05** `provider_id_of`：签名承诺 `Option`，旧实现直接索引 ⇒ 越界 panic。现在返回 `None`。
 //! - **F-03** `add_joint`：端点体号越界旧实现要到下一次 `step()` 才 panic。现在在入口断言。
-use vxl_phys::{Joint, JointKind, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, Joint, JointKind, PhysConfig, Quat, Shape, Vec3, World};
 
 fn world_with_two_bodies() -> World {
     let mut w = World::new(PhysConfig::default());

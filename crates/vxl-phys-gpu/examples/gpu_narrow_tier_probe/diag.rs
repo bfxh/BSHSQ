@@ -1,6 +1,4 @@
-//! 窄相卡上档验收的**判据与取证**（主文件 `main.rs` 只留编排与打印；本文件由 `mod diag;` 收进来
-//! ⇒ 条目对父模块可见即可）。
-//!
+//! 窄相卡上档验收的**判据与取证**（主文件 `main.rs` 只留编排与打印；本文件由 `mod diag;` 收进来 ⇒ 条目对父模块可见即可）。
 //! 内容三块：
 //! - **判据**：`t1_report`（结构 / 特征多重集 / 几何 / 位姿差的读数）、`geom_ok`（点集双射 + 法线容差）。
 //! - **量具自检**：`selftest`（复算表 vs 引擎单对 vs 卡上隔离，三方同轴才准拿表判案）。
@@ -11,7 +9,9 @@
 //! 排序/去重/截断是离散选择，ulp 差会翻它）⇒ 结构 + 特征多重集逐位 + 点集双射 + 法线容差；
 //! 点次序与同位次 ulp 噪声**只报不判**。
 
-use vxl_phys::{Manifold, NarrowPhase, Quat, Shape, Vec3, World};
+use vxl_phys::{
+    BodyBuildExt, DiagExt, Manifold, NarrowPhase, NarrowTierExt, Quat, Shape, Vec3, World,
+};
 use vxl_phys_gpu::narrow::NarrowTier;
 
 use super::{cfg, scene, scene_m1};

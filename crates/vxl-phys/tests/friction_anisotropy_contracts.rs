@@ -14,7 +14,7 @@
 //! ⚠️ 场景用 `substeps = 1`：本文件每次 `step()` 施加一个**整 tick 的力**（力累加器每子步清零，
 //! 多子步下"每 tick 施一次力"只有首子步受力、读数不再是解析式）。
 
-use vxl_phys::{FrictionModel, Material, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, FrictionModel, Material, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 各向异性地表（静止大板，顶面 `y = 0`）+ 其上的 1 m 盒；返回 `(世界, 盒, 板)`。
 /// `mu` 是盒自己的各向同性摩擦（组合律 `√(μ_axis·μ_box)` 的可控那一项）。

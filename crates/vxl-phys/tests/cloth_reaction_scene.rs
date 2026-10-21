@@ -11,7 +11,7 @@
 //! （`cloth_scene.rs` 76 → 138 行 + 最长函数 45 → 52 会双双红）⇒ 按本仓"一片一文件"的惯例
 //! （`cloth_{minimal,contact,body,bending,reaction,self_collision}.rs`）另立一个。
 
-use vxl_phys::*;
+use vxl_phys::{SoftExt, *};
 use vxl_phys_core::{PhysConfig, Vec3};
 use vxl_phys_soft::{ClothSheet, Stiffness};
 

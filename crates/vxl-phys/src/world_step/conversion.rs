@@ -45,7 +45,7 @@
 //!
 //! 显式导入（不用 `use super::*`）——glob-gate：新文件零通配。
 use crate::types::{ConversionError, ConversionReject, ConversionReport, EffectKey};
-use crate::{Aabb, Providers, Vec3, World};
+use crate::{Aabb, BodyBuildExt, ProviderExt, Providers, Vec3, World};
 use vxl_phys_core::interop::{InteropContact, ProviderColliders};
 use vxl_phys_terrain::mesh::TriMesh;
 use vxl_phys_terrain::voxel::surface_mesh;
@@ -372,7 +372,7 @@ mod tests {
         recon_passed, ReconSummary, VoxelConversionExt, RECON_DEPTH_TOL, RECON_NORMAL_TOL,
         RECON_POINTS_TOL,
     };
-    use crate::{PhysConfig, Quat, Shape, Vec3, World};
+    use crate::{BodyBuildExt, PhysConfig, Quat, Shape, Vec3, World};
     use vxl_phys_terrain::mesh::TriMesh;
     use vxl_phys_terrain::voxel::{surface_mesh, VoxelVolume};
 

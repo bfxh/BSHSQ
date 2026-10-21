@@ -13,7 +13,7 @@
 //! 判据：① 自由衰减 **λ = 6πμr/m**；② **μ = 0 对照**是**二次**阻力（率 ∝ |v|）—— 同一个体
 //! 两个速度窗的率之比 ~3.5×，而 Stokes 档两窗**一致**；③ **静止体金丝雀**（`v ≡ 0` ⇒ 不动）；
 //! ④ 只耗散（动能单调不增）；⑤ 转动阻力矩 ⇒ 自旋按 τ_rot = m/(20πμr) 收、μ = 0 无力矩。
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, PhysConfig, Quat, Shape, Vec3, World};
 
 const R: f32 = 0.05;
 /// 体**密度**（`add_dynamic` 的第 4 参是密度）：r = 0.05 ⇒ m ≈ 0.600 kg。

@@ -5,7 +5,7 @@
 //! 与**非复合体**完全一样（`spaces=[1,0,1,0] features=[65536,0,65536,0]`）。机制确定、可达性低
 //! （要 65536 个子形状），故按 S1 口径**在注册入口拒绝**：`u16::MAX` 放行、`u16::MAX + 1` 断言。
 
-use vxl_phys::{CompoundChild, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{CompoundChild, HullExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 一个最小的合法子形状（球，局部原点）。
 fn child() -> CompoundChild {

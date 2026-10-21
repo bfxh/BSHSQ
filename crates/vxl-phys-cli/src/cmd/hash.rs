@@ -1,6 +1,7 @@
 //! `hash` 子命令：末态 `state_hash`（人读 + `--json`；纯搬移自 `lib.rs`）。
 
 use crate::scene::run_scene;
+use vxl_phys::DiagExt;
 
 /// `hash`：末态 `state_hash`（人读带提示，`--json` 给机器）。
 pub(super) fn hash_cmd(name: &str, ticks: usize, json: bool) -> Result<String, String> {

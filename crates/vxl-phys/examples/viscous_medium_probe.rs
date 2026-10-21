@@ -14,7 +14,7 @@
 //! cargo run -q --release -p vxl-phys --example viscous_medium_probe
 //! VISC_MU=2.0 VISC_V0=0.5 VISC_TRACE=1 cargo run -q --release -p vxl-phys --example viscous_medium_probe
 //! ```
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, FluidExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 水槽（与 `tests/fluid_coupling.rs` 同款：5×5 格外沿、中心一格围堰 ⇒ 内腔 0.5 m）。
 fn tank(w: &mut World) -> u32 {

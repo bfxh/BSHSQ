@@ -4,7 +4,7 @@
 //! 的那条（Fermat）—— 与独立参照的"暴力扫界面点"对拍，且比直线积分更快；③ 均匀介质**不折**
 //! （避免与直达重复计能）。外加逐段遮挡与确定性。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, ImpactExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::{
     jsonl, AcousticConfig, AcousticGeometry, AcousticMedium, AcousticStats, AcousticsExt,
     LayeredMedium, Listener, Medium, PathKind, SoundPath, BANDS,

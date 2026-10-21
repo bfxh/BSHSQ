@@ -20,7 +20,7 @@
 //!
 //! 运行：`cargo run --release -p vxl-phys --example m7_splat_gold -- [ticks]`
 //! 门禁配方：`720`（见 `scripts/gate_gold.sh`）。
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_splat::{GaussianSplatField, Splat};
 
 /// 门禁配方。

@@ -7,7 +7,7 @@
 //! 场景：地板 + **z = 1 的实心墙**（门洞也照样用三角盖住），门洞上**叠一个声明的开口** ——
 //! 开口是作者给的拓扑，不是从碰撞体或几何空洞里猜的（§4 设计原则 ②）。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, ImpactExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::{
     jsonl, AcousticConfig, AcousticGeometry, AcousticStats, AcousticsExt, Listener, PathKind,
     Portal, SoundPath, BANDS,

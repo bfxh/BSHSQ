@@ -9,7 +9,7 @@
 //! —— 而不是悄悄改变一个公开开关的语义。
 //!
 //! 场景选「有接触、有堆叠、有姿态扰动」：确定性差异最容易在接触求解路径上显形。
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 同一构造跑 `ticks` tick，返回末态 xxh3-128 哈希。
 fn run(strict: bool, ticks: usize) -> u128 {

@@ -11,7 +11,7 @@
 //!
 //! 跑法：`cargo test --release -p vxl-phys --test fluid_reaction_torque -- --ignored --nocapture`
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, FluidExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 0.5 m 盆腔：底两层实体 + 一圈围堰（与 `float_quiet_probe::tank` 同形，独立复制以免耦合）。
 fn tank(w: &mut World) -> u32 {

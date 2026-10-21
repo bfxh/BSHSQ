@@ -34,7 +34,7 @@
 //! 2. **浅接触的接触点口径不一致**（本轮顺带量到，未修）：`(球, 凸壳)` 的**浅**接触走 EPA + 顶点带
 //!    （接触点取壳顶点），而**深**接触走最近面投影（接触点 = 球心投影）—— 同一对形状两套口径。
 //!    浅档当前的读数（`hull_on_cylinder_cap` 等）稳定，故只登记。
-use vxl_phys::World;
+use vxl_phys::{BodyBuildExt, HullExt, World};
 use vxl_phys_core::{PhysConfig, Quat, Shape, Vec3};
 use vxl_phys_terrain::voxel::VoxelVolume;
 

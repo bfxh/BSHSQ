@@ -13,7 +13,7 @@
 //! ① 贴面托住：`gap = mean_y − 盒顶 ∈ [0, 0.03]`；② 长窗零漂移：600 与 1800 tick 的 `mean_y`
 //! 差 ≤ 5e-3（mm/tick 级的漏会远超）；③ 动态盒稳定坐在地面（底 ≈ 0）。
 //! （显式导入，不用 `use vxl_phys::*`——glob-gate：新文件零通配。）
-use vxl_phys::{Quat, Shape, World};
+use vxl_phys::{BodyBuildExt, Quat, Shape, SoftExt, World};
 use vxl_phys_core::{PhysConfig, Vec3};
 use vxl_phys_soft::{ClothSheet, Stiffness};
 

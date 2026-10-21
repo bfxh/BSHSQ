@@ -14,7 +14,7 @@
 //! 三个"量一个场景"的取数件 → `protocol`；本文件留测试本体与 `report` / `run_protocol_block`
 //! —— `report` 有 8 个形参（超 args 门 soft=7）⇒ **不能**搬进新文件，否则新文件的 args 计数非 0。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, FluidExt, PhysConfig, Quat, Shape, Vec3, World};
 
 mod protocol;
 mod scene;

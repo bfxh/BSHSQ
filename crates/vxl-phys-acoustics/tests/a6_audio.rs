@@ -10,7 +10,7 @@
 //! 6. **真实场景端到端**：体素地面砸出的冲击 → 绕射/反射路径 → 渲染出**有声且有限**的波形；
 //!    同输入两跑**逐位相同**（含 WAV 字节），且渲染前后 `state_hash` 不变（渲染层只读）。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, ImpactExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::audio::{self, AudioConfig, Clip};
 use vxl_phys_acoustics::{
     AcousticConfig, AcousticGeometry, AcousticsExt, Edge, Listener, PathKind, SoundPath, BANDS,

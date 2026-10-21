@@ -13,7 +13,7 @@
 //! 粒子越出流体 AABB 预滤 ⇒ 自由落体到 y=−3.53）。**那不是边界失效，也不是本耦合的问题**，
 //! 但会让任何"水里有盒子"的断言失效 ⇒ 本门用铸装口径。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 水槽：5×5 格（外沿 2.5 m）地板（y∈[0,1]）+ **中心一格**围堰 ⇒ 内腔 0.5×0.5 m
 /// （与 `showcase` 石盆/门禁同款量级）；外圈地板留给"干区对照盒"。

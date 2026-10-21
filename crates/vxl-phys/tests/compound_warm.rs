@@ -20,8 +20,8 @@
 //! 详见 `TECH-SURVEY.md` A9 ④。
 
 use vxl_phys::{
-    warm_match_stats_take, CompoundChild, FrictionModel, Material, PhysConfig, Quat, Shape, Vec3,
-    World,
+    warm_match_stats_take, BodyBuildExt, CompoundChild, DiagExt, FrictionModel, HullExt, Material,
+    PhysConfig, Quat, Shape, Vec3, World,
 };
 
 /// 回归门（2026-09-20 解除 ignore）：暖启动键已带**显式特征空间**（`ContactPoints::space()`，

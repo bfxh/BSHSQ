@@ -6,7 +6,7 @@
 //! 判据：① 粒子数 = 扫描点数；② 每个粒子**逐值**落在对应扫描点上；③ 装进 `World` 推进后健康。
 //!
 //! ⚠️ 本文件不许出现 `unwrap` / `expect` / `.clone()`（新文件零基线）。
-use vxl_phys::{PhysConfig, Vec3, World};
+use vxl_phys::{BodyBuildExt, FluidExt, PhysConfig, Vec3, World};
 use vxl_phys_fluid::fluid_access::from_positions;
 use vxl_phys_fluid::FluidConfig;
 use vxl_phys_splat::{export_splats, GaussianSplatField, Splat};

@@ -21,7 +21,7 @@ mod diag;
 
 use diag::{axes_probe, selftest, t1_report};
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, NarrowTierExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_core::narrow_tier::{NarrowSlots, NarrowTierBackend, SLOT_WORDS};
 use vxl_phys_gpu::narrow::{prof_snapshot, NarrowTier};
 

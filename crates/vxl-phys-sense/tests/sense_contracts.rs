@@ -5,7 +5,7 @@
 //! 的平局判据，cue 流就没法当基线对拍；③ 一旦"全播"，万级密堆一 tick 上千条 cue 在设备侧
 //! 等于白噪，且"预算"这条设计约束会静默消失。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_sense::{jsonl, Cue, SenseConfig, SenseExt, SenseStats};
 
 /// 场景：**体素地板** + 网格盒雨（与 `sense_dump` 的 CLI 场景同族口径；布局全确定性）。

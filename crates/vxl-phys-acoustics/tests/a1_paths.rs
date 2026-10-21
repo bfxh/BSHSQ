@@ -3,7 +3,7 @@
 //!
 //! 场景刻意**只有声学几何、没有任何碰撞体**：这就是"声学几何 ≠ 碰撞几何"这条设计原则的可执行形式。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, ImpactExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::{
     jsonl, AcousticConfig, AcousticGeometry, AcousticsExt, Listener, PathKind, SoundPath, BANDS,
 };

@@ -41,7 +41,6 @@ mod world_build;
 mod world_ccd;
 mod world_health;
 mod world_kinematic;
-mod world_mesh;
 mod world_soft;
 mod world_step;
 mod world_struct;

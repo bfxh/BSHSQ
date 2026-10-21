@@ -12,7 +12,7 @@
 //!   "平台静止 vs 上行" p50 tick 时间，机器标注 |
 
 use std::time::Instant;
-use vxl_phys::{KinematicExt, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, KinematicExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 平台（运动学，顶面 `y = 0`）+ `n×n` 个 1 m 盒。
 /// ⚠️ 间距 **1.06**（> `skin = 0.02` 两倍）：1.02 会让相邻盒落在 skin 边界上生成**投机接触**

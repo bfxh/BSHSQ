@@ -1,6 +1,7 @@
 //! `record` 子命令：录观测点序列（JSONL；纯搬移自 `lib.rs`）。
 
 use crate::scene::scene;
+use vxl_phys::DiagExt;
 
 /// `record`：给了文件就写盘并回报行数，没给就打流（两条分支抽出来是为了压 `run` 的圈复杂度）。
 pub(super) fn record_cmd(name: &str, ticks: usize, path: Option<&str>) -> Result<String, String> {

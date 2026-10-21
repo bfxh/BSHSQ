@@ -1,11 +1,11 @@
-//! M0 确定性验证（§5）：**同一构造连续 10 轮** 各跑 600 tick，每 60 tick 记录
-//! xxh3-128 状态哈希；任意轮与基线轮不一致 → 退出码 1（CI 阻断提交）。
-//!
+//! M0 确定性验证（§5）：**同一构造连续 10 轮** 各跑 600 tick，每 60 tick 记录 xxh3-128 状态哈希；任意轮与基线轮不一致 → 退出码 1（CI 阻断提交）。
 //! 输出 `FINAL_HASH=0x<32 hex>` 行供 CI 三编译器/双架构矩阵提取比对。
 //!
 //! 运行：cargo run --release -p vxl-phys --example determinism
 
-use vxl_phys::{HeightField, PhysConfig, Quat, Recorder, Shape, Vec3, World};
+use vxl_phys::{
+    BodyBuildExt, DiagExt, HeightField, PhysConfig, Quat, Recorder, Shape, Vec3, World,
+};
 
 const ROUNDS: usize = 10;
 const TICKS: u64 = 600;

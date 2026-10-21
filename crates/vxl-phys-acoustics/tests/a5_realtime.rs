@@ -5,7 +5,7 @@
 //! 另外补两条这一期引入的契约：③ 截断按**优先级（能量）**而不是产出顺序；④ 档位（[`AcousticTier`]）
 //! 是**确定性**的工作量上界（与机器/负载/时间无关）。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, ImpactExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::{
     jsonl, AcousticConfig, AcousticGeometry, AcousticStats, AcousticTier, AcousticsExt, Edge,
     Listener, PathKind, Portal, SoundPath, BANDS,

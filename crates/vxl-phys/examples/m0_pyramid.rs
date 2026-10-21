@@ -3,7 +3,7 @@
 //!
 //! 运行：cargo run --release -p vxl-phys --example m0_pyramid
 
-use vxl_phys::{HeightField, PhysConfig, Preset, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, HeightField, PhysConfig, Preset, Quat, Shape, Vec3, World};
 
 fn main() {
     let mut w = World::new(PhysConfig::from_preset(Preset::Balanced));

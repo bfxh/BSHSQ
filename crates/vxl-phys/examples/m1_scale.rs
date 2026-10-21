@@ -5,7 +5,7 @@
 
 use std::time::Instant;
 
-use vxl_phys::{Manifold, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, Manifold, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 命令行参数：[threads] [static] [dynamic] [ticks] [iters]。
 struct Args {

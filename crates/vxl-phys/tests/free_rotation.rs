@@ -21,7 +21,7 @@
 //! **换代账（ADR-0004）**：`determinism` `0x655cdbf4… → 0x8c5c8fc9…`（场景里有可分辨的不对称
 //! 旋转体）；`m0_gates` 门槛/压力两档与 `m3_collapse` **逐位未变**（那些场景的体是立方体/各向同性
 //! ⇒ 走"各向同性早退"），健康读数也一字未动。
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_core::Mat3;
 
 /// `(L 世界系, ω 局部系)`：本仓局部惯量是**对角**（`Vec3` 存 `I⁻¹`）⇒ 正向惯量 = 逐分量倒数。

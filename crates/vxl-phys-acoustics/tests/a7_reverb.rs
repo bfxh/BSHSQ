@@ -9,7 +9,7 @@
 //! ⑤ 渲染：冲激的尾巴在 `RT60` 处掉 **60 dB**（±6 dB）、`onset` 之前一个采样都不动；
 //! ⑥ `mix = 0` ⇒ 与"不加尾巴"**逐位**相同 + 同输入两跑**逐位**相同 + 单调性。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::audio::{self, AudioConfig};
 use vxl_phys_acoustics::reverb::{reverb_params, reverb_params_from, ReverbParams, MIX};
 use vxl_phys_acoustics::{AcousticConfig, AcousticGeometry, AcousticsExt, Listener, BANDS};

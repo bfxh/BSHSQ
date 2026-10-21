@@ -11,7 +11,7 @@
 //! ⑦ **未开气动域**：`set_aero_wakes` 返回 false、`aero_wind_at` 为零（不静默建槽）。
 //!
 //! ⚠️ 本文件不许出现 `unwrap` / `expect` / `panic!` / `.clone()`（新文件零基线）。
-use vxl_phys::{AeroWakeExt, PhysConfig, Quat, Vec3, World};
+use vxl_phys::{AeroExt, AeroWakeExt, MeshExt, PhysConfig, Quat, Vec3, World};
 use vxl_phys_aero::{AeroConfig, WakeSource};
 
 /// 基准风 `+x 10 m/s`（够大，亏损后可分辨）。

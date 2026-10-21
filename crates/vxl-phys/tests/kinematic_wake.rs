@@ -12,7 +12,7 @@
 //! 的抖动阈值是 < 1；0.02 m/s 实测 0.95，贴近阈值）—— 载荷速度低于 `sleep_linear` 本来就该睡，
 //! 但它同时在被推动 ⇒ 这个边角是「慢到该睡、又在动」的固有矛盾，不是门的实现问题。
 
-use vxl_phys::{KinematicExt, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, KinematicExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 睡熟的三层堆 + 运动学平台；返回 `(睡→醒翻转次数, 末态醒着数, 底盒 Δy, 平台顶 − 底盒底)`。
 /// `speed` = 平台上行速度（0 ⇒ 静置）；`cfg` 决定睡眠档与唤醒门（`wake_gate_k`）。

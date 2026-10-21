@@ -22,7 +22,7 @@
 //! 平台，钉的是三条断链的坏行为）。K1/K2 落地后改写为契约 —— 断链②的机制说明仍留在
 //! `SURVEY-RIGID-HARD-CASES.md` §2。静态体那条路**保持不支持**（C5 的边界格把它钉住）。
 
-use vxl_phys::{KinematicExt, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, KinematicExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 不睡（除 C6 外）：本文件测的是接触/宽相语义，不是睡没睡。
 fn cfg() -> PhysConfig {

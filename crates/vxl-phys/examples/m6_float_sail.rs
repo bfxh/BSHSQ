@@ -18,7 +18,10 @@
 //! 运行：`cargo run --release -p vxl-phys --example m6_float_sail -- [ticks]`
 //! 门禁配方：`720`（见 `scripts/gate_gold.sh`）。
 // 新文件：`glob-gate` 对新增文件零基线 ⇒ 显式导入（不用 `use vxl_phys::*`）。
-use vxl_phys::{Joint, JointKind, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{
+    AeroExt, BodyBuildExt, FluidExt, Joint, JointKind, MeshExt, PhysConfig, Quat, Shape, Vec3,
+    World,
+};
 use vxl_phys_aero::AeroConfig;
 
 const GATE_TICKS: usize = 720;

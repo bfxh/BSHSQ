@@ -22,7 +22,7 @@
 //!   恰好 `round(update_hz·dt)` 帧 ⇒ **延迟 0 帧**（本 tick 的 cue 在本 tick 首帧就生效）。
 //!   stderr 末行给 `frames_per_tick` 与 `last_cue_tick`：前者判"更新率口径"、后者划出**纯释放段**
 //!   （门在那儿判包络单调与"释放到恰好 0.0"）。
-use vxl_phys::{Material, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, Material, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_sense::{
     haptic_jsonl, jsonl, jsonl_banked, map_banks, slide_jsonl, slide_jsonl_banked, Cue,
     HapticConfig, HapticDriver, HapticFrame, MaterialSlot, SenseConfig, SenseExt, SlideCue,

@@ -29,7 +29,7 @@ mod haptic;
 mod slide;
 mod table;
 
-use vxl_phys::World;
+use vxl_phys::{ImpactExt, World};
 
 pub use haptic::{
     haptic_jsonl, write_haptic_jsonl, HapticConfig, HapticDriver, HapticFrame, HapticStats,

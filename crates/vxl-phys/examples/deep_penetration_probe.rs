@@ -20,7 +20,7 @@
 //! `PROBE_MU`（摩擦系数，默认 0.9；**置 0** 可把横向速度/自旋全归到接触口径上）、
 //! `PROBE_SUBSTEPS`（≥1 时覆盖子步数，默认用 `PhysConfig::default`）、`PROBE_TRACE` +
 //! `PROBE_TRACE_N`（逐 tick 打印位置/速度/流形，法线 5 位小数）。
-use vxl_phys::World;
+use vxl_phys::{BodyBuildExt, DiagExt, HullExt, NarrowTierExt, World};
 use vxl_phys_core::{PhysConfig, Quat, Shape, Vec3};
 use vxl_phys_terrain::voxel::VoxelVolume;
 

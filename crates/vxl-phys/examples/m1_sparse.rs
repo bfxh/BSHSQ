@@ -13,7 +13,7 @@
 
 use std::time::Instant;
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// **体间距**（米）：体半长 0.4 ⇒ 间距 3.0 时相邻体净空 2.2 m ⇒ 落到地面后**互不接触**。
 const GAP: f32 = 3.0;

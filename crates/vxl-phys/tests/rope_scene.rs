@@ -12,7 +12,7 @@
 //!
 //! **本片边界**：绳不吃刚体（无 Akinci 耦合）、无摩擦、无自碰撞 —— 都属后续切片。
 
-use vxl_phys::*;
+use vxl_phys::{SoftExt, *};
 use vxl_phys_core::{PhysConfig, Quat, Shape, Vec3};
 use vxl_phys_soft::Rope;
 use vxl_phys_terrain::mesh::TriMesh;

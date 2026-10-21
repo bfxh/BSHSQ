@@ -7,7 +7,7 @@
 //!
 //! 跑法：`cargo run --release -q -p vxl-phys --example ccd_thin_shell_probe`
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 盒半长（最小半长 = 0.5 ⇒ 段长上限 0.25）。
 const HALF: f32 = 0.5;

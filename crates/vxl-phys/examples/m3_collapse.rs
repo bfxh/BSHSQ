@@ -19,7 +19,7 @@
 //! 本档 1200 tick、32 个多格碎块（**全睡**；CI 可负担）；放大/加密就改参数（同时会跳过基线判定）。
 
 // 新文件：`glob-gate` 对新增文件零基线 ⇒ 显式导入（不用 `use vxl_phys::*`）。
-use vxl_phys::World;
+use vxl_phys::{BodyBuildExt, DestructionOpsExt, DiagExt, ProviderExt, World};
 use vxl_phys_core::{PhysConfig, Vec3};
 
 /// 门禁配方（`ticks / seeds`）。

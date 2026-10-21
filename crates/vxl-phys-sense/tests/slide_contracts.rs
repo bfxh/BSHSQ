@@ -6,7 +6,7 @@
 //! 截断保留最**快**的。额外那条 S2 判据是"**静止体不产生循环音**"——静置堆滑速只是数值
 //! 噪声，必须被 `min_slide_speed` 挡掉（否则"循环音"永远在响，等于白噪）。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_sense::{slide_jsonl, SenseConfig, SenseExt, SenseStats, SlideCue};
 
 /// 场景：**平滑静态盒地板** + N 个**贴地、带水平初速**的盒 ⇒ 落定即滑、摩擦减速到停。

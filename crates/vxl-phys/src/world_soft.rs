@@ -12,13 +12,18 @@
 //! **本片边界**：绳索的接触走**提供者**（地形）+ **刚体代理**（形状：Sphere/Box/Capsule）；
 //! 自碰撞、`Compound`/`Cylinder`/`Cone`/`ConvexHull` 代理、体积/弯曲约束都属后续切片。
 use super::*;
-use crate::world_step::coupling as cpl; // 耦合契约短别名（用 add_force / add_tick_torque / apply_two_leg_reactions）
 
 // **域反作用的自由函数**（角反作用 + 布→介质反作用）：走 `#[path]` 子模块——`lib.rs` 零行预算，
 // 加不了 crate 级 `mod`（同 `vxl-phys-soft` 的 `cloth_medium` 先例）。
 #[path = "world_soft_reaction.rs"]
-mod soft_reaction;
-use soft_reaction::{apply_rope_angular_reactions, cloth_medium_reaction};
+pub(crate) mod soft_reaction;
+pub(crate) use soft_reaction::{apply_rope_angular_reactions, cloth_medium_reaction};
+
+// **软体域的扩展 trait**（`SoftExt`）——走 `#[path]` 子模块（同 `world_soft_reaction.rs` 先例）：
+// `lib.rs` 零行预算，加不了 crate 级 `mod`（god 门的行数棘轮）。
+#[path = "world_soft_ext.rs"]
+mod soft_ext;
+pub use soft_ext::SoftExt;
 
 /// 2b（Akinci 边界粒子）那一族的成组状态（原为 `World` 的 3 个散字段：开关 / 暂存 / 覆盖集）。
 #[derive(Default)]
@@ -52,158 +57,6 @@ impl FluidBoundary {
     /// （只准减），折行会让它"变胖"。
     pub fn is_two_b(&self, fluid: usize) -> bool {
         self.two_b.get(fluid).copied().unwrap_or(false)
-    }
-}
-
-impl World {
-    /// 注册一条绳索（`vxl_phys_soft::Rope`），返回其索引。
-    pub fn add_rope(&mut self, rope: vxl_phys_soft::Rope) -> usize {
-        self.soft.ropes.push(rope);
-        self.soft.ropes.len() - 1
-    }
-
-    /// 已注册绳索（判据/渲染读 `pos` / `vel`）。
-    pub fn ropes(&self) -> &[vxl_phys_soft::Rope] {
-        &self.soft.ropes
-    }
-
-    /// 第 `i` 条绳索。
-    pub fn rope(&self, i: usize) -> Option<&vxl_phys_soft::Rope> {
-        self.soft.ropes.get(i)
-    }
-
-    /// 注册一张布片（`vxl_phys_soft::ClothSheet`），返回其索引。
-    pub fn add_cloth(&mut self, cloth: vxl_phys_soft::ClothSheet) -> usize {
-        self.soft.cloths.push(cloth);
-        self.soft.cloths.len() - 1
-    }
-
-    /// 已注册布片（判据/渲染读 `pos`）。
-    pub fn cloths(&self) -> &[vxl_phys_soft::ClothSheet] {
-        &self.soft.cloths
-    }
-
-    /// 第 `i` 张布片。
-    pub fn cloth(&self, i: usize) -> Option<&vxl_phys_soft::ClothSheet> {
-        self.soft.cloths.get(i)
-    }
-
-    /// **域通道**（每 tick 一次、体子步全部完成之后）：液体域 → 软体域（绳 → 布）。
-    /// 顺序固定 ⇒ 确定性不受影响（各条通道互不读对方状态）。
-    /// 刚体代理在**进域前重建一次**（绳/布共用同一份快照；任一域非空才建）。
-    pub(crate) fn domain_pass(&mut self) {
-        self.fluid_pass();
-        // 介质域推进（D3 切片 1/2）：喷溅场逐核平流 + 衰减一格（two_way 关 ⇒ 每场首行短路、
-        // 逐位不变）。放在域轮次其余格之前——各格互不读对方状态，顺序只为确定性固定。
-        self.providers.advance_medium(self.config.dt);
-        if !self.soft.ropes.is_empty() || !self.soft.cloths.is_empty() {
-            self.rebuild_soft_proxies();
-        }
-        self.rope_pass();
-        self.cloth_pass();
-        cloth_medium_reaction(self);
-    }
-
-    /// **重建刚体代理快照**（每 tick 一次：体在动；从 `rope_pass` 提取，绳/布共用）。
-    fn rebuild_soft_proxies(&mut self) {
-        self.soft.rope_proxies.clear();
-        for i in 0..self.bodies.len() {
-            let shape = self.bodies.shape[i];
-            if matches!(
-                shape,
-                Shape::Provider(_) | Shape::HeightField(_) | Shape::Compound { .. }
-            ) {
-                continue;
-            }
-            self.soft.rope_proxies.push(vxl_phys_soft::RigidProxy {
-                body: i as u32,
-                shape,
-                pos: self.bodies.position[i],
-                rot: self.bodies.rot(i),
-                linvel: self.bodies.linvel[i],
-                // **角速度**（§8.4.29 / 2c-1）：接触几何要跟着转动走。**静态体与睡眠体一律 0**
-                // （睡眠体对软体域呈现静态，§8.4.27）；**运动学体算**（转盘要带着布料走）。
-                angvel: if self.bodies.is_dynamic_or_kinematic(i) && self.bodies.awake[i] {
-                    self.bodies.angvel(i)
-                } else {
-                    Vec3::ZERO
-                },
-                local_inv_inertia: if self.bodies.is_dynamic(i) && self.bodies.awake[i] {
-                    self.bodies.local_inv_inertia[i]
-                } else {
-                    Vec3::ZERO
-                },
-                // **睡眠体对软体域呈现为"静态"**（§8.4.27）：`inv_mass = 0` ⇒ 软体把它当墙
-                // （接触照做、反作用自动跳过）。不这么做的话反作用会**静默累进睡眠体的
-                // `linvel`** ⇒ 醒来瞬间被弹出（判据 `rope_scene::rope_does_not_disturb_a_sleeping_body`）。
-                inv_mass: if self.bodies.is_dynamic(i) && self.bodies.awake[i] {
-                    self.bodies.inv_mass[i]
-                } else {
-                    0.0
-                },
-            });
-        }
-    }
-
-    /// **软体域通道**：每条绳索按自身 `substeps` 推进一个 `config.dt`；接触走统一提供者通道
-    /// （`0..providers.len()` 全量 id）与**刚体代理**（粒子↔刚体，Akinci 式最小实现）。
-    /// 反作用回填：`bodies.linvel += body_dv`（速度增量）、`bodies.position += body_dx`（位置补足）；
-    /// 角反作用（`angular_reaction`，默认开）经 `cpl::add_tick_torque`（`÷dt_sub` 契约）注入。
-    /// **空集 ⇒ 零成本短路**。
-    pub(crate) fn rope_pass(&mut self) {
-        if self.soft.ropes.is_empty() {
-            return;
-        }
-        let dt = self.config.dt;
-        let gravity = self.config.gravity;
-        let count = self.providers.len() as u32;
-        // 刚体代理已在 `domain_pass` 重建（`rebuild_soft_proxies`，绳/布共用同一份快照）。
-        // **睡眠体对软体域呈现为"静态"**（§8.4.27）：代理里 `inv_mass = 0` ⇒ 软体把它当墙
-        // （接触照做、反作用自动跳过）；判据 `rope_scene::rope_does_not_disturb_a_sleeping_body`。
-        let proxies = std::mem::take(&mut self.soft.rope_proxies);
-        let providers = &self.providers;
-        for rope in &mut self.soft.ropes {
-            rope.step(dt, gravity, providers, count, &proxies);
-            // **反作用两腿**（`Rope::body_dv` 速度口径 + `Rope::body_dx` 位置口径，§8.4.9）：
-            // 与布料域**共用同一段实现**（切片 2b-ii 提取 —— 两处逐字相同，见 `apply_two_leg_reactions`）。
-            cpl::apply_two_leg_reactions(&mut self.bodies, &proxies, &rope.body_dv, &rope.body_dx);
-            // **角反作用**（默认开；为什么/怎么算，长注已随实现搬进 `apply_rope_angular_reactions`）。
-            if rope.angular_reaction {
-                let substeps = self.config.substeps.max(1) as f32;
-                apply_rope_angular_reactions(&mut self.bodies, rope, substeps, dt);
-            }
-        }
-        self.soft.rope_proxies = proxies;
-    }
-
-    /// **布料域通道**（软体切片 1/2/2b-ii）：每张布片按自身 `substeps` 推进一个 `config.dt`；
-    /// 接触走**统一提供者通道**（与 rope 同款：`0..providers.len()` 全量 id + 球采样 + 库仑锥）
-    /// 与**刚体代理**（静态/睡眠 = 墙；动态 = 两体约束 + 反作用两腿）。
-    /// 反作用回填与 `rope_pass` **同口径**：`bodies.linvel += dv`（速度增量）+
-    /// `bodies.position += dx`（位置口径补足，§8.4.9）。**空集 ⇒ 零成本短路**。
-    pub(crate) fn cloth_pass(&mut self) {
-        if self.soft.cloths.is_empty() {
-            return;
-        }
-        let dt = self.config.dt;
-        let gravity = self.config.gravity;
-        let count = self.providers.len() as u32;
-        let providers = &self.providers;
-        // 刚体代理：与 rope 同一份快照（`domain_pass` 已重建；借出免借用冲突）。
-        let proxies = std::mem::take(&mut self.soft.rope_proxies);
-        for cloth in &mut self.soft.cloths {
-            cloth.step(dt, gravity, providers, count, &proxies);
-            // **反作用两腿**（切片 2b-ii，与 `rope_pass` 同段位、同口径 —— 共用同一段实现）：
-            // 静态/睡眠体（代理里 `inv_mass = 0`）不收反作用；角反作用**本片不引入**
-            // （§8.4.20 条件②：接触模型看不见转动）。
-            cpl::apply_two_leg_reactions(
-                &mut self.bodies,
-                &proxies,
-                &cloth.body.dv,
-                &cloth.body.dx,
-            );
-        }
-        self.soft.rope_proxies = proxies;
     }
 }
 

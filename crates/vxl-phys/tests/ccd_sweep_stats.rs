@@ -14,7 +14,9 @@
 //! | ② 关档档 | 关档时计数**全 0**——仪器不会把别处的窄相算进来 |
 //! | ③ 动-动档（旋翼 × 弹体，24 相位） | **P20 的对照基线**（改 CCD ⇒ 必然变 ⇒ 一起更新并按 ADR-0004 记账） |
 
-use vxl_phys::{ccd_sweep_stats_take, KinematicExt, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{
+    ccd_sweep_stats_take, BodyBuildExt, KinematicExt, PhysConfig, Quat, Shape, Vec3, World,
+};
 
 /// ① 薄壁：1 m 盒 60 m/s 撞 5 mm 立板（同 `ccd_thin_shell.rs` 的场景）。
 fn thin_wall(ccd_on: bool) -> (u64, u64, u64) {

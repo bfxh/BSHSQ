@@ -11,7 +11,7 @@
 //! cargo run -q --release -p vxl-phys --example oil_film_probe
 //! FILM_K=200 FILM_TICKS=240 cargo run -q --release -p vxl-phys --example oil_film_probe
 //! ```
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 滑块（1 m 立方、密度 1000 ⇒ m = 1000 kg）；`Tilt` = 滑道倾角（弧度，绕 z 轴）。
 struct Scene {

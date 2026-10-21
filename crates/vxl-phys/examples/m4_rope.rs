@@ -26,7 +26,8 @@
 //! 运行：`cargo run --release -p vxl-phys --example m4_rope -- [ticks]`
 //! 门禁配方：`600`（见 `scripts/gate_gold.sh`）。
 // 新文件：glob 门对新增文件零基线 ⇒ 显式导入（不用 `use vxl_phys::*`）。
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::SoftExt;
+use vxl_phys::{BodyBuildExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_soft::Rope;
 
 /// 门禁配方（`gate_gold.sh` 用这个）。

@@ -1,6 +1,6 @@
 //! 窗口统计与读数量（`yaw_of` / `surface_height` / `Stats` / `window_stats`）—— 同上拆出。
 
-use vxl_phys::{PhysConfig, Quat, Vec3, World};
+use vxl_phys::{BodyBuildExt, FluidExt, PhysConfig, Quat, Vec3, World};
 
 use crate::scene::{tank, water};
 

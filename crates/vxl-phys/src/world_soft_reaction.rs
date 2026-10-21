@@ -24,7 +24,7 @@ use vxl_phys_soft::Rope;
 /// 子步消费 ⇒ 交付"整 tick 的角冲量 `r.torque`"必须 `÷ dt_sub`（= `× substeps / dt`）；
 /// 写成 `÷ dt` 只会交付 `1/substeps`（默认 2 ⇒ **差 2×**，那条判据的金丝雀里实测比值
 /// 正好 `0.500000`）。
-pub(super) fn apply_rope_angular_reactions(
+pub(crate) fn apply_rope_angular_reactions(
     bodies: &mut BodySet,
     rope: &Rope,
     substeps: f32,
@@ -43,7 +43,7 @@ pub(super) fn apply_rope_angular_reactions(
 /// **同一份公式**）⇒ 这里读到的是**整 tick 的精确冲量**，不是"按 tick 末速度重算"的近似。
 /// 口径仍与 2a 同款（**一 tick 滞后**）；**为什么默认生效**：全仓"布 + 介质"场景只有
 /// `wet_cloth_gap.rs` 一个，三条冻结哈希都不含布 ⇒ 默认档逐位不变；多流体取第一个。
-pub(super) fn cloth_medium_reaction(w: &mut World) {
+pub(crate) fn cloth_medium_reaction(w: &mut World) {
     if w.soft.cloths.is_empty() || w.fluids.is_empty() {
         return;
     }

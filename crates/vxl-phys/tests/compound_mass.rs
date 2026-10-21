@@ -3,7 +3,7 @@
 //! 判据用"两球 + 横杆"哑铃（arena `shape-compound` 探针同形）：真体积 = 两球 + 长条，
 //! 并集 AABB 盒体积约为它的 2.4 倍 ⇒ 两条路径的质量可区分（守住"别再退回近似"）。
 
-use vxl_phys::{CompoundChild, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{CompoundChild, HullExt, PhysConfig, Quat, Shape, Vec3, World};
 
 #[test]
 fn compound_mass_is_exact_union() {

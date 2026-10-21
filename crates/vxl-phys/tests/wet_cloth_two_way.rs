@@ -5,7 +5,7 @@
 //! —— 只推水不拖布、或反作用取"tick 末重算"的近似，这条都会红。
 //!
 //! ⚠️ 本文件不许出现 `unwrap` / `expect` / `.clone()`（新文件零基线）。
-use vxl_phys::{PhysConfig, Vec3, World};
+use vxl_phys::{BodyBuildExt, FluidExt, PhysConfig, SoftExt, Vec3, World};
 use vxl_phys_fluid::{FluidConfig, FluidSystem};
 use vxl_phys_soft::{ClothSheet, Stiffness};
 

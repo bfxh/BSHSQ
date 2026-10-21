@@ -5,7 +5,7 @@
 //! 且折线长与**独立于实现的暴力扫棱**一致；② 阴影越深越弱（严格单调）；③ 棱的**端点**解也对；
 //! ④ 逐带、预算、确定性。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, ImpactExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::{
     jsonl, AcousticConfig, AcousticGeometry, AcousticStats, AcousticsExt, Edge, Listener, PathKind,
     SoundPath, BANDS,

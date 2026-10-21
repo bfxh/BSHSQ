@@ -1,7 +1,4 @@
-//! **V2 转换窗口判据**（`docs/PLAN-CONVERSION.md` §4 的 I0 / I5 / I6，外加 I3 效应键冲突）。
-//!
-//! 场景与 `tests/voxel_mesh_extract_rest.rs` 同源（体素地板 8×2×8、边长 0.5、顶面 y=1.0 +
-//! 一只半高 0.5 的盒），这样两条判据量的是**同一条路径**上的不同侧面。
+//! **V2 转换窗口判据**（`docs/PLAN-CONVERSION.md` §4 的 I0 / I5 / I6，外加 I3 效应键冲突）。 场景与 `tests/voxel_mesh_extract_rest.rs` 同源（体素地板 8×2×8、边长 0.5、顶面 y=1.0 + 一只半高 0.5 的盒），这样两条判据量的是**同一条路径**上的不同侧面。
 //!
 //! - **I0 零代际**：默认关 ⇒ 请求被显式拒绝（`Err(Disabled)`，不是静默跳过）；**开档但不发事件**
 //!   ⇒ 与关档逐位同哈希、不多建一个体。
@@ -10,7 +7,10 @@
 //! - **I6 无穿透突变**：切换是本 tick 末的**位姿不跳**操作 ⇒ 盒的静置高度在切换前后不得跳变。
 //! - **I3 效应键**：同一体素域同一 tick 被「挖格」与「转换」双消费 ⇒ 两个方向都 fail-loud。
 
-use vxl_phys::{ConversionError, EffectKey, VoxelConversionExt, World};
+use vxl_phys::{
+    BodyBuildExt, ConversionError, DestructionOpsExt, DiagExt, EffectKey, ProviderExt,
+    VoxelConversionExt, World,
+};
 use vxl_phys_core::{PhysConfig, Quat, Shape, Vec3};
 use vxl_phys_terrain::voxel::VoxelVolume;
 

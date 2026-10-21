@@ -5,7 +5,7 @@
 //! 阴影边界恰 −6.02 dB）与**端到端**（频率开关：旧口径逐带相等 / 声明后逐带单调、逐带比值与
 //! **独立 Simpson 积分**算出的 Fresnel 链一致；零干扰、确定性）。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, ImpactExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::{
     jsonl, utd, AcousticConfig, AcousticGeometry, AcousticStats, AcousticsExt, Edge, Listener,
     PathKind, SoundPath, BANDS,

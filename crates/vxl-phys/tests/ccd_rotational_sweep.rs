@@ -30,7 +30,7 @@
 //! **厚柱对照**（柱半宽 0.30）证明撞击确实交换角动量（`|ω|` 40 → 13.4）。
 //! 要"刀锋被细柱卡住"只能上**转动约束模型**（M2，设计决策）。证据链：`docs/DESIGN-ccd-rotation.md`。
 
-use vxl_phys::{ccd, PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{ccd, BodyBuildExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 小柱中心（半径 0.7 m 处，刀锋切向扫过它）。
 const POST_C: Vec3 = Vec3::new(0.7, 0.0, 0.0);

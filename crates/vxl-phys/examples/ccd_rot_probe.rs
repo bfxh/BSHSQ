@@ -14,7 +14,7 @@
 //!
 //! 用法：`cargo run --release -p vxl-phys --example ccd_rot_probe`
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 子步数（见文件头注）。
 const SUBSTEPS: u32 = 1;

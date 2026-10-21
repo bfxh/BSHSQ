@@ -1,12 +1,12 @@
-//! **求解器/CCD/确定性与杂项判据** —— `tests` 的子模块。
-//!
-//! 2026-10-05 从 967 行的 `tests.rs` 按域拆出（纯搬移，只补显式 `use`）。
+//! **求解器/CCD/确定性与杂项判据** —— `tests` 的子模块。 2026-10-05 从 967 行的 `tests.rs` 按域拆出（纯搬移，只补显式 `use`）。
 
 use super::ground_world;
-use crate::{FrictionModel, HeightField, Material, PhysConfig, Quat, Shape, Vec3, World};
+use crate::{
+    BodyBuildExt, DiagExt, FrictionModel, HeightField, Material, PhysConfig, Quat, Shape, Vec3,
+    World,
+};
 
-/// **CCD 回归**（本轮修复）：开启 CCD 后，**贴地滑行**的体不得被锁死。
-/// 修前：每个扫描采样都有地面接触 ⇒ 判「命中」⇒ 钳回起点、原地停住。
+/// **CCD 回归**（本轮修复）：开启 CCD 后，**贴地滑行**的体不得被锁死。 修前：每个扫描采样都有地面接触 ⇒ 判「命中」⇒ 钳回起点、原地停住。
 /// 修后：只有「沿法向接近」的采样才算命中 ⇒ 切向滑行不受影响。
 #[test]
 fn ccd_does_not_lock_sliding_body() {

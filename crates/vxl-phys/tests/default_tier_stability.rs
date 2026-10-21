@@ -13,7 +13,7 @@
 //!
 //! 更新冻结值：只应在**有意**改动默认档时进行，并按 ADR 0004 记录换代理由。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, PhysConfig, Quat, Shape, Vec3, World};
 
 /// 长跑读数（确定性：同配置同机同状态应逐位可复现）。
 #[derive(Debug, Clone, Copy)]

@@ -18,7 +18,7 @@
 //! ⑤ 预算（每阶段 `max_reflections` 面；`= 0` 一条反射都没有，且 `dropped_budget` 如实上报）；
 //! ⑥ 确定性（两跑逐位一致）+ `state_hash` 不变 + `order > 2` 按 2 处理。
 
-use vxl_phys::{PhysConfig, Quat, Shape, Vec3, World};
+use vxl_phys::{BodyBuildExt, DiagExt, ImpactExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_acoustics::{
     AcousticConfig, AcousticGeometry, AcousticsExt, Listener, PathKind, SoundPath, BANDS,
 };
