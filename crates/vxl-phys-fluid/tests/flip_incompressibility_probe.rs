@@ -512,6 +512,80 @@ fn diag_apic_hydrostatic() {
     }
 }
 
+/// `#[ignore]` 诊断（不进 CI）：**APIC 的代价随 θ 怎么变**（P23 的前置表·代价侧）。
+///
+/// P23 记的账是**单点**的：静水槽 `ke` +18%（θ = 0.95，`diag_apic_hydrostatic` 那张表）。
+/// 而 APIC 的**红利**在另一头（θ = 0 的旋转团，`flip_rotation_probe.rs::diag_apic_theta_scan`
+/// 那张表）⇒ 「**θ 门控**」（APIC 只在 θ ≤ θ_max 生效）能不能用，取决于代价与红利**随 θ 是否
+/// 分得开**。本诊断出代价侧那张表（θ ∈ {0, 0.25, 0.5, 0.8, 0.95} × APIC 开/关）。
+/// **只打印、不断言**（仪表）；`flip_apic` 默认关 ⇒ 本诊断**不改**默认档任何读数。
+///
+/// 跑法：`cargo test -p vxl-phys-fluid --test flip_incompressibility_probe -- --ignored --nocapture`
+#[test]
+#[ignore = "APIC × θ 扫描（仪表，只打印）；跑法见该测试的 doc"]
+fn diag_apic_theta_scan() {
+    eprintln!("== 静水槽（60 tick，80 次 CG）：APIC 开/关 × θ 扫描 ==");
+    eprintln!(
+        "{:8} {:6} {:11} {:11} {:11} {:11} {:10.3}",
+        "θ", "apic", "over", "over_in", "sink", "height_keep", "ke"
+    );
+    for ratio in [0.0f32, 0.25, 0.5, 0.8, 0.95] {
+        for apic in [false, true] {
+            let m = run_cfg(
+                FluidFamily::CpuFlip,
+                Knobs {
+                    pressure_iters: 80,
+                    flip_ratio: ratio,
+                    cg: true,
+                    apic,
+                },
+                60,
+                false,
+            );
+            eprintln!(
+                "{ratio:8} {apic:6} {:11.3e} {:11.3e} {:11.3e} {:11.4} {:10.3e}",
+                m.over, m.over_in, m.sink, m.height_keep, m.ke
+            );
+        }
+    }
+}
+
+/// **θ 门控 · 判据 G3**：`θ = 0.5`（恰在门控内 `θ_max = 0.5`）的**静水槽代价面**：
+/// 开 APIC 的全体过密 `over` 不得比关档高 5% 以上（实测 1.828e-1 vs 1.821e-1 = 1.004×），
+/// 且末态动能 `ke` 不得更高（实测 5.246e-1 vs 6.026e-1）⇒ 门控内那一档**红利仍在、
+/// 代价已收窄**（对照 `θ = 0.95` 档 `ke` +18% / `over` +15%，见 `docs/OPEN-PROBLEMS.md` P23）。
+///
+/// 场景与 `diag_apic_theta_scan` 逐字相同（静水槽 60 tick、80 次 CG、`CpuFlip`），读数取自
+/// 该诊断 `θ = 0.5` 的两行（该诊断是 `#[ignore]` 的仪表，**不进 CI**）；门控只在 `θ > 0.5` 处收口
+/// ⇒ `θ ≤ 0.5` 的读数与门控前一致。
+///
+/// ⚠️ **margin 薄**：`over` 的实际裕度只有 **1.004×**（阈值 1.05×）⇒ 这条判据钉的是
+/// "**没有出现** θ = 0.95 档那种 +15% 的过密代价"，**不是**钉"APIC 在静水上更省"。
+#[test]
+fn apic_theta_gate_cost_bench_at_theta_half() {
+    let mut k = Knobs {
+        pressure_iters: 80,
+        flip_ratio: 0.5,
+        cg: true,
+        apic: false,
+    };
+    let off = run_cfg(FluidFamily::CpuFlip, k, 60, false);
+    k.apic = true;
+    let on = run_cfg(FluidFamily::CpuFlip, k, 60, false);
+    assert!(
+        on.over <= 1.05 * off.over,
+        "θ = 0.5 门控内开 APIC 的过密代价超 5%：{} vs 关档 {}",
+        on.over,
+        off.over
+    );
+    assert!(
+        on.ke <= off.ke,
+        "θ = 0.5 门控内开 APIC 的动能反而更高：{} vs 关档 {}",
+        on.ke,
+        off.ke
+    );
+}
+
 /// `#[ignore]` 诊断（不进 CI）：打印 FLIP/WCSPH 末态过密的**空间分布**，用来分辨
 /// "网格投影造会聚流"（过密聚集在壁角/底面/贴邻对）与"纯几何起始条件"（均匀过密）。
 /// 跑法：`cargo test -p vxl-phys-fluid --test flip_incompressibility_probe -- --ignored --nocapture`

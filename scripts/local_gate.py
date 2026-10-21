@@ -10,7 +10,7 @@ asm-gate / staticmut-gate / license-gate / dbg-gate / print-gate / memfind-core-
 engine-dep-gate。
 棘轮（存量进基线，只准减，新增即红）：unwrap / unsafe / linelen / glob / todo / god /
 cyc / nest / args / clone。
-元门：gate-selftest（门禁自检）/ gate-probe（逐门注入验证是真门）。
+元门：gate-selftest（门禁自检）/ gate-probe（逐门注入验证是真门）/ slice-gate（分片↔原文逐字节）。
 
 注意：子进程一律用 sys.executable，避免「python」不在子进程 PATH 上导致静默失败。
 
@@ -61,8 +61,8 @@ STEPS = [
     # 本地 Python 面：评审 .codex-local-python/ 下的脚本；门自身可用性单列一步（照 god-gate 先例）。
     ("security-gate",["scripts/security_review.py"]),
     ("security-gate-selftest",["scripts/security_review.py", "--selftest"]),
-    ("gate-selftest",["scripts/gate_selftest.py"]),
-    ("gate-probe",   ["scripts/gate_probe.py"]),
+    # 分片 ↔ 原文逐字节一致性（2026-10-21 新增；此前 docs/slices/ 无任何机器校验 ⇒ 改原文忘同步会悄悄漂移）。--check 只校验不写盘，覆盖 5 份大文档。
+    ("slice-gate",   ["scripts/reslice_docs.py","--check"]), ("gate-selftest",["scripts/gate_selftest.py"]), ("gate-probe",   ["scripts/gate_probe.py"]),
 ]
 
 

@@ -694,15 +694,15 @@ push:
 含代码的 4 个全部有 run。不是故障，是配置。
 
 **为什么是坑**：`static-text` job 跑 `vocab_scan.sh` / `typos` / `naming_gate.py`，
-**它也在被跳过的那批里**；而 `local_gate.py` 的 28 道门**不含**这三项
+**它也在被跳过的那批里**；而 `local_gate.py` 的 29 道门**不含**这三项
 （dag / rayon / cpp / fastmath / f64 / asm / staticmut / license / dbg / print / memfind-core /
 engine-dep / clone / unwrap / unsafe / linelen / usize / glob / todo / god / god-selftest /
-cyc / nest / args / security / security-selftest / gate-selftest / gate-probe）。
+cyc / nest / args / security / security-selftest / slice / gate-selftest / gate-probe）。
 ⇒ 纯文档提交**唯一的** vocab/typos 把关是**人手动跑**。
 
-**同一串清单的另一个盲区（2026-10-18 实测）**：这 28 道门也**不含编译**。往 Rust 字符串
+**同一串清单的另一个盲区（2026-10-18 实测）**：这 29 道门也**不含编译**。往 Rust 字符串
 字面量里塞嵌套双引号 ⇒ `cargo` 报 `expected one of . ? ] or an operator`，而
-`local_gate.py` **28/28 全绿**、`LOCAL_RC=0`。⇒ 「门禁全过」与「代码能编过」是两件事，
+`local_gate.py` **29/29 全绿**、`LOCAL_RC=0`。⇒ 「门禁全过」与「代码能编过」是两件事，
 别用前者替代后者。
 
 **处置**：改文档的提交，提交前手动跑这三条：
@@ -716,3 +716,151 @@ python -X utf8 scripts/naming_gate.py
 **没改 `paths-ignore` 的理由**：文档改动确实不该跑 23 个 job（编译 / 测试 / miri / loom 与
 markdown 无关）。真要给文档上 CI，正确做法是**单独一个轻量 workflow**（只跑静态文本门），
 而不是让全量 CI 对 markdown 触发。
+
+## 2026-10-21 · 大文档分片的机器校验（`slice-gate`）：改了原文忘了同步分片，从此是**红**不是**静默漂移**
+
+**背景**：5 份大文档（`OPEN-PROBLEMS` / `EXPERIMENTS` / `M1-PLAN` / `PLAN-gpu` /
+`SURVEY-SOFT-CLOTH-AND-CONVERSION`）都按标题边界切成 `docs/slices/<NAME>.pNN.md` +
+`<NAME>.INDEX.md`，用来给 Agent 点名取片（**不要整份读原文**）。切片的**权威**校验器是
+`E:\bundles\reslice-2026-10-21\verify.py`（逐字节比对 + token 估算 + INDEX 标题行号 +
+「读法行 / INDEX / 分片和」三处整篇估算相等）。
+
+**坑（实测）**：`docs/slices/` 此前**没有任何机器校验**——仓内 11 处 `slices` 全是注释。
+所以「改了原文但忘了同步分片」会**静默漂移**：本轮就实测到 1 处既有漂移
+（`OPEN-PROBLEMS.p04.md` 对不上原文 3329 行），而且**没有任何门会红**。
+⇒ 光有 `verify.py` 这种**人工**跑一次的脚本不够，必须进 `local_gate.py`（CI 的 ratchet 作业就跑它）。
+
+**处置**：新增 `scripts/reslice_docs.py`（352 行，5 份文档通吃）
++ `local_gate.py` 里登记 **slice-gate** ⇒ 本地门禁 **28 → 29 道**。
+
+```powershell
+python -X utf8 scripts/reslice_docs.py --check   # 只校验不写盘；退出 0 = 一致，1 = 有漂移
+python -X utf8 scripts/reslice_docs.py             # 重切 5 份 + 重建 5 份 INDEX
+```
+
+**为什么不用现成的 `reslice.py`**：那份的 `build()` 断言「旧片首行必须在原文里逐字命中」，
+而 **p01 的首行是读法行**——它内含「整篇估算 token」，这个数一变首行就变 ⇒ 断言必然红。
+本脚本改成「锚点只用于**定边界**（p02..pNN 的标题行），p01 首行不做锚点断言」。
+
+**边界锚点 = 下一片的首行 = 一条标题行**。有人改了那条标题的正文 ⇒ 精确/归一化都找不到。
+故加**模糊层**：只在**标题行**里用 `difflib` 找相似度最高者，且要求
+相似度 ≥ 0.80 且领先第二名 ≥ 0.05，否则**仍然报错**。
+⇒ 宁可不写，也不能把边界写歪（边界写歪 ⇒ 分片内容整体错位，比漂移更坏）。
+实测：改边界标题后 `--check` 报**红**（5 个文件漂移）、重切后**绿**；
+造一条「与边界标题极像的干扰标题」放在别处 ⇒ 边界**仍定在原行**（不误伤）。
+
+**验证**（都是实跑，不是推断）：
+- 5 份文档 `--check` 全绿；写盘 24 个文件后 md5 **全部不变**（幂等）；
+  4 份**没动过**的文档（EXPERIMENTS / M1-PLAN / PLAN-gpu / SURVEY）重切后 **git diff 为空**
+  ⇒ 证明「按旧片首行锚定边界」这个做法跨 5 份都成立。
+- 注入漂移逐份验证：5 份各改一个数字 ⇒ `--check` 全部**退出码 1**，还原后**退出码 0**。
+- **真实失效模式**（改原文忘同步）：`M1-PLAN.md` 插一行 ⇒ `--check` 红 ⇒ 重切 ⇒ 绿 ⇒ 还原 ⇒ 绿。
+- `E:\bundles\reslice-2026-10-21\verify.py` ⇒ **ALL PASS**（5 份全绿）。
+- `local_gate.py` ⇒ **29/29 通过**；`god_gate.py` ⇒ 超标/变胖=0
+  （`local_gate.py` 89 行 ≤ 基线 90 ⇒ 棘轮「不许变胖」满足；新增脚本 352 行 ≤ 绝对阈值 800
+  且**不在基线** ⇒ 不触发棘轮）。
+
+**教训**：**「文档派生物」也必须有机器校验**。分片是手工同步的派生物，
+一次忘同步就够让 agent 读到**过期内容**而毫无察觉——而 agent 读到过期台账会做出错误决策。
+
+## 2026-10-21 · `gate-probe` 在中文 Windows 上**整门崩掉**（HEAD 就有）：编码缺陷把 22 道门的自检变成了「21 道 + 一堆 UnicodeDecodeError」
+
+**现象**：`python scripts/gate_probe.py` 刷一屏
+`UnicodeDecodeError: 'utf-8' codec can't decode byte 0xa3 in position 2`，
+然后 `_probe_toml` 里抛 `TypeError: 'NoneType' object is not subscriptable`
+⇒ **整个 gate-probe 崩掉**（非 0 退出）⇒ `local_gate.py` 的**最后一道门假红**。
+
+**根因（两层）**：
+① `subprocess.run(..., capture_output=True, text=True)` **没给 `encoding`**，
+而 Windows 中文控制台默认 codepage 是 **cp936（GBK）** ⇒ 子进程按 GBK 写的字节
+被 Python 当 UTF-8 解码 ⇒ **reader 线程崩** ⇒ `out.stdout` 变 `None`；
+② 崩掉后 `out.stderr[:300]` 直接下标 `None` ⇒ 抛 TypeError 把整门带走。
+
+**修法**（照 `local_gate.py` 的既有做法）：
+- 给所有 `subprocess.run` 显式 `encoding="utf-8", errors="replace"`；
+- 给子进程注入 `PYTHONUTF8=1`（子进程自己就按 UTF-8 输出）；
+- 打印处一律 `(out.stdout or "")` / `(out.stderr or "")` 兜底。
+
+**修完才发现的真问题**：这个崩溃**一直掩盖着一件坏事**——修好编码后 `gate-probe`
+第一次真正跑完，才暴露出 **`god-gate` 的「注入前已红（基线未绿）」**。
+⇒ **一个崩掉的元门 = 一道一直没人看的门**。元门自己崩了，它守护的门就没人验证了。
+
+**顺带**：`gate_probe.py` 受 god 棘轮约束（基线 153 行 / 最长函数 28 行，只准减），
+新加的 slice-gate 注入验证**不能**塞进去 ⇒ 拆成独立模块 `scripts/gate_probe_slice.py`（74 行），
+`gate_probe.py` 只多 1 行调用。同时把 `_probe_rs` / `_probe_toml` 两个形状雷同的函数
+**合并**（共用 `_inject` helper）⇒ 最长函数 28 → 25 行 ⇒ 触发 god 门自己的
+**S169「拆函数放行」**条款（file_lines 涨但 max_fn_lines 严格下降、涨幅 ≤10% ⇒ 判为合法交换）。
+⇒ 这是**门按设计工作**，不是绕过门。
+
+**验收**：`python scripts/gate_probe.py` ⇒ **22 道注入验证均转红**（含新增 slice-gate）、
+1 道硬判归手动（dag-gate）⇒ 退出码 0；`local_gate.py` ⇒ **29/29 通过**；
+`god_gate.py` ⇒ **✅ 超标/变胖=0**。
+
+**教训**：`gate-probe` / `gate-selftest` 这类**元门**自己也会坏。
+元门坏了不会让 CI 红（它红得**很安静**——只是最后一道门假红），
+但它守护的「每道门都是真门」这个保证就**静默失效**了。
+⇒ 元门要**单独盯**（本仓靠 `local_gate.py` 把 `gate-probe` 列为最后一步 + 本条记录）。
+
+## 2026-10-21 · `FluidSystem` 上帝对象债务的**设计层第一片**：并列变体收敛成「**一个核 + 枚举参数**」
+
+**债务原文**（`god.gate.json::god_pairs`）：`FluidSystem` 字段 26 / 方法 43（双超 ⇒ 在榜），
+处置写的是「把并列变体（density/force 各三份）收敛成**一个带枚举参数的入口**」，
+判据是「新加一个边界口径**不必再加一个 `*_pass`**」。
+
+**改前**：同一相位的**同一套算式被手抄了两遍**（串行档一份、并行档一份），
+边界口径则是**两个方法**（`density_pass` / `density_boundary_pass`）。
+⇒ 改一条公式要改两处，且两处可能**悄悄分叉**（当时靠「两份恰好一致」保证并行档逐位一致）。
+
+**改后**（三处同款）：
+- **一个核**：密度相位的算式 = `density_fluid_particle`（`fluid_density/kernel.rs`）；
+  力相位的算式 = `force_fluid_particle`（`fluid_force/kernel.rs`）。
+  **串行档与并行档调同一个核** ⇒ 逐位一致靠「**只有一份算式**」保证，
+  不再靠「两份手抄的算式恰好一致」。
+- **口径 = 参数**：`DensityKind::{Fluid, Boundary}` 取代两个方法 ⇒
+  **新加一种边界口径 = 加一个枚举变体 + 核里一处分支**，
+  **不必再往 `FluidSystem` 添 `*_pass`**（= 债务的判据达成）。
+- 力相位的 2b 反作用累加器（`bforce`）作为**可选参数**传给同一个核
+  （串行档 `Some` 就地累加、并行档 `None` 另走一趟）⇒ 两条路径共用一个核。
+
+**方法数 43 → 40**（⚠️ 按 §1.9，**数字只是测量、不是处置**；
+真正的处置是上面那条「不必再添 `*_pass`」）。
+
+**逐位不变**（实测）：三份契约哈希零换代
+（`0x6b578a3730000f5aeb4c00cee0a7e249` / `0xa50eaa7229f1b39dada0741822795627` /
+`220153979919752808011342471829159370844`）；`cargo test -p vxl-phys-fluid` 46 通过 / 0 失败。
+
+**过程中撞到的三条仓内规则**（都是「量具在教我设计」）：
+1. **god 棘轮是只准减的量具**：核塞回原文件 ⇒ `file_lines` 涨 ⇒ 红。
+   ⇒ 正解**不是**把基线改大，而是**把新代码放进新文件**（`kernel.rs`）——
+   新文件**不在基线**里 ⇒ 只受**绝对阈值**（800 行 / 120 行函数）管。
+2. **glob-gate**：新文件里 `use super::super::*;` ⇒ **红**（新文件必须零 glob）⇒
+   改成显式导入。
+3. **args-gate**：新文件的函数**形参 ≤ 7**（按**逗号**计数 ⇒ `&mut [Vec3; 8]`
+   这类带 `; 8` 的类型被数成 **2** 个参数）⇒ 我的核被数成 8 ⇒ 红。
+   ⇒ 正解不是改门，而是**把两个平行数组合成一个结构体** `WallPlanes { pt, n }`
+   —— 这本来就更对：「一组壁面（点 + 法线）」是一个概念，不是两个平行数组。
+
+**另一条账**：`DefaultNarrowPhase`（18 方法）与 `Packet`（19 方法）**已不在榜**
+（方法数 ≤ `max_type_methods_alone` = 32）⇒ 它们的 `god_pairs` 登记是**过期登记**。
+本次**没有删**（删了会丢掉里面的设计意图留档），而是在登记开头点明「**已出榜，保留作留档**」，
+避免后来人误以为还欠着。**仍在榜的 3 条**：`World`（76）/ `FluidSystem`（40）/ `ClothSheet`（36）。
+
+
+## 2026-10-21 · **出榜的债务**：两条 god_pairs 登记已删除，设计意图移到这里
+
+god 门只认「**名字在不在 `god_pairs` 里**」，不认「这个类型**现在还在不在榜**」。
+⇒ 一个类型降下来之后，它的登记会**永远留在榜上**，让后来人以为**还欠着**——
+而实际上门早就不拦它了（`DefaultNarrowPhase` 62 → **18** 方法、
+`Packet` 的会话侧已拆出 ⇒ **19** 方法，都 ≤ `max_type_methods_alone` = 32）。
+
+**处置（2026-10-21）**：**删掉这两条登记**（它们已不在榜），
+**设计意图另存到本节** ⇒ 意图不丢、账不骗人。
+剩余 3 条（在榜）：`FluidSystem` / `World` / `ClothSheet`。
+
+### `crates/vxl-phys-narrow::DefaultNarrowPhase`
+
+【2026-10-21 已出榜：方法数 18 ≤ `max_type_methods_alone`（32）⇒ 不再被 god 门记为债务；本条保留作**设计意图留档**，不是当前在榜债务。】已登记债务（非豁免）：握着 HullStore/CompoundStore/MeshStore 三个仓库 + scratch + 配置 + 诊断计数，方法数是形状×形状分派矩阵（box_pair / capsule_ab|ba / hull_pair / *_heightfield / hull_vs_mesh / *_provider_contacts…），每加一个形状或域都要动它 —— 与 ROUTE §2.1『跨域只走四接口』同源的问题。⚠️ **方法数只准减只是测量、不是处置**（2026-10-06 定调，见 KNOWLEDGE.md §1.9）：把方法搬成模块自由函数或拆文件**不改设计、不计进度**（#115 把三个高度场采样搬成 hf.rs 自由函数即属测量层动作）。**处置（设计层）**：把形状×形状的分派改成**形状对表 / 域 trait** —— 判据是：新加一个形状或域**不必再动本类型**。✅ **2026-10-06 设计层第一片**：**分派级联本体**（段序：复合体→提供者→外壳→高度场→通用）搬到 `pair_shaped/pair_dispatch.rs`，类型侧只留薄入口 ⇒ 加形状/加域改那个文件、`impl` 块零改动（方法数仍 59**未变** —— 正说明它与 #115 那类**测量层**搬移不是一回事）。✅ **同日设计层第二片**：**形状对已数据化** —— 分派成了 `RULES` 的**有序规则表**（谓词 + 处理器；**顺序即语义**，兜底必须最后由 debug_assert 守），**加一个域 = 在 generic 之前追加一条规则**（谓词 + 处理器），`process_pair_shaped` 本体不用动。✅ **同日设计层第三片**：**mesh 族的 5 个求解器**（`fill_mesh_world` / `mesh_provider_contacts` / `mesh_pair` / `mesh_heightfield` / `hull_vs_mesh`）整族搬成 `mesh_pair.rs` 的**自由函数**（`np: &mut DefaultNarrowPhase` 首参）⇒ 59 → **54**，且**该族自洽**：以后新加 mesh 族的求解器 = 在 `mesh_pair.rs` 里加自由函数（必要时再进一条 `RULES`），**不进类型的方法账**。仍待做：其余族（provider / 高度场 / 盒-多面体 / 外壳 / 胶囊）同样外迁 —— 按同一判据做（新加该族求解器不必再动本类型），别只盯数字。✅ **同日设计层第四片**：**mesh 域已收干净** —— `mesh_mesh.rs` 的 3 个（`mesh_dispatch` / `mesh_vs_mesh` / `mesh_collect`）也成自由函数 ⇒ 54 → **51**；**整个 mesh 域的求解器**现在都在 `pair_shaped` / `mesh_pair` / `mesh_mesh` 的自由函数里。✅ **同日设计层第五片**：**provider 族与 capsule 族的求解器**外迁 —— `provider.rs` 的 `provider_shape_contacts` / `hull_provider_contacts` 与 `pair_shaped/capsule.rs` 的 `capsule_ab` / `capsule_ba` 都成**自由函数**（`np: &mut DefaultNarrowPhase` 首参）⇒ 51 → **47**；新增该族的**求解器** = 在对应文件里加自由函数，不进类型的方法账（provider 族的**对组装** `provider_pair` 见第六片）。✅ **同日设计层第六片**：**provider 族的对组装与高度场族**也离开类型 —— `provider_pair`（含 `quant_normal` / `pick_dominant_normal` / `four_corner_points`）与 `heightfield_pair` 从 `impl DefaultNarrowPhase` 搬成 `pair_shaped.rs` 的**自由函数**（`np` 首参），分派表的两个处理器改调 `super::provider_pair` / `super::heightfield_pair` ⇒ 47 → **45**。放在 `pair_shaped.rs` 而不搬进 `provider.rs` / `hf.rs`：接收文件受 god 棘轮的 file_lines 只准减约束，涨行会判红 —— 门是量具，这里修的是**类型不再持有这两族**这件事本身。✅ **同日设计层第七片**：**prims 族**离开类型 —— `prims.rs` 的 `sphere_convex_ab` / `capsule_axis_reach` / `capsule_reach` / `select_contacts` 从 `impl DefaultNarrowPhase` 搬成模块级自由函数（`np` 首参；`select_contacts` 直接读 `np.min_point_sep`，所有调用点本来就传这个值）⇒ 45 → **41**。✅ **同日设计层第八片**：**盒-多面体族**离开类型 —— `pair_non_heightfield` / `sphere_convex_pair` / `convex_sphere_pair` / `box_pair` / `poly_pair` 从 `impl DefaultNarrowPhase` 搬成 `pair_shaped.rs` 的自由函数（`np` 首参），分派表的 generic 处理器改调 `super::pair_non_heightfield` ⇒ 41 → **36**；此时 `pair_shaped.rs` 的 `impl` 只剩 `process_pair_shaped` 薄入口。✅ **同日设计层第九片**：**外壳族**离开类型 —— `support.rs` 的 `fill_hull_world` / `support_of` / `hull_pair` / `hull_pair_heightfield` 从 `impl DefaultNarrowPhase` 搬成模块级自由函数（`np` 首参；`support_of` 显式 `'a` 生命周期以保持对 `np.hulls` 的借用）⇒ 36 → **32**，调用点（provider / capsule / pair_dispatch）改调 `crate::support::*`。方法数 **32 = `max_type_methods_alone` 阈值上限** ⇒ 本类型**不再被 god 门记为债务**（下面仍待做的是**设计口径**上的继续收敛，不是门的要求）：✅ **同日设计层第十片**：**SAT 族**离开类型 —— `sat.rs` 的 10 条（`box_axes` / `select_ref_face` / `collect_ref_verts` / `collect_incident` / `clip_by_side_planes` / `build_axes` / `box_pair_scan` / `axis_extents` / `sat` / `clip`）从 `impl DefaultNarrowPhase` 搬成模块级自由函数（`np` 首参），`box_pair` / `poly_pair` 与单元测试改调 `crate::sat::*` ⇒ 32 → **22**。✅ **同日设计层第十一片**：**support 余下的工具方法**离开类型 —— `kids_take` / `kids_put` / `predict_inflate` / `poly_for` 从 `impl DefaultNarrowPhase` 搬成 `support.rs` 的模块级自由函数（`np` 首参），调用点（pair_dispatch / pair_shaped / capsule / prims / heightfield / 单测）改调 `crate::support::*` ⇒ 22 → **18**。⚠️ **`pair.rs::process_pair` 刻意不搬**：它是 20 行的薄委派（唯一调用点在 `entry.rs`），搬成自由函数会让 `entry.rs` 加一行 `use`（或把长路径调用拆成 8 行）——两者都触发 `entry.rs` 的 file_lines 棘轮，而该文件的最长函数（`collide`）降不下来 ⇒ **没有设计收益、只有门账**；按 KNOWLEDGE.md §1.9「不为维护而维护」，保留为方法并在此留档。
+
+### `crates/vxl-phys-gpu::Packet`
+
+【2026-10-21 已出榜：方法数 19 ≤ `max_type_methods_alone`（32）⇒ 不再被 god 门记为债务；本条保留作**设计意图留档**，不是当前在榜债务。】已登记债务（非豁免）：常驻缓冲清单 + 驱动会话（run_/run_stages/run_deferred/read_*/poll_wait/measure_readback_ms）混在一个类型。**处置（设计层）**：把会话侧（run/read/poll）拆到独立的 submission 类型，缓冲清单留原处 —— 字段数本就不是复杂度（数字只准减是**测量**，见 KNOWLEDGE.md §1.9）。

@@ -1,7 +1,8 @@
 //! FLIP **仿射传输层**：APIC 的 `C` 从**粒子场**现算（`flip.rs` 的传输半）。
 //!
-//! 口径与推导写在 `flip.rs` 模块头"APIC"节；这里只放三件纯函数级的事：`C·d`、
-//! 一阶矩累加、`C = M·D⁻¹`，以及在粒子场上跑一遍估出逐粒子 `C`。
+//! 口径与推导写在 `flip.rs` 模块头"APIC"节；这里只放纯函数级的事：`C·d`、一阶矩累加、
+//! `C = M·D⁻¹`、在粒子场上跑一遍估出逐粒子 `C`，以及 **θ 门控**（`APIC_MAX_THETA` +
+//! `apic_allowed`：APIC 只在 `θ = cfg.flip_ratio ≤ 0.5` 时生效）。
 //!
 //! **为什么不去读网格速度场**（上一版的写法）：PIC 的 `v ← v_网格` 重置把粒子场在同一格的
 //! 8 个节点上拉平，从那个场估出的梯度是"被磨过一次"的 ⇒ 自洽退化回 PIC（实测 `l_keep`
@@ -9,8 +10,33 @@
 //!
 //! **契约**：`estimate_from_field` 是 `(pos, vel)` 的纯函数，每子步现算、不落任何跨 tick 缓冲
 //! ⇒ 逐位复现/保存恢复/状态继承三份契约原样成立（`C` **不进粒子状态**）。
+//!
+//! **成本口径**（相对纯 FLIP 的额外开销）：APIC 每子步**多一次** `UniformGrid::rebuild`
+//! **加上**每个流体粒子**一次** 27 邻域查询（`estimate_from_field`）。两者都只取**流体粒子**
+//! （`sys.pos[..sys.n_fluid]`）⇒ 与 FLIP 自身网格 `flip/grid.rs::build` 的取样口径**一致**
+//! ⇒ **边界粒子两边都不在内**。FLIP 的 P2G 是 **8 角点三线性散射**（`flip.rs::p2g`）、
+//! **不做** 27 邻域遍历 ⇒ 准确说法是「多一次网格重建 + 每粒子一次 27 邻域查询」，
+//! **不是**"邻居查询成本翻倍"。拟合只看流体粒子 ⇒ 表面粒子的邻域是**单侧**的
+//! ⇒ 这正是岭正则 `λ` 存在的理由（见 `affine_from_moments`）。
 use crate::grid::UniformGrid;
-use crate::{FluidSystem, Vec3};
+use crate::{FluidConfig, FluidSystem, Vec3};
+
+/// **APIC 的 θ 门控上限**（`θ = cfg.flip_ratio`）：`θ > 0.5` 时 **APIC 不得生效**。
+///
+/// 依据（P23 的 θ 扫描，见 `docs/OPEN-PROBLEMS.md`）：APIC 的**红利**（旋转团 `l_keep`
+/// 0.376 → 1.007、`rot_err` 0.673 → 0.439，**θ = 0.5 档**）只存在于 `θ ≤ 0.5`；`θ = 0.8` 起红利反向
+/// （`rot_err` 反超），`θ = 0.95` 更两头挨打（**门控前读数**：`rot_err` +0.215、`vmax` 1.86×、`ke` +18%）
+/// ⇒ 门控后这两档的 APIC **不可达**（开/关读数逐位相同）。
+pub(super) const APIC_MAX_THETA: f32 = 0.5;
+
+/// **APIC 是否允许生效** ＝ 开关开着 **且** `θ ≤ APIC_MAX_THETA`。
+///
+/// 门控只作用在 **APIC 分支内部** ⇒ 默认档（`flip_apic = false`）逐位不变，
+/// 三份确定性契约（逐位复现/保存恢复/状态继承）原样成立。`θ` 为 `NaN` 时比较为假 ⇒ 视为关。
+#[inline]
+pub(super) fn apic_allowed(cfg: &FluidConfig) -> bool {
+    cfg.flip_apic && cfg.flip_ratio <= APIC_MAX_THETA
+}
 
 /// APIC 仿射项 `C·d`（`C` 行主序 3×3，**世界单位** 1/s）；返回值是速度增量（不是位移）。
 #[inline]

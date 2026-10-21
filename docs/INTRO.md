@@ -20,7 +20,7 @@
 | 测试 | **763 个** | `cargo test --workspace -- --list` |
 | 金样（回归基线） | **14 项**，全部在 CI 阻断 | `scripts/gate_gold.sh` 的注册项 |
 | CI | **23 个 job**，覆盖 3 个编译器 × 2 个架构 | `.github/workflows/ci.yml` |
-| 本地门禁 | **28 道** | `python -X utf8 scripts/local_gate.py` |
+| 本地门禁 | **29 道** | `python -X utf8 scripts/local_gate.py` |
 | 文档 | **47 份** + **10 条 ADR** | `docs/` |
 | 提交 | **193 个** | `git rev-list --count HEAD` |
 

@@ -17,6 +17,10 @@ import sys
 import shutil
 import subprocess
 
+# 子进程按 UTF-8 输出（Windows 中文控制台默认 cp936 ⇒ 不注入会 UnicodeDecodeError，
+# 曾把整个 gate-probe 打崩 ⇒ local_gate.py 末道门假红）。与 local_gate.py 同源做法。
+os.environ["PYTHONUTF8"] = "1"
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROBE_DIR = os.path.join(ROOT, "crates", "_gate_probe")
 
@@ -77,23 +81,28 @@ def run_gate(gate):
     return subprocess.run(
         [sys.executable, script], cwd=ROOT,
         capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
     )
 
 
+def _inject(path, content):
+    os.makedirs(PROBE_DIR, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+
+
 def _probe_rs():
+    """逐门注入 .rs 最小违规：注入前先跑一次**干净态**（否则「本来就红」会被
+    误当成「注入后转红」——本仓 2026-09-30 就靠这步量出 16 道门的 ✅ 不成立）。"""
     fails = []
     try:
         for gate, (fname, content) in PROBES.items():
-            os.makedirs(PROBE_DIR, exist_ok=True)
-            # 先跑一次**干净态**：此时探针文件还没写。缺这步的话，一门本来判红也会被
-            # 当成"注入后转红"而误判成真门（本仓 2026-09-30 就靠这步量出 16 道门的 ✅ 不成立）。
             pre = run_gate(gate)
-            with open(os.path.join(PROBE_DIR, fname), "w", encoding="utf-8") as f:
-                f.write(content)
+            p = os.path.join(PROBE_DIR, fname)
+            _inject(p, content)
             out = run_gate(gate)
-            os.remove(os.path.join(PROBE_DIR, fname))
+            os.remove(p)
             if pre.returncode != 0:
-                # 基线未绿 ⇒ 这门无论注入不注入都是红，注入实验无法归因。别把它当"真门"放行。
                 print(f"⚠️ {gate}: 注入前已红（基线未绿）——本次无法判定它是否真门，先修基线")
                 fails.append(gate + "(基线未绿)")
                 continue
@@ -102,21 +111,20 @@ def _probe_rs():
                 print(f"✅ {gate}: 注入最小违规后转红（是真门）")
             else:
                 print(f"❌ {gate}: 注入后仍绿 / 崩溃 —— 门可能为空门！")
-                print("   rc:", out.returncode, "| stdout:", repr(out.stdout[:300]), "| stderr:", repr(out.stderr[:300]))
+                print("   rc:", out.returncode, "| out:", repr((out.stdout or "")[:300]), "| err:", repr((out.stderr or "")[:300]))
                 fails.append(gate)
     finally:
-        if os.path.isdir(PROBE_DIR):
-            shutil.rmtree(PROBE_DIR, ignore_errors=True)
+        shutil.rmtree(PROBE_DIR, ignore_errors=True)
     return fails
 
 
 def _probe_toml():
+    """逐门注入含违例的 Cargo.toml（结构性硬判）。"""
     fails = []
     try:
         for gate, content in TOML_PROBES.items():
-            os.makedirs(PROBE_DIR, exist_ok=True)
-            with open(os.path.join(PROBE_DIR, "Cargo.toml"), "w", encoding="utf-8") as f:
-                f.write(content)
+            p = os.path.join(PROBE_DIR, "Cargo.toml")
+            _inject(p, content)
             out = run_gate(gate)
             shutil.rmtree(PROBE_DIR, ignore_errors=True)
             caught = out.returncode != 0 and "❌" in out.stdout
@@ -124,11 +132,10 @@ def _probe_toml():
                 print(f"✅ {gate}: 注入最小违例 manifest 后转红（是真门）")
             else:
                 print(f"❌ {gate}: 注入违例 manifest 后仍绿 / 崩溃 —— 门可能为空门！")
-                print("   rc:", out.returncode, "| stdout:", repr(out.stdout[:300]), "| stderr:", repr(out.stderr[:300]))
+                print("   rc:", out.returncode, "| out:", repr((out.stdout or "")[:300]), "| err:", repr((out.stderr or "")[:300]))
                 fails.append(gate)
     finally:
-        if os.path.isdir(PROBE_DIR):
-            shutil.rmtree(PROBE_DIR, ignore_errors=True)
+        shutil.rmtree(PROBE_DIR, ignore_errors=True)
     return fails
 
 
@@ -137,6 +144,7 @@ def main():
     skipped = []
     fails += _probe_rs()
     fails += _probe_toml()
+    import gate_probe_slice; fails += gate_probe_slice.probe_slice_gate()
     for gate, why in SKIP.items():
         print(f"ℹ️  {gate}: 跳过注入验证 —— {why}")
         skipped.append(gate)

@@ -205,7 +205,8 @@ fn rot_case(ratio: f32, apic: bool, ticks: usize) -> Rot {
 ///    `C ← (⟨C,M⟩/T)·C`"那一刀的——驯服前是 1.033（伪增益）、把 `C` 写死成解析 ω× 是 1.081，
 ///    而没有收缩时近静场会炸（见 ⑤ 的 P23 读数）；
 /// ③ **场更接近刚体**：APIC 的 `rot_err` 必须明显低于 PIC（实测 0.429 vs 0.864）；
-/// ④ **不搅乱**：`θ = 0.95` 开 APIC 不得把角动量搞坏（实测反升 0.866 → 1.073）；
+/// ④ **不搅乱**：`θ = 0.95` 开 APIC 不得把角动量搞坏（**门控落盘后该档 ≡ FLIP**，见 G1；
+///    门控前实测反升 0.866 → 1.073 ⇒ 门控把这笔红利连同代价一起收掉）；
 /// ⑤ **默认关**：`flip_apic` 默认 `false`（off 路径逐字节不动；开档是 A/B 实验档——
 ///    静水槽代价 `ke` +18%、`sink` +15%、`over_in` −61%，见 `docs/OPEN-PROBLEMS.md` P23）；
 /// ⑥ **A/B 档也逐位复现**：同档跑两遍读数逐位相同（含 `digest`）。
@@ -266,7 +267,8 @@ fn flip_apic_derived_c_buys_rotation() {
         apic.rot_err,
         pic.rot_err
     );
-    // ④ 不搅乱：FLIP 档开 APIC 不得把角动量搞坏 > 3%（实测反升到 1.073）。
+    // ④ 不搅乱：FLIP 档开 APIC 不得把角动量搞坏 > 3%（门控落盘后该档 ≡ FLIP ⇒ 恒等通过；
+    //    门控前实测反升到 1.073）。
     assert!(
         flip_apic.l_keep >= 0.97 * flip.l_keep,
         "APIC 把 FLIP 档的角动量搞坏了：{} vs {}",
@@ -298,6 +300,61 @@ fn flip_apic_derived_c_buys_rotation() {
     );
 }
 
+/// **θ 门控 · 判据 G1**：`θ = 0.95`（**超** `θ_max = 0.5`）时，即使 `flip_apic = true`
+/// 也必须与 `flip_apic = false` **逐位相同** ⇒ 门控把「红利/代价两头挨打」那一档彻底关掉，
+/// 且关得**不留痕**（不是"近似退回"，是同一位模式）。
+///
+/// 门控实现见 `src/flip/affine.rs::apic_allowed`（`θ_max = APIC_MAX_THETA = 0.5`）。
+#[test]
+fn apic_theta_gate_shuts_high_theta_bit_exactly() {
+    let ticks = 30;
+    let off = rot_case(0.95, false, ticks);
+    let on = rot_case(0.95, true, ticks);
+    assert!(
+        on.digest == off.digest,
+        "θ = 0.95 超门控（θ_max = 0.5）⇒ APIC 档必须与关档逐位相同：digest {} vs {}",
+        on.digest,
+        off.digest
+    );
+    assert!(
+        on.l_keep.to_bits() == off.l_keep.to_bits(),
+        "θ = 0.95 超门控 ⇒ l_keep 位不同 ⇒ 门控没生效"
+    );
+    assert!(
+        on.rot_err.to_bits() == off.rot_err.to_bits(),
+        "θ = 0.95 超门控 ⇒ rot_err 位不同 ⇒ 门控没生效"
+    );
+}
+
+/// **θ 门控 · 判据 G2**：`θ = 0.5`（**恰在**门控边界 `θ_max = 0.5`）时 APIC **必须真的生效**
+/// 且红利仍在：`l_keep ≥ 0.95`（实测 1.0071）、`rot_err ≤ 0.50`（实测 0.4385）。
+///
+/// 这条钉的是门控的**另一头**：门控不能把红利那一档也一起关掉（否则门控只是"把 APIC 焊死"
+/// 而不是"把代价那一头收掉"）。读数取自 `diag_apic_theta_scan`（30 tick，ω = 2 rad/s）：
+/// **θ = 0.5 关档** `l_keep` 0.3760 / `rot_err` 0.6728 ⇒ 开档 `rot_err` 0.4385 明显优于关档 0.6728。
+#[test]
+fn apic_theta_gate_keeps_benefit_at_theta_half() {
+    let ticks = 30;
+    let on = rot_case(0.5, true, ticks);
+    let off = rot_case(0.5, false, ticks);
+    assert!(
+        on.l_keep >= 0.95,
+        "θ = 0.5 恰在门控内 ⇒ APIC 必须生效且保住旋转：l_keep {}（< 0.95）",
+        on.l_keep
+    );
+    assert!(
+        on.rot_err <= 0.50,
+        "θ = 0.5 恰在门控内 ⇒ APIC 必须生效且场更接近刚体：rot_err {}（> 0.50）",
+        on.rot_err
+    );
+    assert!(
+        on.rot_err < off.rot_err,
+        "θ = 0.5 门控内开 APIC 的 rot_err {} 未优于关档 {} ⇒ APIC 档没真生效",
+        on.rot_err,
+        off.rot_err
+    );
+}
+
 /// `#[ignore]` 诊断（不进 CI）：旋转团台的四档原始读数；结论见 `src/config.rs` 的
 /// `flip_apic` doc 与 `src/flip.rs` 模块头 `## APIC` 节。
 #[test]
@@ -319,5 +376,32 @@ fn diag_apic_rotation() {
             "{n:12} {:9.4} {:9.4} {:11.3e} {:8.4}",
             r.l_keep, r.rot_err, r.ke, r.vmax
         );
+    }
+}
+
+/// `#[ignore]` 诊断（不进 CI）：**APIC 的红利随 θ 怎么变**（P23 的前置表·红利侧）。
+///
+/// 代价侧那张表在 `flip_incompressibility_probe.rs::diag_apic_theta_scan`（静水槽 × θ）。
+/// 本表出红利侧（旋转团 × θ）⇒ 两表合起来才能判「**θ 门控**」（APIC 只在 θ ≤ θ_max 生效）：
+/// 若红利在 θ → 0 时单调变大、而代价要到 θ → 0.95 才出现 ⇒ 两段分得开，门控可用。
+/// **只打印、不断言**（仪表）；`flip_apic` 默认关 ⇒ 本诊断**不改**默认档任何读数。
+///
+/// 跑法：`cargo test -p vxl-phys-fluid --test flip_rotation_probe -- --ignored --nocapture`
+#[test]
+#[ignore = "旋转团 × θ 扫描（仪表，只打印）；跑法见该测试的 doc"]
+fn diag_apic_theta_scan() {
+    eprintln!("== 旋转团（30 tick，ω = 2 rad/s，零重力/无边界）：APIC 开/关 × θ 扫描 ==");
+    eprintln!(
+        "{:8} {:6} {:9} {:9} {:11} {:8}",
+        "θ", "apic", "l_keep", "rot_err", "ke", "vmax"
+    );
+    for ratio in [0.0f32, 0.25, 0.5, 0.8, 0.95] {
+        for apic in [false, true] {
+            let r = rot_case(ratio, apic, 30);
+            eprintln!(
+                "{ratio:8} {apic:6} {:9.4} {:9.4} {:11.3e} {:8.4}",
+                r.l_keep, r.rot_err, r.ke, r.vmax
+            );
+        }
     }
 }
