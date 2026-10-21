@@ -17,6 +17,7 @@
 use super::super::{grid::UniformGrid, Vec3};
 
 /// **力相位的只读上下文**（核是自由函数 ⇒ 把 `FluidSystem` 的字段按需借出来）。
+#[derive(Clone, Copy)]
 pub(crate) struct ForceCtx<'a> {
     pub pos: &'a [Vec3],
     pub vel: &'a [Vec3],

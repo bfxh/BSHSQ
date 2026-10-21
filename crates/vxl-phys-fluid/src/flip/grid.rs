@@ -92,7 +92,7 @@ impl FlipScratch {
     pub(super) fn build(&mut self, sys: &FluidSystem, providers: &dyn ProviderColliders) {
         let mut mn = Vec3::new(f32::INFINITY, f32::INFINITY, f32::INFINITY);
         let mut mx = Vec3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
-        for p in &sys.pos[..sys.n_fluid] {
+        for p in &sys.dom.ps.pos[..sys.n_fluid] {
             mn = Vec3::new(mn.x.min(p.x), mn.y.min(p.y), mn.z.min(p.z));
             mx = Vec3::new(mx.x.max(p.x), mx.y.max(p.y), mx.z.max(p.z));
         }
@@ -102,13 +102,13 @@ impl FlipScratch {
         if !matches!(mn.x.partial_cmp(&mx.x), Some(core::cmp::Ordering::Less)) {
             // 给一个 h 见方的单格网格（不该发生，`substep` 已挡 n_fluid = 0）。
             mn = Vec3::ZERO;
-            mx = Vec3::new(sys.h, sys.h, sys.h);
+            mx = Vec3::new(sys.dom.kern.h, sys.dom.kern.h, sys.dom.kern.h);
         }
         // 单元边长 ≈ 粒子间距（经典 FLIP：grid_step ≈ 粒径）；间距未设时退回 h/2。
-        let base = if sys.spacing > 0.0 {
-            sys.spacing
+        let base = if sys.dom.kern.spacing > 0.0 {
+            sys.dom.kern.spacing
         } else {
-            0.5 * sys.h
+            0.5 * sys.dom.kern.h
         };
         let mut grid_step = base.max(1e-6);
         let mut dims = [1usize; 3];
@@ -180,13 +180,13 @@ impl FlipScratch {
         let mut out: Vec<InteropContact> = Vec::new();
         let (nx, ny, nz) = (self.dims[0], self.dims[1], self.dims[2]);
         // ① 固体：只在"存在边界"时才查（无边界 ⇒ 全空/流，零开销）。
-        if !sys.boundaries.is_empty() {
+        if !sys.dom.bnd.boundaries.is_empty() {
             for i in 0..nx {
                 for j in 0..ny {
                     for k in 0..nz {
                         let c = self.center(i, j, k);
                         let mut solid = false;
-                        for &bid in &sys.boundaries {
+                        for &bid in &sys.dom.bnd.boundaries {
                             out.clear();
                             if providers.contacts_point_boundary(bid, c, probe, &mut out) {
                                 for ct in &out {
@@ -206,7 +206,7 @@ impl FlipScratch {
         }
         // ② 流体：三线性权重散射（与 P2G 同一模板）⇒ 权重和 > 0 的**非固体**单元是流体。
         for i in 0..sys.n_fluid {
-            let g = self.coord(sys.pos[i]);
+            let g = self.coord(sys.dom.ps.pos[i]);
             let (i0, ux) = cell_axis(g.x);
             let (j0, uy) = cell_axis(g.y);
             let (k0, uz) = cell_axis(g.z);

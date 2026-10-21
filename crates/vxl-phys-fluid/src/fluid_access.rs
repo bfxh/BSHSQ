@@ -12,7 +12,8 @@ mod state;
 // **液面表面驱动**（风/水流 → 自由表面粒子；`ROUTE §4` 的「风 × 液」那一格）。
 #[path = "fluid_access/wind.rs"]
 pub mod wind;
-use lattice::{lattice_positions, lattice_w_sum};
+use crate::system::domains::{Domains, FluidBoundary, KernelParams, ParticleState};
+use lattice::lattice_positions;
 
 /// **按给定位置建流体系统**（`ROUTE.md` §4「扫描场景起步」的落点）：点云/扫描件先经
 /// `StateBridge::import_positions` 或直接给位置，再由此建系统 —— 质量仍按**静止晶格**标定
@@ -38,47 +39,28 @@ fn assert_cpu_family(cfg: &FluidConfig) {
 
 /// 组装本体（`new` 的晶格路径与 `from_positions` 的点云路径**共用**一条：核常数 + 质量标定 +
 /// 逐段缓冲初始化）。抽出来的另一个理由：`new` 是本文件最长函数，god 门"合法交换"要求它严格下降。
+///
+/// **数据侧按域打包**（见 `system/domains.rs`）：四个域各建一份，交给 `Domains`。
 fn assemble(cfg: FluidConfig, pos: Vec<Vec3>, spacing: f32) -> FluidSystem {
     assert_cpu_family(&cfg);
-    let h = cfg.smoothing_radius.max(1e-5);
-    let h2 = h * h;
-    let k6 = 315.0 / (64.0 * std::f32::consts::PI * h.powi(9));
-    let ks = 45.0 / (std::f32::consts::PI * h.powi(6));
-    let w0 = k6 * h2 * h2 * h2; // (h²)³
-    let b_tait = cfg.sound_speed * cfg.sound_speed * cfg.rest_density / cfg.gamma_tait;
+    // 核常数（域①）：从 `cfg` 一次性标定（含质量标定 `m = ρ0/Σ_lattice W`）。
+    let kern = KernelParams::calibrate(&cfg, spacing);
+    let mass = kern.mass;
     let n = pos.len();
-    // 质量标定：对晶格求 Σ W（间距 spacing 的无限晶格截断到核半径内）。
-    let mass = cfg.rest_density / lattice_w_sum(h, h2, k6, spacing);
+    // 边界域（域③）：接触带 0.15h（见 `KernelParams::calibrate` 的注）。
+    let bnd = FluidBoundary {
+        skin: 0.15 * kern.h,
+        ..FluidBoundary::default()
+    };
     FluidSystem {
-        // 接触带 0.15h：粒子静置在 sdf = skin 处，带越薄壁邻密度亏越小
-        // （镜像鬼影对贴壁层全额补回固体侧缺失的核质量）。带内最深穿透
-        // 仍被推出（半空间无「另一侧」，薄带不引入穿隧）。
-        skin: 0.15 * h,
-        h,
-        h2,
-        k6,
-        ks,
-        w0,
-        b_tait,
-        mass,
-        boundaries: Vec::new(),
-        vel: vec![Vec3::ZERO; n],
-        dens: vec![0.0; n],
-        press: vec![0.0; n],
-        acc: vec![Vec3::ZERO; n],
-        xsph: vec![Vec3::ZERO; n],
-        grid: UniformGrid::default(),
-        contacts: Vec::new(),
-        spacing,
+        dom: Domains {
+            kern,
+            ps: ParticleState::new(pos, mass),
+            bnd,
+            grid: UniformGrid::default(),
+        },
         n_fluid: n,
-        pmass: vec![mass; n],
-        spans: Vec::new(),
-        breact: Vec::new(),
-        // 不变式：`bforce.len() == pos.len()`（`assemble` 给流体段；`set_boundary_particles` 随 `pos` 一起 resize；`truncate_to_fluid` 一起截断）。
-        bforce: vec![Vec3::ZERO; n],
-        lattice_cache: Vec::new(),
         phase_us: [0; 5],
-        pos,
         cfg,
     }
 }
@@ -108,28 +90,28 @@ impl FluidSystem {
 
     /// 流体晶格间距（边界粒子的采样间距与体积标定同源）。
     pub fn particle_spacing(&self) -> f32 {
-        self.spacing
+        self.dom.kern.spacing
     }
 
     /// 当前边界粒子数（2b；0 = 纯流体）。
     pub fn boundary_count(&self) -> usize {
-        self.pos.len() - self.n_fluid
+        self.dom.ps.pos.len() - self.n_fluid
     }
 
     /// 当前边界粒子覆盖的体 id（按段序 = 生成序，确定性）。
     pub fn boundary_bodies(&self) -> impl Iterator<Item = u32> + '_ {
-        self.spans.iter().map(|s| s.0)
+        self.dom.bnd.spans.iter().map(|s| s.0)
     }
 
     /// **反作用**（`step` 后有效；**tick 平均** = dt_sub 时间加权，C2 口径）：每体 `(体 id, 力, 绕体原点的力矩)`。
     /// 体原点处的力与力矩都已是**力的量纲**（未乘 dt）；facade 按自己的子步施加。
     pub fn boundary_reactions(&self) -> &[(u32, Vec3, Vec3)] {
-        &self.breact
+        &self.dom.bnd.breact
     }
 
     /// 单粒质量（晶格标定结果；导出/审计用）。
     pub fn particle_mass(&self) -> f32 {
-        self.mass
+        self.dom.kern.mass
     }
 
     /// **邻域网格导出**（只读；GPU 后端与诊断用）。
@@ -138,18 +120,19 @@ impl FluidSystem {
     /// 格内按**索引升序**）⇒ GPU 侧按同一序枚举邻域即可与 CPU **同求和序**
     /// （这是 `docs/PLAN-gpu.md` §4 口径 A"能位级就位级"的前提）。
     pub fn neighbor_grid(&self) -> NeighborGrid<'_> {
+        let g = &self.dom.grid;
         NeighborGrid {
-            min: self.grid.min,
-            inv: self.grid.inv,
-            dims: (self.grid.nx, self.grid.ny, self.grid.nz),
-            start: &self.grid.start,
-            items: &self.grid.items,
+            min: g.min,
+            inv: g.inv,
+            dims: (g.nx, g.ny, g.nz),
+            start: &g.start,
+            items: &g.items,
         }
     }
 
     /// 流体粒子位置（前缀；不含边界粒子）。
     pub fn positions(&self) -> &[Vec3] {
-        &self.pos[..self.n_fluid]
+        &self.dom.ps.pos[..self.n_fluid]
     }
 
     /// **全部粒子**（含 2b 边界粒子）的 `(pos, vel, pmass, n_fluid)`——**GPU 后端/耦合**用。
@@ -158,45 +141,50 @@ impl FluidSystem {
     /// 语义（与 CPU 的 `substep` 逐条对应）：密度/压力/力跑**全部**粒子（邻域必须看得见边界粒子），
     /// 而**积分（含 XSPH/CFL）只跑 `0..n_fluid`**（边界粒子是运动学冻结的）。
     pub fn raw_particles(&self) -> (&[Vec3], &[Vec3], &[f32], usize) {
-        (&self.pos, &self.vel, &self.pmass, self.n_fluid)
+        (
+            &self.dom.ps.pos,
+            &self.dom.ps.vel,
+            &self.dom.ps.pmass,
+            self.n_fluid,
+        )
     }
 
     /// 流体粒子的**加速度**（前缀；不含重力以外的外力）——`Σ m·a` 与 `boundary_forces()` 一起
     /// 构成 2b 的"成对力等大反向"判据（见 `tests/boundary_reaction_balance.rs`）。
     pub fn accelerations(&self) -> &[Vec3] {
-        &self.acc[..self.n_fluid]
+        &self.dom.ps.acc[..self.n_fluid]
     }
 
     /// **边界粒子受的反作用**（后缀；每子步由流体侧成对累加，见 `fluid_force.rs`）——
     /// 聚合到体上就是 `breact`（`boundary_reactions()`）。空 = 无边界粒子。
     pub fn boundary_forces(&self) -> &[Vec3] {
-        &self.bforce[self.n_fluid..]
+        &self.dom.ps.bforce[self.n_fluid..]
     }
 
     pub fn velocities(&self) -> &[Vec3] {
-        &self.vel[..self.n_fluid]
+        &self.dom.ps.vel[..self.n_fluid]
     }
 
     pub fn densities(&self) -> &[f32] {
-        &self.dens[..self.n_fluid]
+        &self.dom.ps.dens[..self.n_fluid]
     }
 
     pub fn pressures(&self) -> &[f32] {
-        &self.press[..self.n_fluid]
+        &self.dom.ps.press[..self.n_fluid]
     }
 
     /// 覆盖初速度（ dams break / 动量测试用；顺序 = 粒子索引序）。
     pub fn set_velocities(&mut self, vs: &[Vec3]) {
         let n = vs.len().min(self.n_fluid);
-        self.vel[..n].copy_from_slice(&vs[..n]);
+        self.dom.ps.vel[..n].copy_from_slice(&vs[..n]);
     }
 
     /// 边界提供者 id 列表（统一 id 空间）。
     pub fn boundaries(&self) -> &[u32] {
-        &self.boundaries
+        &self.dom.bnd.boundaries
     }
 
     pub fn set_boundaries(&mut self, ids: &[u32]) {
-        self.boundaries = ids.to_vec();
+        self.dom.bnd.boundaries = ids.to_vec();
     }
 }

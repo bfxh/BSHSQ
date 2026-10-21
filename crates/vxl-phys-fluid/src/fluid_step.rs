@@ -12,14 +12,18 @@ impl FluidSystem {
     /// - 数组按**体序 × 层序 × 面内序**排布 ⇒ 求和序确定。
     pub fn set_boundary_particles(&mut self, bodies: &[(u32, Shape, BodyPose)]) -> usize {
         self.truncate_to_fluid();
-        let mut cache = std::mem::take(&mut self.lattice_cache);
+        let mut cache = std::mem::take(&mut self.dom.bnd.lattice_cache);
         for &(body, shape, pose) in bodies {
-            // 取或建局部两层采样（缓存已移出 `self` ⇒ 与下面的 self.pos 写入无借用冲突）。
+            // 取或建局部两层采样（缓存已移出 `self` ⇒ 与下面的粒子写入无借用冲突）。
             let idx = match cache.iter().position(|(s, _)| *s == shape) {
                 Some(i) => i,
                 None => {
-                    let lat =
-                        boundary::lattice(&shape, self.spacing, self.h, self.cfg.boundary_layers);
+                    let lat = boundary::lattice(
+                        &shape,
+                        self.dom.kern.spacing,
+                        self.dom.kern.h,
+                        self.cfg.boundary_layers,
+                    );
                     if lat.is_empty() {
                         continue; // 不支持 ⇒ 不造粒、不缓存（回退粗档的信号）
                     }
@@ -27,44 +31,35 @@ impl FluidSystem {
                     cache.len() - 1
                 }
             };
-            let (_, lat) = &cache[idx];
-            let start = self.pos.len() as u32;
-            for &lp in &lat.pts {
-                let wp = pose.pos + pose.rot.rotate_vec3(lp);
-                self.pos.push(wp);
-                // 体面速度：刚体速度场 v + ω×r（r 自体原点量起）。
-                self.vel
-                    .push(pose.linvel + pose.angvel.cross(wp - pose.pos));
-                self.pmass.push(self.cfg.rest_density * lat.volume);
-                self.dens.push(0.0);
-                self.press.push(0.0);
-                self.acc.push(Vec3::ZERO);
-                self.xsph.push(Vec3::ZERO);
-            }
-            let end = self.pos.len() as u32;
+            let start = self.dom.ps.pos.len() as u32;
+            self.dom
+                .ps
+                .append_boundary(self.cfg.rest_density, &cache[idx].1, pose);
+            let end = self.dom.ps.pos.len() as u32;
             if end > start {
-                self.spans.push((body, pose.pos, start, end));
+                self.dom.bnd.spans.push((body, pose.pos, start, end));
             }
         }
-        self.lattice_cache = cache;
-        self.bforce.resize(self.pos.len(), Vec3::ZERO);
-        self.breact.clear();
+        self.dom.bnd.lattice_cache = cache;
+        self.dom.ps.bforce.resize(self.dom.ps.pos.len(), Vec3::ZERO);
+        self.dom.bnd.breact.clear();
         self.boundary_count()
     }
 
     /// 清空边界粒子（截断回流体前缀；容量保留 ⇒ 稳态零分配）。
     pub(crate) fn truncate_to_fluid(&mut self) {
         let nf = self.n_fluid;
-        self.pos.truncate(nf);
-        self.vel.truncate(nf);
-        self.dens.truncate(nf);
-        self.press.truncate(nf);
-        self.acc.truncate(nf);
-        self.xsph.truncate(nf);
-        self.pmass.truncate(nf);
-        self.bforce.truncate(nf);
-        self.spans.clear();
-        self.breact.clear();
+        let ps = &mut self.dom.ps;
+        ps.pos.truncate(nf);
+        ps.vel.truncate(nf);
+        ps.dens.truncate(nf);
+        ps.press.truncate(nf);
+        ps.acc.truncate(nf);
+        ps.xsph.truncate(nf);
+        ps.pmass.truncate(nf);
+        ps.bforce.truncate(nf);
+        self.dom.bnd.spans.clear();
+        self.dom.bnd.breact.clear();
     }
 
     /// 推进一个完整 tick（内部按 `cfg.substeps` 等分子步，经 `pbf::substep_of` 分派族；边界经统一提供者通道）。
@@ -79,14 +74,14 @@ impl FluidSystem {
     pub fn step(&mut self, dt_tick: f32, providers: &dyn ProviderColliders) {
         let sub = self.cfg.substeps.max(1);
         let dt = dt_tick / sub as f32;
-        self.breact.clear();
+        self.dom.bnd.breact.clear();
         let mut flip_sc = crate::flip::FlipScratch::new();
         for _ in 0..sub {
             crate::pbf::substep_of(self, dt, providers, &mut flip_sc);
         }
         if sub > 1 {
             let inv = 1.0 / sub as f32; // 等分子步 ⇒ 即 dt_sub/dt_tick
-            for e in &mut self.breact {
+            for e in &mut self.dom.bnd.breact {
                 e.1 *= inv;
                 e.2 *= inv;
             }
@@ -101,7 +96,7 @@ impl FluidSystem {
         // 网格含**全部**粒子（邻域必须看得见边界粒子）；边界粒子的位置/速度每 tick
         // 由 `set_boundary_particles` 整体重建，本子步内不动（运动学冻结）。
         let t = vxl_phys_core::probe::start();
-        self.grid.rebuild(&self.pos, self.h);
+        self.dom.grid.rebuild(&self.dom.ps.pos, self.dom.kern.h);
         self.phase_us[0] += vxl_phys_core::probe::us(t);
         let t = vxl_phys_core::probe::start();
         self.density_pass(providers);
@@ -114,17 +109,17 @@ impl FluidSystem {
         self.phase_us[3] += vxl_phys_core::probe::us(t);
         // 半隐式欧拉：v ← v + dt·a + ε·xsph；CFL 限速防穿隧。
         // **只积分流体粒子**（索引前缀）——边界粒子不作积分。
-        let vmax = self.cfg.max_speed_frac * self.h / dt;
+        let vmax = self.cfg.max_speed_frac * self.dom.kern.h / dt;
         let vmax2 = vmax * vmax;
         let eps = self.cfg.xsph_viscosity;
         for i in 0..nf {
-            let mut v = self.vel[i] + self.acc[i] * dt + self.xsph[i] * eps;
+            let mut v = self.dom.ps.vel[i] + self.dom.ps.acc[i] * dt + self.dom.ps.xsph[i] * eps;
             let s2 = v.length_squared();
             if s2 > vmax2 {
                 v *= vmax / s2.sqrt();
             }
-            self.vel[i] = v;
-            self.pos[i] += v * dt;
+            self.dom.ps.vel[i] = v;
+            self.dom.ps.pos[i] += v * dt;
         }
         let t = vxl_phys_core::probe::start();
         self.boundary_pass(providers);
@@ -147,6 +142,8 @@ impl FluidSystem {
     /// **转发给 `UniformGrid::for_neighbors_in`**（并行相位在分块闭包里用同一实现）。
     #[inline]
     pub(crate) fn for_neighbors(&self, i: usize, f: impl FnMut(usize, Vec3, f32)) {
-        self.grid.for_neighbors_in(&self.pos, self.h2, i, f);
+        self.dom
+            .grid
+            .for_neighbors_in(&self.dom.ps.pos, self.dom.kern.h2, i, f);
     }
 }

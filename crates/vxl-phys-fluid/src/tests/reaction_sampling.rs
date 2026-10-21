@@ -26,15 +26,15 @@ fn reaction_sampling_is_time_weighted() {
     assert!(f.set_boundary_particles(&[body]) > 0, "应当造出边界粒子");
     let nb = f.boundary_count() as f32; // 聚合是**段内逐粒求和** ⇒ 账 = nb × 每粒力
                                         // 与 `FluidSystem::step` 同一条账路：清零 → 逐子步 `aggregate_reactions` → ÷ 子步数。
-    f.breact.clear();
+    f.dom.bnd.breact.clear();
     for s in 0..4u32 {
-        for b in f.bforce[f.n_fluid..].iter_mut() {
+        for b in f.dom.ps.bforce[f.n_fluid..].iter_mut() {
             *b = Vec3::new((s + 1) as f32, 0.0, 0.0);
         }
         f.aggregate_reactions();
     }
     let inv = 1.0 / 4.0f32;
-    for e in f.breact.iter_mut() {
+    for e in f.dom.bnd.breact.iter_mut() {
         e.1 *= inv;
         e.2 *= inv;
     }

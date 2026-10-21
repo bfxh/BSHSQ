@@ -17,11 +17,11 @@ use vxl_phys_core::interop::{BridgeKind, BridgeState, StateBridge};
 #[rustfmt::skip]
 impl StateBridge for FluidSystem {
     fn kind(&self) -> BridgeKind { BridgeKind::Particle }
-    fn export_positions(&self, out: &mut Vec<Vec3>) { out.extend_from_slice(&self.pos[..self.n_fluid]); }
+    fn export_positions(&self, out: &mut Vec<Vec3>) { out.extend_from_slice(&self.dom.ps.pos[..self.n_fluid]); }
     fn import_positions(&mut self, src: &[Vec3]) -> bool {
         if src.len() != self.n_fluid { return false; }
-        self.pos[..self.n_fluid].copy_from_slice(src);
-        self.vel[..self.n_fluid].fill(Vec3::ZERO);
+        self.dom.ps.pos[..self.n_fluid].copy_from_slice(src);
+        self.dom.ps.vel[..self.n_fluid].fill(Vec3::ZERO);
         true
     }
     fn export_state(&self, out: &mut BridgeState) {
@@ -29,18 +29,18 @@ impl StateBridge for FluidSystem {
         out.vel.clear();
         out.mass.clear();
         let n = self.n_fluid;
-        out.pos.extend_from_slice(&self.pos[..n]);
-        out.vel.extend_from_slice(&self.vel[..n]);
-        out.mass.extend_from_slice(&self.pmass[..n]);
+        out.pos.extend_from_slice(&self.dom.ps.pos[..n]);
+        out.vel.extend_from_slice(&self.dom.ps.vel[..n]);
+        out.mass.extend_from_slice(&self.dom.ps.pmass[..n]);
     }
     fn import_state(&mut self, src: &BridgeState) -> bool {
         let n = self.n_fluid;
         if src.pos.len() != n { return false; }
         if !src.vel.is_empty() && src.vel.len() != n { return false; }
         if !src.mass.is_empty() && src.mass.len() != n { return false; }
-        self.pos[..n].copy_from_slice(&src.pos);
-        if src.vel.is_empty() { self.vel[..n].fill(Vec3::ZERO); } else { self.vel[..n].copy_from_slice(&src.vel); }
-        if !src.mass.is_empty() { self.pmass[..n].copy_from_slice(&src.mass); }
+        self.dom.ps.pos[..n].copy_from_slice(&src.pos);
+        if src.vel.is_empty() { self.dom.ps.vel[..n].fill(Vec3::ZERO); } else { self.dom.ps.vel[..n].copy_from_slice(&src.vel); }
+        if !src.mass.is_empty() { self.dom.ps.pmass[..n].copy_from_slice(&src.mass); }
         true
     }
 }

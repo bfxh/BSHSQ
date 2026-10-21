@@ -53,16 +53,16 @@ pub(super) fn poly6_scan(sys: &FluidSystem, x: Vec3) -> (f32, f32, Vec3) {
     let (mut wsum, mut rho) = (0.0f32, 0.0f32);
     let mut vsum = Vec3::ZERO;
     for_each_neighbor(
-        &sys.grid,
-        &sys.pos,
+        &sys.dom.grid,
+        &sys.dom.ps.pos,
         x,
-        sys.h2,
-        sys.k6,
+        sys.dom.kern.h2,
+        sys.dom.kern.k6,
         sys.n_fluid,
         |j, w| {
             wsum += w;
-            rho += sys.mass * w;
-            vsum += sys.vel[j] * w;
+            rho += sys.dom.kern.mass * w;
+            vsum += sys.dom.ps.vel[j] * w;
         },
     );
     (wsum, rho, vsum)

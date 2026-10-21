@@ -8,21 +8,21 @@ impl FluidSystem {
     /// **dt_sub 时间加权的 tick 平均力**。段序在 tick 内不变 ⇒ 按段位置就地累加；
     /// 段表中途被换（不该发生）时就地改标签重起账。
     pub(crate) fn aggregate_reactions(&mut self) {
-        for (si, &(body, origin, start, end)) in self.spans.iter().enumerate() {
+        for (si, &(body, origin, start, end)) in self.dom.bnd.spans.iter().enumerate() {
             let mut f = Vec3::ZERO;
             let mut tau = Vec3::ZERO;
             for k in start..end {
-                let fk = self.bforce[k as usize];
+                let fk = self.dom.ps.bforce[k as usize];
                 f += fk;
-                tau += (self.pos[k as usize] - origin).cross(fk);
+                tau += (self.dom.ps.pos[k as usize] - origin).cross(fk);
             }
-            match self.breact.get_mut(si) {
+            match self.dom.bnd.breact.get_mut(si) {
                 Some(e) if e.0 == body => {
                     e.1 += f;
                     e.2 += tau;
                 }
                 Some(e) => *e = (body, f, tau),
-                None => self.breact.push((body, f, tau)),
+                None => self.dom.bnd.breact.push((body, f, tau)),
             }
         }
     }
@@ -43,44 +43,45 @@ impl FluidSystem {
     /// **只投影流体粒子**（索引前缀）：边界粒子在体内、由体运动学带着走，
     /// 既不该被提供者推出，也不该被推出体外。
     pub(crate) fn boundary_pass(&mut self, providers: &dyn ProviderColliders) {
-        if self.boundaries.is_empty() {
+        if self.dom.bnd.boundaries.is_empty() {
             return;
         }
+        // 核半径与接触带宽度（域①/域③ 各自读出 ⇒ 下面几处不必再走 `self.dom.…`）。
+        let (h, skin) = (self.dom.kern.h, self.dom.bnd.skin);
         // 本子步被投影粒子：(索引, 接触法线和)。升序登记 ⇒ 消解序确定。
         let mut pushed: Vec<(usize, Vec3)> = Vec::new();
         for i in 0..self.n_fluid {
-            let pi = self.pos[i];
+            let pi = self.dom.ps.pos[i];
             // 投影累计跨所有边界（角部粒子同帧吃地面+墙的多笔推出）。
             let mut p = pi;
-            let mut v = self.vel[i];
+            let mut v = self.dom.ps.vel[i];
             let mut n_sum = Vec3::ZERO;
             let mut hit = false;
-            for &bid in &self.boundaries {
+            for &bid in &self.dom.bnd.boundaries {
                 // AABB 预滤（外扩 h；None = 无信息 ⇒ 仍查询）。
                 if let Some(bb) = providers.bounds(bid) {
-                    let m = self.h;
-                    if pi.x < bb.min.x - m
-                        || pi.x > bb.max.x + m
-                        || pi.y < bb.min.y - m
-                        || pi.y > bb.max.y + m
-                        || pi.z < bb.min.z - m
-                        || pi.z > bb.max.z + m
+                    if pi.x < bb.min.x - h
+                        || pi.x > bb.max.x + h
+                        || pi.y < bb.min.y - h
+                        || pi.y > bb.max.y + h
+                        || pi.z < bb.min.z - h
+                        || pi.z > bb.max.z + h
                     {
                         continue;
                     }
                 }
-                self.contacts.clear();
+                self.dom.bnd.contacts.clear();
                 // 流体边界口径（内点鲁棒）：体素等截断 SDF 提供者的内部
                 // 梯度被格间内面主导可指向固体深处 ⇒ 投影穿壁隧逃（实测
                 // 1–2 格厚壁均复现）；解析面提供者默认原样转 contacts_point。
-                if providers.contacts_point_boundary(bid, pi, self.skin, &mut self.contacts) {
-                    for c in &self.contacts {
+                if providers.contacts_point_boundary(bid, pi, skin, &mut self.dom.bnd.contacts) {
+                    for c in &self.dom.bnd.contacts {
                         let sdf = (pi - c.point).dot(c.normal);
                         let pen = -sdf;
                         if pen <= 0.0 {
                             continue;
                         }
-                        p += c.normal * (pen + self.skin).min(self.h);
+                        p += c.normal * (pen + skin).min(h);
                         n_sum += c.normal;
                         hit = true;
                         let vn = v.dot(c.normal);
@@ -88,15 +89,14 @@ impl FluidSystem {
                             v -= c.normal * vn;
                         }
                     }
-                    self.pos[i] = p;
-                    self.vel[i] = v;
+                    self.dom.ps.pos[i] = p;
+                    self.dom.ps.vel[i] = v;
                 }
             }
             if hit {
                 pushed.push((i, n_sum));
             }
         }
-        // 同位坍缩消解（见 `separate_coincident`）。
         self.separate_coincident(&pushed);
     }
 
@@ -105,7 +105,7 @@ impl FluidSystem {
     /// 深穿粒子逐轴推到平面交集点，法线和指向流体侧，一步拉开后
     /// 常规压强接管。位移 ≤ r_min，不注入爆发能量。
     fn separate_coincident(&mut self, pushed: &[(usize, Vec3)]) {
-        let r_min = 0.2 * self.h;
+        let r_min = 0.2 * self.dom.kern.h;
         for a in 0..pushed.len() {
             let (ia, na) = pushed[a];
             let nl = na.length();
@@ -113,9 +113,9 @@ impl FluidSystem {
                 continue;
             }
             let dir = na * (1.0 / nl);
-            let mut pa = self.pos[ia];
+            let mut pa = self.dom.ps.pos[ia];
             for &(ib, _) in &pushed[..a] {
-                let d = pa - self.pos[ib];
+                let d = pa - self.dom.ps.pos[ib];
                 let r2 = d.length_squared();
                 if r2 < r_min * r_min {
                     let r = r2.sqrt();
@@ -123,7 +123,7 @@ impl FluidSystem {
                     pa += dir * (r_min - r);
                 }
             }
-            self.pos[ia] = pa;
+            self.dom.ps.pos[ia] = pa;
         }
     }
 
@@ -131,6 +131,6 @@ impl FluidSystem {
     /// `(体 id, 体原点, 起始索引, 结束索引)`。`[start, end)` 即该体的边界粒子区间，
     /// 也正是 `boundary_reactions()` 的聚合单位 ⇒ GPU 侧按同一段表聚合即可**逐体对拍**。
     pub fn boundary_spans(&self) -> &[(u32, Vec3, u32, u32)] {
-        &self.spans
+        &self.dom.bnd.spans
     }
 }
