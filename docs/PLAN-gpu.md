@@ -1,4 +1,4 @@
-> ⚠ 读法（2026-10-19 分片）：本文已按标题边界逐字复制到 `docs/slices/PLAN-gpu.pNN.md`（3 片，单片 ≤30k 估算 token）。定位先开 `docs/slices/PLAN-gpu.INDEX.md`，再点名取单片；**不要整份读本文**（≈77,725 估算 token，一旦进上下文就每轮重送）。分片与本文不一致时以本文为准。
+> ⚠ 读法（2026-10-19 分片）：本文已按标题边界逐字复制到 `docs/slices/PLAN-gpu.pNN.md`（3 片，单片 ≤30k 估算 token）。定位先开 `docs/slices/PLAN-gpu.INDEX.md`，再点名取单片；**不要整份读本文**（≈77,832 估算 token，一旦进上下文就每轮重送）。分片与本文不一致时以本文为准。
 
 # PLAN-GPU —— GPU 档（§8 / M4）立项首步（2026-09-23）
 
