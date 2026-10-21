@@ -16,7 +16,7 @@
 #[test]
 #[ignore = "微探针（只打印）：访存 vs 算术账；见上注"]
 pub fn micro_probe_gather_vs_compute() {
-    use crate::{FluidConfig, FluidSystem, Vec3};
+    use crate::{system::ext::FluidPipelineExt, FluidConfig, FluidSystem, Vec3};
     use std::time::Instant;
     let n = 50usize; // 125k 粒（够大又不至于跑很久）
     let spacing = 0.05f32;

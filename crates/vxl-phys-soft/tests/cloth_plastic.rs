@@ -1,9 +1,8 @@
-//! **判据：布片塑性**（`docs/PLAN-plasticity.md` §四 —— `yield_strain`/`rate` 的落点）：
-//! 应变 `|len − rest| / rest` 超**屈服阈**的部分按**塑性率**每子步永久并入 `rest`
-//! ⇒ 卸载后留**永久变形**；默认 `∞` = 关（零换代）。
+//! **判据：布片塑性**（`docs/PLAN-plasticity.md` §四 —— `yield_strain`/`rate` 的落点）：应变
+//! `|len − rest| / rest` 超**屈服阈**的部分按**塑性率**每子步永久并入 `rest` ⇒ 卸载后留
+//! **永久变形**；默认 `∞` = 关（零换代）。
 //!
-//! **判据**（机器无关；装置 = **全钉住**布片 ⇒ 应变**运动学给定**、投影不干扰，
-//! 除行为腿外）：
+//! **判据**（机器无关；装置 = **全钉住**布片 ⇒ 应变**运动学给定**、投影不干扰，除行为腿外）：
 //! ① **亚阈 / 默认 = 纯弹性（逐位）**：亚阈（ε = 0.02 < yield）与默认档（∞，ε = 0.6）
 //!    各跑 60 tick ⇒ `rest` **逐位不变**、累计塑性应变恒 `0`；
 //! ② **逐边闭式对拍（主判据）**：ε = 0.6 / yield 0.05 / rate 0.5 跑 1 tick（8 子步）
@@ -18,7 +17,8 @@
 //!    ⑦ 开 ⇒ 压缩装置的**永久收缩兑现**，关 ⇒ 被弯曲 `rest` 拉住（上一片登记的边界，量化 1.24×）。
 use vxl_phys_core::interop::NoProviders;
 use vxl_phys_core::Vec3;
-use vxl_phys_soft::{cloth::plastic::Plastic, ClothSheet, Stiffness};
+use vxl_phys_soft::cloth::plastic::Plastic;
+use vxl_phys_soft::{ClothPlasticExt, ClothSheet, ClothTearExt, Stiffness};
 
 const DT: f32 = 1.0 / 60.0;
 const N: usize = 2;

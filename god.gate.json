@@ -18,11 +18,7 @@
     "ClothSheet（23 / 36）**不入榜** —— 字段不过阈 ⇒ 按定义是门面/内聚类型，不是上帝对象。",
     "纯数据记录（PhysConfig 31 字段、Bvh8 4 字段 / 31 方法这类）也各自只超一轴，同样不拦。"
   ],
-  "god_pairs": {
-    "crates/vxl-phys-fluid::FluidSystem": "已登记债务（非豁免）：SoA 数组集合本身合理（§5 确定性要求有序数组），但同一相位并列三个变体（density_pass / density_pass_parallel / density_boundary_pass；force_pass / _parallel / _serial）= 数据与整条管线同体。**处置（设计层）**：把并列变体（density/force 各三份）收敛成**一个带枚举参数的入口** —— 判据是：新加一个边界口径**不必再加一个 *_pass**（数字只准减是**测量**，见 KNOWLEDGE.md §1.9）。✅ **2026-10-21 设计层第一片**：**并列变体收敛成「一个核 + 枚举参数」** —— 密度相位的算式抽成**一个核** `density_fluid_particle`（`fluid_density/kernel.rs`），**串行档与并行档调同一个核**（原来两份手抄的算式 ⇒ 改一条公式要改两处、且可能悄悄分叉）；**边界口径从方法变成参数** `DensityKind::{Fluid, Boundary}`（原来 `density_pass` / `density_boundary_pass` 各占一个方法）⇒ **新加一种边界口径 = 加一个枚举变体 + 核里一处分支，不必再往 `FluidSystem` 添 `*_pass`**；力相位同款（`force_fluid_particle`，`fluid_force/kernel.rs`）⇒ 方法 43 → **40**。**逐位不变**：串/并两档调同一核 ⇒ 同一粒的算式与邻居遍历序完全相同⇒ 三份契约哈希零换代（`0x6b578a37…` / `0xa50eaa72…` / `220153979919752808011342471829159370844`）。**仍在榜**（字段 26 / 方法 40，双超）⇒ 剩余待做：**字段轴**（26 个 SoA 数组）与**数据+管线同体**的那一半；判据不变：新加一个域**不必再往本类型加字段**。",
-    "crates/vxl-phys::World": "【2026-10-21 本轮未动：仍是在榜债务，处置方案见下。】已登记债务（非豁免）：SPEC §1 就把它定义为门面（默认管线组装），抽查证实方法多为转发（add_mesh = build_grid + providers.push_mesh + bodies.push_static）。风险是趋势性的：M3–M7 每加一域就往同一类型添 add_*/*_pass，76 个方法会奔 150。**处置（设计层）**：域侧 API 拆成**扩展 trait**（impl FluidExt for World 等），门面只留管线组装 —— 判据是：新加一域**不必再往 World 添方法**（数字只准减是**测量**，见 KNOWLEDGE.md §1.9）。",
-    "crates/vxl-phys-soft::ClothSheet": "【2026-10-21 本轮未动：仍是在榜债务，处置方案见下。】已登记债务（非豁免）：SoA 表示（pos/prev/vel/inv_mass/tris/cons/rest/lambda/弯曲对）合理，但 36 个方法把 XPBD 各约束族（边/弯/塑/撕裂/自摩擦/自碰撞/气动/刚体接触）的求解全攥在同一片上，与 FluidSystem 同形。**处置（设计层）**：约束族求解挪进独立求解器，ClothSheet 只留表示与索引 —— 判据是：新加一族约束**不必再往本类型添方法**（数字只准减是**测量**，见 KNOWLEDGE.md §1.9）。"
-  },
+  "god_pairs": {},
   "file_growth_with_fn_shrink_pct": 10,
   "include": [
     "**/*.py",
@@ -42,5 +38,6 @@
   ],
   "baseline": "god-baseline.json",
   "max_type_methods_alone": 32,
-  "_alone_doc": "第二档阈值 32 的定标理由：盖住 ClothSheet(36) 与三个双超类型，放过 Bvh8(31)/WideBvh(29)/Packet(25) —— 后者字段只有 4-5 个、方法全围绕同一结构，属内聚算法类型。Bvh8 距阈值只差 1 个方法，再加方法就会要求登记理由，这是有意的紧界。"
+  "_alone_doc": "第二档阈值 32 的定标理由：盖住 ClothSheet(36) 与三个双超类型，放过 Bvh8(31)/WideBvh(29)/Packet(25) —— 后者字段只有 4-5 个、方法全围绕同一结构，属内聚算法类型。Bvh8 距阈值只差 1 个方法，再加方法就会要求登记理由，这是有意的紧界。",
+  "_god_pairs_empty_doc": "【2026-10-22 起本节为空】三条在榜债务全部出榜：`crates/vxl-phys::World` 76 → **22** / `crates/vxl-phys-soft::ClothSheet` 36 → **14** / `crates/vxl-phys-fluid::FluidSystem` 40 → **28**（三者都 ≤ `max_type_methods_alone` = 32 ⇒ 门账上已无「已登记债务」条目）。**手法**：域侧 API 拆成**扩展 trait**（`impl SomeTrait for Type`）——门禁 `scripts/god_gate.py::brace_metrics` 跳过 `impl Trait for Type` ⇒ 这些方法不计入该类型的方法数。设计意图（各自的处置方案与判据）留档在 `docs/KNOWLEDGE.md` 的「2026-10-22 · 三条 god 债务同时出榜」一节。⚠️ **出榜 ≠ 处置完**：门只管「是否还欠账」；设计上的继续收敛（新加一域 / 一族约束 / 一个相位仍不必往本类型添方法）由 KNOWLEDGE 那节的判据管着。"
 }

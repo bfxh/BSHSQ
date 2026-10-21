@@ -864,3 +864,95 @@ god 门只认「**名字在不在 `god_pairs` 里**」，不认「这个类型**
 ### `crates/vxl-phys-gpu::Packet`
 
 【2026-10-21 已出榜：方法数 19 ≤ `max_type_methods_alone`（32）⇒ 不再被 god 门记为债务；本条保留作**设计意图留档**，不是当前在榜债务。】已登记债务（非豁免）：常驻缓冲清单 + 驱动会话（run_/run_stages/run_deferred/read_*/poll_wait/measure_readback_ms）混在一个类型。**处置（设计层）**：把会话侧（run/read/poll）拆到独立的 submission 类型，缓冲清单留原处 —— 字段数本就不是复杂度（数字只准减是**测量**，见 KNOWLEDGE.md §1.9）。
+
+## 2026-10-22 · **三条 god 债务同时出榜**：`World` 76 → 22 / `ClothSheet` 36 → 14 / `FluidSystem` 40 → 28
+
+god 门只认「**名字在不在 `god_pairs` 里**」，不认「这个类型**现在还在不在榜**」⇒
+一个类型降下来之后，它的登记会**永远留在榜上**，让后来人以为**还欠着**。
+本片把**三条在榜债务全部出榜** ⇒ `god.gate.json::god_pairs` **清空**（设计意图留档到本节）。
+
+### 共同的落地手法：**域侧 API 拆成扩展 trait**
+
+判据（三个类型各自的 `god_pairs` 原文都写着）：
+「新加一个域 / 一族约束 / 一个相位**不必再往本类型添方法**」。
+
+**门为什么认这个手法**：`scripts/god_gate.py::brace_metrics`（`god_gate.py:216`）**跳过
+`impl Trait for Type`** ⇒ 搬进 `impl SomeTrait for Type` 的方法**不计入该类型的方法数**。
+
+⚠️ **这不是「把方法搬成自由函数」那种测量层动作**（§1.9 定调：搬自由函数**不改设计、
+不计进度**）—— 区别在**接口的位置**：搬进 trait ⇒ **调用方 `use` 该 trait** ⇒
+**新加一个域 = 加一个 trait + 一份 impl**，而**原类型的方法账不动** ⇒ 判据「不必再往本类型
+添方法」在**结构上**成立（不是靠自觉，是靠类型系统：trait 方法不在那个类型的 impl 块里）。
+
+**可见性的坑**（本片实测踩到）：
+① trait 的方法声明**不能带任何可见性修饰符**（`pub` / `pub(crate)` 都不行）⇒ 原先
+`pub fn` 的方法在 trait 里写 `fn`，由 **trait 自身的可见性**决定对外可见性
+⇒ `pub trait` ⇒ 调用方 `use` 后点号语法照旧可用 ⇒ **公开 API 不破坏**。
+② 反过来：原先 `pub(crate)` 的方法搬进 **`pub`** trait ⇒ **对外可见性变大** ⇒ 顺带触发
+Rust 的 `private_interfaces` lint（`pub` trait 的签名里出现 crate 私有类型）⇒
+**本片的处置**：原先 crate 内可见的族，trait 也用 `pub(crate)`（**不外扩**）；
+只有原先就是 `pub` 的族（`ClothSheet` 的撕裂/塑性判据仪器）才用 `pub`。
+③ **trait 方法调用要求 trait 在调用方作用域可见** ⇒ 消费者要么 `use` 该 trait，
+要么写 `Trait::method(obj)`（`world.manifolds()` 会解析成私有字段 ⇒ 必须
+`DiagExt::manifolds(world)`）。
+
+### `crates/vxl-phys::World`（76 → **22**）
+
+【2026-10-22 已出榜：方法数 22 ≤ `max_type_methods_alone`（32）⇒ 不再被 god 门记为债务；
+本条保留作**设计意图留档**，不是当前在榜债务。】已登记债务（非豁免）：SPEC §1 就把它定义为
+门面（默认管线组装），抽查证实方法多为转发（`add_mesh` = `build_grid` + `providers.push_mesh` +
+`bodies.push_static`）。风险是趋势性的：M3–M7 每加一域就往同一类型添 `add_*` / `*_pass`。
+**处置（设计层）**：域侧 API 拆成**扩展 trait**，门面只留管线组装 —— 判据：新加一域
+**不必再往 `World` 添方法**。✅ **2026-10-22 落地**：11 个域侧扩展 trait 落在
+`crates/vxl-phys/src/world_struct/ext/`（`AeroExt` 3 / `BodyBuildExt` 11 / `DestructionOpsExt` 5 /
+`DiagExt` 2 / `FieldExt` 1 / `FluidExt` 3 / `HullExt` 9 / `ImpactExt` 1 / `MeshExt` 6 /
+`NarrowTierExt` 5 / `ProviderExt` 2）；门面保留的 22 个 = **管线组装面**
+（`step` / `substep` / 各 `*_pass` / `new` / `timings` / `health` / `ccd_pass` …）。
+配套：`world_mesh.rs` 删除（内容进 `world_struct/ext/mesh.rs`）、`world_soft.rs` 212 → 65 行
+（软体域进 `world_soft_ext.rs` 的 `SoftExt`）、`tests/coupling_rounds.rs` 的**扫描面**加
+`world_soft_ext.rs`（软体的三个调用点搬了家 ⇒ 扫描面不跟着搬 ⇒「新域不登记即红」那条判据
+会**静默失效**）。
+
+### `crates/vxl-phys-soft::ClothSheet`（36 → **14**）
+
+【2026-10-22 已出榜：方法数 14 ≤ `max_type_methods_alone`（32）⇒ 不再被 god 门记为债务；
+本条保留作**设计意图留档**，不是当前在榜债务。】已登记债务（非豁免）：SoA 表示
+（`pos`/`prev`/`vel`/`inv_mass`/`tris`/`cons`/`rest`/`lambda`/弯曲对）合理，但 36 个方法把
+XPBD 各约束族（边/弯/塑/撕裂/自摩擦/自碰撞/气动/刚体接触）的求解全攥在同一片上，
+与 `FluidSystem` 同形。**处置（设计层）**：约束族求解挪进独立求解器，`ClothSheet` 只留
+表示与索引 —— 判据：新加一族约束**不必再往本类型添方法**。✅ **2026-10-22 落地**：
+5 个约束族扩展 trait 落在 `crates/vxl-phys-soft/src/cloth/ext/` ——
+`ClothTearExt`（8，撕裂）/ `ClothPlasticExt`（4，塑性）/ `ClothBodyExt`（7，刚体耦合）/
+`ClothSelfCollideExt`（2，自碰撞）/ `ClothDamageExt`（1，损伤汇总步）；
+**14 个**留在 `ClothSheet` = 表示面（`new` / `particle_count` / `edge_count` / `set_pinned` /
+`step` / `substep` / `predict` / `project_constraints` / `project_bend` / `project_contacts` /
+`write_back` / `max_strain` / `bend_count`）+ `apply_aero`。
+配套：`cloth_self_collide_pass.rs` 删除（内容进 `cloth/ext/selfcollide.rs`）、
+`cloth_tear.rs` / `cloth/plastic.rs` / `cloth_coupling.rs` / `cloth/damage.rs` **只留状态**。
+**公开 API 不破坏**：`ClothTearExt` / `ClothPlasticExt` 是 `pub`（原先的方法就是 `pub`）
+⇒ crate 根再导出 ⇒ 外部 crate `use vxl_phys_soft::ClothTearExt;` 后点号语法照旧。
+
+### `crates/vxl-phys-fluid::FluidSystem`（40 → **28**）
+
+【2026-10-22 已出榜：方法数 28 ≤ `max_type_methods_alone`（32）⇒ 不再被 god 门记为债务；
+本条保留作**设计意图留档**，不是当前在榜债务。】已登记债务（非豁免）：数据侧已按域打包
+（**字段 26 → 4**：核参数 / 粒子 SoA / 边界账 / 邻域网格，见 `system/domains.rs`）
+⇒ **新加一个域不必再往本类型加字段**（字段轴判据达成）。剩余那半 = **数据+管线同体**：
+40 个方法里一半是**管线内部步**（`density_pass` / `force_pass` / `boundary_pass` / `substep` /
+`for_neighbors` / …）。**处置（设计层）**：管线内部步搬进扩展 trait —— 判据：新加一个相位
+**不必再往 `FluidSystem` 添方法**。✅ **2026-10-22 落地**：`FluidPipelineExt`（`pub(crate)`）
+落在 `crates/vxl-phys-fluid/src/system/ext/pipeline.rs`，**12 个方法 + 3 个自由函数**
+（`density_ctx` / `split_force` / `boundary_reaction_serial`）搬进去 ⇒ **40 → 28**；
+留下的 28 个**全是公开访问器与公开入口**（`len` / `positions` / `velocities` / `densities` /
+`pressures` / `accelerations` / `boundary_reactions` / `set_boundary_particles` / `step` /
+`phase_us` / `reset_phase_us` / `boundary_spans` / `gather_wall_*` …）⇒
+**公开 API 一字未动**（`vxl-phys` / `vxl-phys-gpu` / `vxl-phys-fluid/tests/` 零改动）。
+**门账口径**：`fluid_density.rs` / `fluid_force.rs` 的 `kernel` 模块改 `pub(crate)`（原先私有）
+⇒ 只在 crate 内可见，不外扩。
+
+### 逐位不变
+
+三个类型的方法体**逐字搬移**，未改一个算式、一个遍历序、一个分支 ⇒ 三份契约哈希
+**逐位不变**：`0x6b578a3730000f5aeb4c00cee0a7e249`（determinism）/
+`0xa50eaa7229f1b39dada0741822795627`（m0_gates）/
+`220153979919752808011342471829159370844`（m1_islands）。

@@ -12,14 +12,14 @@
 //! （`god_gate.py:216`）⇒ 搬进 trait 后 `World` 的方法数**不计入本类型**。
 //!
 //! **数值与顺序一字不改**（纯搬移：方法体逐字搬过来，未改一个算式、一个遍历序）。
-use crate::*;
+use crate::{BodyId, HeightField, Joint, Material, Quat, Shape, Vec3, World};
 
 /// **BodyBuildExt**：`World` 的刚体/场/液体注册面。
 pub trait BodyBuildExt {
     fn add_static(&mut self, shape: Shape, position: Vec3, rotation: Quat) -> BodyId;
     fn add_dynamic(&mut self, shape: Shape, position: Vec3, rotation: Quat, density: f32)
         -> BodyId;
-    fn add_material(&mut self, material: core::Material) -> core::MaterialId;
+    fn add_material(&mut self, material: Material) -> vxl_phys_core::MaterialId;
     fn add_heightfield(&mut self, hf: HeightField) -> BodyId;
     fn add_voxel(&mut self, vol: vxl_phys_terrain::voxel::VoxelVolume) -> BodyId;
     fn add_mesh(&mut self, mesh: vxl_phys_terrain::mesh::TriMesh) -> BodyId;
@@ -48,7 +48,7 @@ impl BodyBuildExt for World {
         self.bodies.push_dynamic(shape, position, rotation, density)
     }
     /// 注册材质并返回 id（§4.4/§4.5）；`BodySet::set_material` 绑定到体。
-    fn add_material(&mut self, material: core::Material) -> core::MaterialId {
+    fn add_material(&mut self, material: Material) -> vxl_phys_core::MaterialId {
         self.bodies.add_material(material)
     }
     /// 加入高度场：地形账本 + 静态 marker 体（宽相经 marker AABB 参与对生成）。
@@ -121,7 +121,7 @@ impl BodyBuildExt for World {
             _ => None,
         }
     }
-    /// 注册**流体系统**（液体域，WCSPH）：返回流体索引（[`Self::fluids`] 取用）。
+    /// 注册**流体系统**（液体域，WCSPH）：返回流体索引（取用见 `World::fluids` 访问器）。
     /// `boundaries` = 边界碰撞的 provider id 列表（与体素/网格同一 id 空间，
     /// 经 [`Self::provider_id_of`] 由 marker 体反查）；切片1为单向耦合——
     /// 流体被刚体几何约束（驻留投影），对刚体无反作用（水推箱属切片2）。

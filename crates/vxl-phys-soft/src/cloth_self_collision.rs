@@ -18,12 +18,11 @@ use crate::params::SelfCollision;
 use std::collections::BTreeMap;
 use vxl_phys_core::Vec3;
 
-// **推进步**（`project_self_contacts`）在子模块 `pass` 里（`#[path]` 指向同目录的
-// `cloth_self_collide_pass.rs`）。**为什么拆**：本文件受 god 门**文件行数棘轮** —— 自摩擦那片让它
-// 167 → 184 行、最长函数 66 → 82 ⇒ 按"按域拆文件"先例把**这一个函数**整块搬走（子模块能看父模块
-// 私有项 ⇒ `cell_of` 的可见性不必动）。
-#[path = "cloth_self_collide_pass.rs"]
-mod pass;
+// **推进步**（`project_self_contacts`）与**点-边趟**已搬进扩展 trait
+// [`ClothSelfCollideExt`](crate::cloth::ClothSelfCollideExt)（`cloth/ext/selfcollide.rs`）——
+// god 门处置方案「约束族求解挪进独立求解器，`ClothSheet` 只留表示与索引」的执行面
+// （见 `god.gate.json::god_pairs["crates/vxl-phys-soft::ClothSheet"]`）。
+// ⇒ 原先的 `#[path]` 子模块 `pass`（`cloth_self_collide_pass.rs`）**已删除**（其内容整体搬走）。
 
 // **点-边**（T3 进阶档）= 同名目录式子模块 `edge`（边接触 + 子开关 + `new` 的两个小构建器；
 // 父文件行数棘轮 ⇒ 构建器下沉后本文件回到基线以下）。
@@ -51,7 +50,7 @@ pub struct SelfContacts {
     /// **空间哈希**（格子边长 = 碰撞直径 `2r` ⇒ 3×3×3 邻格覆盖全部候选）。
     /// 用 `BTreeMap` 而不是 `HashMap`：**迭代序确定**（本仓的确定性纪律 —— 本片只做查找，
     /// 但别给未来的"遍历格子"留坑）。桶内序 = 插入序 = **粒子升序**（建格时按 `i` 升序）。
-    cells: BTreeMap<(i32, i32, i32), Vec<u32>>,
+    pub(crate) cells: BTreeMap<(i32, i32, i32), Vec<u32>>,
     /// 最近一个子步实际解算的对数（诊断/判据读；不参与动力学）。
     pub pairs: u32,
     /// **点-边子系统**（T3 进阶档；子开关默认关 ⇒ 零换代；见子模块 `edge`）。
@@ -86,7 +85,7 @@ impl SelfContacts {
 
 /// **位置 → 格子**（边长 = 碰撞直径的倒数 `inv`）。`floor` + `as i32`（饱和转换）⇒ 确定性；
 /// 极端坐标会被饱和到 `i32` 边界（同一格里 ⇒ 只影响性能不影响判据）。
-fn cell_of(p: Vec3, inv: f32) -> (i32, i32, i32) {
+pub(crate) fn cell_of(p: Vec3, inv: f32) -> (i32, i32, i32) {
     (
         (p.x * inv).floor() as i32,
         (p.y * inv).floor() as i32,

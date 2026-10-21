@@ -1,6 +1,5 @@
 {
   "crates/vxl-phys-core/src/interop.rs": 1,
-  "crates/vxl-phys-fluid/src/fluid_density.rs": 1,
   "crates/vxl-phys-fluid/src/tests.rs": 2,
   "crates/vxl-phys-fluid/tests/boundary_accuracy_probe.rs": 1,
   "crates/vxl-phys-fluid/tests/flip_incompressibility_probe.rs": 1,
@@ -29,7 +28,7 @@
   "crates/vxl-phys-narrow/src/simd.rs": 4,
   "crates/vxl-phys-narrow/src/support.rs": 1,
   "crates/vxl-phys-soft/src/cloth.rs": 1,
-  "crates/vxl-phys-soft/src/cloth_coupling.rs": 1,
+  "crates/vxl-phys-soft/src/cloth/ext/body.rs": 1,
   "crates/vxl-phys-soft/src/cloth_self_friction.rs": 1,
   "crates/vxl-phys-soft/src/rigid.rs": 1,
   "crates/vxl-phys-soft/src/rope.rs": 2,

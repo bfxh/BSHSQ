@@ -12,7 +12,7 @@
 //! （`god_gate.py:216`）⇒ 搬进 trait 后 `World` 的方法数**不计入本类型**。
 //!
 //! **数值与顺序一字不改**（纯搬移：方法体逐字搬过来，未改一个算式、一个遍历序）。
-use crate::*;
+use crate::{Manifold, World, HASH_SCRATCH_BYTES};
 
 /// **DiagExt**：`World` 的诊断面（流形表/状态哈希）。
 pub trait DiagExt {

@@ -1,132 +1,14 @@
-//! fluid_boundary：从 lib.rs 按域拆出（纯搬移，语义未改）。
+//! fluid_boundary：**边界段表**（`FluidSystem` 的公开只读面）。
+//!
+//! **本文件现在只留公开段表**（`boundary_spans`）—— 边界相的**内部步**
+//! （`boundary_pass` / `aggregate_reactions` / `separate_coincident`）已搬进扩展 trait
+//! [`FluidPipelineExt`](crate::system::ext::FluidPipelineExt)（`system/ext/pipeline.rs`）——
+//! god 门处置方案「数据+管线同体的那一半」的执行面
+//! （见 `god.gate.json` 的 `_god_pairs_empty_doc` 与 `docs/KNOWLEDGE.md`
+//! 「2026-10-22 · 三条 god 债务同时出榜」一节）。
 use super::*;
 
 impl FluidSystem {
-    /// 反作用聚合：逐粒 `bforce` → 每体 `(力, 绕**体原点**的力矩)`；求和序 = 段序 × 段内索引序。
-    /// **C2（2026-10-01，`PLAN-COUPLING.md` §5 / D1(b)）**：向 `breact` **逐子步累加**（不再清空
-    /// 重写）——清零归 `step` 开头、÷ 子步数归 `step` 末尾 ⇒ `boundary_reactions()` =
-    /// **dt_sub 时间加权的 tick 平均力**。段序在 tick 内不变 ⇒ 按段位置就地累加；
-    /// 段表中途被换（不该发生）时就地改标签重起账。
-    pub(crate) fn aggregate_reactions(&mut self) {
-        for (si, &(body, origin, start, end)) in self.dom.bnd.spans.iter().enumerate() {
-            let mut f = Vec3::ZERO;
-            let mut tau = Vec3::ZERO;
-            for k in start..end {
-                let fk = self.dom.ps.bforce[k as usize];
-                f += fk;
-                tau += (self.dom.ps.pos[k as usize] - origin).cross(fk);
-            }
-            match self.dom.bnd.breact.get_mut(si) {
-                Some(e) if e.0 == body => {
-                    e.1 += f;
-                    e.2 += tau;
-                }
-                Some(e) => *e = (body, f, tau),
-                None => self.dom.bnd.breact.push((body, f, tau)),
-            }
-        }
-    }
-
-    /// 边界投影：`contacts_point` 接触带内，只推**真穿透**（sdf < 0，由
-    /// 接触点/外法线恢复，与 provider 的 depth 口径解耦）+ 法向速度归零
-    /// （非弹性 e=0）。推到 sdf = +skin 驻留线（穿透量 + skin）：静隙由
-    /// 壁压自平衡，投影只定下限——且驻留点 sdf > 0 让密度轮的镜像平面
-    /// 收集始终覆盖得到（sdf = 0 会被 `sdf > 0` 滤掉 → 壁邻鬼影丢失）。
-    /// **投影坍缩消除**：多平面深穿透被逐轴推到各平面交集 = 同一个点
-    /// （凹角/棱），同位粒子对互喂 W(0) ⇒ ρ ≈ 2ρ0 ⇒ Tait q⁷ 爆压
-    /// （实测角点堆粒子 ρ=2153 起爆喷泉）；且同位对 d = 0 ⇒ 压力梯度
-    /// 零方向 ⇒ 永久僵局。解析：低索引驻留、高索引沿自身接触法线和
-    /// （流体侧）外移 r_min = 0.2h；索引升序 + 法线序固定 ⇒ 确定。
-    /// 预滤余量 = h：必须 ≥ 单子步最大行程（CFL 上限 0.4h）+ 接触带，
-    /// 否则快速粒子一步跨过查询带 → 永久脱离所有接触查询（自由落体逃逸）。
-    /// 复用统一提供者通道：体素/三角网/喷溅无改动即为边界。
-    /// **只投影流体粒子**（索引前缀）：边界粒子在体内、由体运动学带着走，
-    /// 既不该被提供者推出，也不该被推出体外。
-    pub(crate) fn boundary_pass(&mut self, providers: &dyn ProviderColliders) {
-        if self.dom.bnd.boundaries.is_empty() {
-            return;
-        }
-        // 核半径与接触带宽度（域①/域③ 各自读出 ⇒ 下面几处不必再走 `self.dom.…`）。
-        let (h, skin) = (self.dom.kern.h, self.dom.bnd.skin);
-        // 本子步被投影粒子：(索引, 接触法线和)。升序登记 ⇒ 消解序确定。
-        let mut pushed: Vec<(usize, Vec3)> = Vec::new();
-        for i in 0..self.n_fluid {
-            let pi = self.dom.ps.pos[i];
-            // 投影累计跨所有边界（角部粒子同帧吃地面+墙的多笔推出）。
-            let mut p = pi;
-            let mut v = self.dom.ps.vel[i];
-            let mut n_sum = Vec3::ZERO;
-            let mut hit = false;
-            for &bid in &self.dom.bnd.boundaries {
-                // AABB 预滤（外扩 h；None = 无信息 ⇒ 仍查询）。
-                if let Some(bb) = providers.bounds(bid) {
-                    if pi.x < bb.min.x - h
-                        || pi.x > bb.max.x + h
-                        || pi.y < bb.min.y - h
-                        || pi.y > bb.max.y + h
-                        || pi.z < bb.min.z - h
-                        || pi.z > bb.max.z + h
-                    {
-                        continue;
-                    }
-                }
-                self.dom.bnd.contacts.clear();
-                // 流体边界口径（内点鲁棒）：体素等截断 SDF 提供者的内部
-                // 梯度被格间内面主导可指向固体深处 ⇒ 投影穿壁隧逃（实测
-                // 1–2 格厚壁均复现）；解析面提供者默认原样转 contacts_point。
-                if providers.contacts_point_boundary(bid, pi, skin, &mut self.dom.bnd.contacts) {
-                    for c in &self.dom.bnd.contacts {
-                        let sdf = (pi - c.point).dot(c.normal);
-                        let pen = -sdf;
-                        if pen <= 0.0 {
-                            continue;
-                        }
-                        p += c.normal * (pen + skin).min(h);
-                        n_sum += c.normal;
-                        hit = true;
-                        let vn = v.dot(c.normal);
-                        if vn < 0.0 {
-                            v -= c.normal * vn;
-                        }
-                    }
-                    self.dom.ps.pos[i] = p;
-                    self.dom.ps.vel[i] = v;
-                }
-            }
-            if hit {
-                pushed.push((i, n_sum));
-            }
-        }
-        self.separate_coincident(&pushed);
-    }
-
-    /// 同位坍缩消解：仅在本子步被投影粒子间做最小间距（r_min = 0.2h，
-    /// 远小于静置间距，常态零触发）。高索引者沿 n_sum 内移——投影把
-    /// 深穿粒子逐轴推到平面交集点，法线和指向流体侧，一步拉开后
-    /// 常规压强接管。位移 ≤ r_min，不注入爆发能量。
-    fn separate_coincident(&mut self, pushed: &[(usize, Vec3)]) {
-        let r_min = 0.2 * self.dom.kern.h;
-        for a in 0..pushed.len() {
-            let (ia, na) = pushed[a];
-            let nl = na.length();
-            if nl <= 1e-9 {
-                continue;
-            }
-            let dir = na * (1.0 / nl);
-            let mut pa = self.dom.ps.pos[ia];
-            for &(ib, _) in &pushed[..a] {
-                let d = pa - self.dom.ps.pos[ib];
-                let r2 = d.length_squared();
-                if r2 < r_min * r_min {
-                    let r = r2.sqrt();
-                    // 同位（r=0）也拉满 r_min；方向 = 自身法线和，不依赖 d。
-                    pa += dir * (r_min - r);
-                }
-            }
-            self.dom.ps.pos[ia] = pa;
-        }
-    }
-
     /// **边界段表**（只读；GPU 档与耦合回路用）：段序 = 生成序（确定性），每项
     /// `(体 id, 体原点, 起始索引, 结束索引)`。`[start, end)` 即该体的边界粒子区间，
     /// 也正是 `boundary_reactions()` 的聚合单位 ⇒ GPU 侧按同一段表聚合即可**逐体对拍**。

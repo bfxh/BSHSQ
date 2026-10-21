@@ -23,6 +23,8 @@ mod mesh;
 mod narrowtier;
 mod provider;
 
+// **集合再导出**（`world_struct.rs` 只需要 `pub use ext::WorldExts;` 一行 ⇒
+// 那个文件受 god 门的 file_lines 棘轮（只准减）⇒ 11 个名字的显式列表放不进它）。
 pub use aero::AeroExt;
 pub use bodybuild::BodyBuildExt;
 pub use destruction::DestructionOpsExt;
@@ -34,3 +36,13 @@ pub use impact::ImpactExt;
 pub use mesh::MeshExt;
 pub use narrowtier::NarrowTierExt;
 pub use provider::ProviderExt;
+
+// **crate 根再导出的入口**（`lib.rs` 只需 `pub use world_struct::ext::all;` 一行 ——
+// `lib.rs` 与 `world_struct.rs` 都受 god 门的 file_lines 棘轮（只准减）⇒
+// 11 个名字的显式列表不能写在它们身上；放这里 ⇒ 那里只多一行）。
+pub mod all {
+    pub use super::{
+        AeroExt, BodyBuildExt, DestructionOpsExt, DiagExt, FieldExt, FluidExt, HullExt, ImpactExt,
+        MeshExt, NarrowTierExt, ProviderExt,
+    };
+}

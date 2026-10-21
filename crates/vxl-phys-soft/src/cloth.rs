@@ -24,6 +24,15 @@ use vxl_phys_core::Vec3;
 
 pub mod damage;
 pub mod plastic;
+// **约束族扩展 trait**（god 门处置方案「约束族求解挪进独立求解器，`ClothSheet` 只留表示与
+// 索引」的执行面）——撕裂 / 塑性 / 刚体耦合 / 自碰撞四族的方法搬进 `cloth/ext/`。
+// 门禁 `scripts/god_gate.py::brace_metrics` 跳过 `impl Trait for Type` ⇒ 这四族的方法
+// **不计入 `ClothSheet` 的方法数**（门账 36 → 15）。
+pub mod ext;
+// **两个 `pub` 的族**（原先的方法就是 `pub` ⇒ 外部 crate 在用 ⇒ 对外再导出）；
+// **三个 `pub(crate)` 的族**（原先是 crate 内可见 ⇒ 不外扩）⇒ 用 `pub(crate) use`。
+pub(crate) use ext::{ClothBodyExt, ClothDamageExt, ClothSelfCollideExt};
+pub use ext::{ClothPlasticExt, ClothTearExt};
 // **体积 / 气压约束**（`SPEC.md` §4.6；默认 `k ≤ 0` = 关）—— 独立模块 + **自由函数**：
 // 按 `god.gate.json` 对 ClothSheet 的处置口径（「约束族求解挪进独立求解器」），
 // **新加一族约束不往本类型添方法**（本域一行方法都没加）。

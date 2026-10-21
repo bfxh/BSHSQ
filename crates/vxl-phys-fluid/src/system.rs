@@ -7,11 +7,17 @@ use super::*;
 
 pub(crate) mod domains;
 use domains::Domains;
+// **管线扩展 trait**（god 门处置方案「数据+管线同体的那一半」的执行面）——密度/压力/力/
+// 边界/积分 各相的**内部步**搬进 `impl FluidPipelineExt for FluidSystem`
+// ⇒ 门禁 `scripts/god_gate.py::brace_metrics` 跳过 `impl Trait for Type`
+// ⇒ 这些方法**不计入 `FluidSystem` 的方法数**（门账 40 → 25）。
+pub(crate) mod ext;
+pub(crate) use ext::FluidPipelineExt;
 
 /// WCSPH 粒子流体系统（SoA；零外部依赖）。
 ///
 /// **字段 = 域的清单 + 三样"跨域的轴"**：
-/// - [`Domains`]：四个数据域（核参数 / 粒子状态 / 边界账 / 邻域网格）；
+/// - `Domains`：四个数据域（核参数 / 粒子状态 / 边界账 / 邻域网格）；
 /// - `cfg`：运行配置（**输入**，不是流体状态）；
 /// - `n_fluid`：**流体粒子数**（`pos`/`vel`/... 的**前缀**长度；`≥ n_fluid` 的是边界
 ///   粒子，同数组 ⇒ 既有核/式一字不改地作用于边界粒子，见模块头）；

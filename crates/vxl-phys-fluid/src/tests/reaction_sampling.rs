@@ -1,7 +1,7 @@
 //! 反作用采样：src/tests.rs 拆出的用例（纯搬移，判据/容差/字面量未动）。
 
 use super::still_pose;
-use crate::{FluidConfig, FluidSystem};
+use crate::{system::ext::FluidPipelineExt, FluidConfig, FluidSystem};
 use vxl_phys_core::{Shape, Vec3};
 
 /// **C2 判据（`PLAN-COUPLING.md` §5 判据④）**：反作用采样是 **dt_sub 时间加权的 tick 平均**。

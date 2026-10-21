@@ -1,7 +1,7 @@
 //! 均匀晶格 / 档位 / 邻居表：src/tests.rs 拆出的用例（纯搬移，判据/容差/字面量未动）。
 
 use super::still_block;
-use crate::{FluidConfig, FluidFamily};
+use crate::{system::ext::FluidPipelineExt, FluidConfig, FluidFamily};
 use vxl_phys_core::interop::NoProviders;
 use vxl_phys_core::Vec3;
 

@@ -10,7 +10,7 @@
 //! **公开面不变**：原 `World::add_rope` 等是 `World` 的**固有方法**；
 //! 搬进 trait 后调用点要 `use vxl_phys::world_soft_ext::SoftExt;`（或经 `lib.rs` 再导出）。
 //! ⇒ **这是 API 位置的变更**（不是行为变更）：数值与顺序一字不改。
-use crate::*;
+use crate::{Shape, Vec3, World};
 // 软体域的**私有**反作用自由函数（`world_soft.rs` 的 `#[path]` 子模块）——
 // 本文件搬走了用到它们的方法 ⇒ 导入路径要跟着走。
 use super::{apply_rope_angular_reactions, cloth_medium_reaction};

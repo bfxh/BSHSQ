@@ -75,7 +75,10 @@
 //!    `iters + 1` 次密度评估（第一个迭代也必须在 x* 上评，否则 `C` 与位置不同步）；
 //!    本档正确性优先，多这一次密度评估登记为已知代价。
 //! 3. `pressures()` 在 PBF 档恒 0（本档没有压力这个量；密度误差看 `densities()`）。
-use crate::{DensityIterations, FluidConfig, FluidFamily, FluidSystem, ProviderColliders, Vec3};
+use crate::{
+    system::ext::FluidPipelineExt, DensityIterations, FluidConfig, FluidFamily, FluidSystem,
+    ProviderColliders, Vec3,
+};
 
 /// 人工压力的无量纲强度（论文 k = 0.1；量纲口径见模块头）。
 const S_CORR_K: f32 = 0.0;

@@ -4,8 +4,12 @@
 //!
 //! **次序是物理决定**（判据④钉它）：每子步投影之后 **先塑性流动**（超阈应变并入 `rest`
 //! ⇒ 弹性应变下降）**再撕裂检查**（判的正是弹性应变）⇒ 塑性**延迟**撕裂。
+//!
+//! **本文件现在只留状态**：损伤域的**汇总步**（`damage_step`）已搬进扩展 trait
+//! `ClothDamageExt`（`cloth/ext/damage.rs`）—— god 门处置方案
+//! 「约束族求解挪进独立求解器，`ClothSheet` 只留表示与索引」的执行面
+//! （见 `god.gate.json::god_pairs["crates/vxl-phys-soft::ClothSheet"]`）。
 use crate::cloth::plastic::Plastic;
-use crate::cloth::ClothSheet;
 use crate::cloth_tear::Tearing;
 
 /// **损伤域**（两子域各自默认关 ⇒ 默认档逐位不变）。
@@ -15,12 +19,4 @@ pub struct Damage {
     pub tear: Tearing,
     /// 塑性（`yield_strain = ∞` = 关 ⇒ `plastic_flow` 首行短路）。
     pub plastic: Plastic,
-}
-
-impl ClothSheet {
-    /// **损伤步**（每子步一次、投影之后）：塑性流动**先**、撕裂检查**后** —— 见文件头注。
-    pub(crate) fn damage_step(&mut self) {
-        self.plastic_flow();
-        self.tear_check();
-    }
 }

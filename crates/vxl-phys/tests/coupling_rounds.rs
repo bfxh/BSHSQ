@@ -1,25 +1,20 @@
-//! **域轮次表一致性断言**（`PLAN-COUPLING.md` §3.6 / §5 C3 片 1）：跨域触点必须登记，
-//! 「新增域忘登记即红」。
+//! **域轮次表一致性断言**（`PLAN-COUPLING.md` §3.6 / §5 C3 片 1）：跨域触点必须登记，「新增域忘登记即红」。
 //!
 //! 机制：本文件持有**声明式轮次表**（`ROUNDS`）与**引擎内部豁免表**（`ENGINE_PASSES`）；
-//! `include_str!` 扫描 `world_step.rs` / `world_soft.rs` / `world_soft_ext.rs` 三个
-//! **编排文件**里所有 `self.<name>_pass(` 形状的调用点（步进/子步/域轮次的调用点都在这三个
-//! 文件 ⇒ 新域的调用点必然被扫到），两向断言：
-//! - 扫描集 − 豁免集 == 登记表（**新域不登记 ⇒ 红**）；
-//! - 登记表 ∪ 豁免集 ⊆ 扫描集（**改名/删域后表留尸 ⇒ 红**）。
+//! `include_str!` 扫描三个**编排文件**（`world_step.rs` / `world_soft.rs` / `world_soft_ext.rs`）
+//! 里所有 `self.<name>_pass(` 形状的调用点（步进/子步/域轮次的调用点都在这三个文件 ⇒ 新域的
+//! 调用点必然被扫到），两向断言：① 扫描集 − 豁免集 == 登记表（**新域不登记 ⇒ 红**）；
+//! ② 登记表 ∪ 豁免集 ⊆ 扫描集（**改名/删域后表留尸 ⇒ 红**）。
 //!
-//! **扫描器是注释盲的**（不做词法剥离）：源码注释里写出 `self.X_pass(` 字面量也会命中
-//! ——文档里提及请改写形式。扫描器自带金丝雀（合成源必命中），防「门空转」；注入实测
-//! （2026-10-01）：在 `world_step.rs` 末尾加一行注释 `self.probe_stray_pass();`
-//! ⇒ 本判据红（`probe_stray_pass` 未登记）⇒ 随即撤回（证据即本条）。
-//!
+//! **扫描器是注释盲的**（不做词法剥离）：源码注释里写出 `self.X_pass(` 字面量也会命中 ——文档里
+//! 提及请改写形式。扫描器自带金丝雀（合成源必命中），防「门空转」；注入实测（2026-10-01）：在
+//! `world_step.rs` 末尾加一行注释 `self.probe_stray_pass();` ⇒ 本判据红 ⇒ 随即撤回（证据即本条）。
 //! 零行为：本片不新增运行时面、不改任何既有读数（C3 的 `apply_round` 收口 = 片 2）。
 
 use std::collections::BTreeSet;
 
-/// **声明式轮次表**：跨域触点（名 = 编排文件里被调用的 `*_pass` 函数）。
-/// 每项对应 `PLAN-COUPLING.md` §3.6 的一行：域 / 产出通道 / 段位 / 滞后拍数。
-/// **动行为的分片不许绕过本表**（`apply_round` 收口也要先在此登记）。
+/// **声明式轮次表**：跨域触点（名 = 编排文件里被调用的 `*_pass` 函数）。每项对应
+/// `PLAN-COUPLING.md` §3.6 的一行：域 / 产出通道 / 段位 / 滞后拍数。**动行为的分片不许绕过本表**。
 const ROUNDS: &[&str] = &[
     "fluid_pass",          // 流体推进 + 2b 边界重建（tick 末；产出下一拍的反作用）
     "fluid_reaction_pass", // 2b 反作用施加（子步 D；Force；受体滞后 1 拍）
@@ -31,8 +26,7 @@ const ROUNDS: &[&str] = &[
     "conversion_pass",     // 体素↔多边形转换窗口（tick 末各域轮次之后；Position 表示切换，事件级）
 ];
 
-/// **引擎内部豁免**：同为 `*_pass` 形状但不是跨域作用（轮次驱动器本身 / 窄相档 / CCD /
-/// 卡上步进）。§3.6 的「引擎自用的求解器/关节/CCD 除外」在名单上的落地。
+/// **引擎内部豁免**：同为 `*_pass` 形状但不是跨域作用（轮次驱动器本身 / 窄相档 / CCD / 卡上步进）。
 const ENGINE_PASSES: &[&str] = &[
     "domain_pass",
     "narrow_tier_pass",
@@ -55,6 +49,20 @@ fn scanned_passes(src: &str) -> BTreeSet<String> {
     out
 }
 
+/// **扫描面 = 三个编排文件的并集**（`world_step.rs` / `world_soft.rs` / `world_soft_ext.rs`）。
+///
+/// **为什么有第三个文件**（2026-10-21）：`World` 的软体域扩展 trait 落地时，软体的管线组装
+/// （`domain_pass` → `fluid_pass` / `rope_pass` / `cloth_pass`）从 `world_soft.rs` 搬到了
+/// `world_soft_ext.rs` ⇒ 扫描面必须跟着搬，否则「新域不登记即红」这条判据**静默失效**。
+fn scanned_all() -> BTreeSet<String> {
+    let files = [
+        include_str!("../src/world_step.rs"),
+        include_str!("../src/world_soft.rs"),
+        include_str!("../src/world_soft_ext.rs"),
+    ];
+    files.iter().flat_map(|s| scanned_passes(s)).collect()
+}
+
 #[test]
 fn coupling_rounds_are_declared_and_not_stale() {
     // ── 金丝雀（门在扫吗）：扫描器对合成源必命中。──
@@ -69,13 +77,7 @@ fn coupling_rounds_are_declared_and_not_stale() {
         "扫描器金丝雀：应命中 wind_pass（实得 {canary:?}）"
     );
 
-    let mut found = scanned_passes(include_str!("../src/world_step.rs"));
-    found.extend(scanned_passes(include_str!("../src/world_soft.rs")));
-    // `world_soft_ext.rs`（2026-10-21）：`World` 的软体域扩展 trait 落地时，**软体的管线组装
-    // （`domain_pass` → `fluid_pass` / `rope_pass` / `cloth_pass` 三个调用点）**从
-    // `world_soft.rs` 搬到了这里 ⇒ 扫描面必须跟着搬，否则「新域不登记即红」这条判据
-    // **静默失效**（扫不到 ⇒ 集合变小 ⇒ 断言红，但方向反了：会误报"表留尸"）。
-    found.extend(scanned_passes(include_str!("../src/world_soft_ext.rs")));
+    let found = scanned_all();
     let declared: BTreeSet<String> = ROUNDS.iter().map(|s| (*s).to_string()).collect();
     let engine: BTreeSet<String> = ENGINE_PASSES.iter().map(|s| (*s).to_string()).collect();
     let coupling: BTreeSet<String> = found.difference(&engine).cloned().collect();

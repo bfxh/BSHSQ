@@ -19,7 +19,7 @@
 //! - 本文件：**动态体的一等几何**（薄壳：布片/薄板/碎片）⇒ 进窄相 `MeshStore`，
 //!   由 `Shape::TriMesh { mesh, half }` 引用，带位姿、有质量、进宽相/窄相。
 
-use crate::*;
+use crate::{Quat, Shape, Vec3, World};
 
 /// **MeshExt**：`World` 的三角网面。
 pub trait MeshExt {

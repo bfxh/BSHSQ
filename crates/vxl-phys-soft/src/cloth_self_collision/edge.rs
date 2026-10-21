@@ -21,8 +21,6 @@
 //! **布局**：本文件是 `cloth_self_collision` 的**同名目录式子模块**（`mod edge;`）。父文件
 //! 受行数棘轮，`SelfContacts::new` 的两个小构建器（默认值/禁止集）也一并收进这里 ⇒ 父文件
 //! 回到基线以下（god 门"可收紧"）。
-use super::cell_of;
-use crate::cloth::ClothSheet;
 use crate::params::SelfCollision;
 use std::collections::BTreeMap;
 use vxl_phys_core::Vec3;
@@ -33,11 +31,11 @@ pub struct PointEdge {
     /// 子开关（**默认 `false`** ⇒ 首行短路 ⇒ T3 读数逐位不变；打开是有意的行为变化）。
     pub enabled: bool,
     /// 三角网唯一边集（= `cons` 的顺序 ⇒ 确定性；`topology()` 的注释钉了这一口径）。
-    list: Vec<[u32; 2]>,
+    pub(crate) list: Vec<[u32; 2]>,
     /// 空间哈希（边 AABB → 桶；桶内 = 插入序 = 边升序）。
-    cells: BTreeMap<(i32, i32, i32), Vec<u32>>,
+    pub(crate) cells: BTreeMap<(i32, i32, i32), Vec<u32>>,
     /// 逐粒子候选去重的 scratch（复用 ⇒ 热路径零分配）。
-    seen: Vec<u32>,
+    pub(crate) seen: Vec<u32>,
     /// 最近一个子步实际解算的点-边对数（诊断/判据读）。
     pub pairs: u32,
 }
@@ -58,7 +56,7 @@ impl PointEdge {
 
     /// **建格**：边 AABB 覆盖到的每个格子收一份边号（格边长 = 碰撞直径，与点-点同一个
     /// `inv` ⇒ 粒子的 3×3×3 邻域必覆盖到 `d_c` 内的全部边）。
-    fn rebuild(&mut self, pos: &[Vec3], inv: f32) {
+    pub(crate) fn rebuild(&mut self, pos: &[Vec3], inv: f32) {
         self.cells.clear();
         for e in 0..self.list.len() {
             let [a, b] = self.list[e];
@@ -104,112 +102,6 @@ pub(super) fn build_forbidden(cons: &[[u32; 2]], bend: &[[u32; 2]]) -> Vec<[u32;
     f.sort_unstable();
     f.dedup();
     f
-}
-
-impl ClothSheet {
-    /// **自碰撞收尾**（`project_self_contacts` 尾行 1:1 替换"写回 pairs"⇒ 那个函数的
-    /// 行数棘轮不动）：写回点-点对数 + **点-边趟**（子开关默认关 ⇒ 整段跳过）。
-    pub(crate) fn finish_self_contacts(&mut self, point_pairs: u32) {
-        self.self_contacts.pairs = point_pairs;
-        if !self.self_contacts.edges.enabled {
-            return; // 点-边关（默认）⇒ T3 读数逐位不变
-        }
-        let d_c = 2.0 * self.self_contacts.cfg.particle_radius;
-        let inv = 1.0 / d_c;
-        let pairs = project(self, d_c, inv);
-        self.self_contacts.edges.pairs = pairs;
-    }
-}
-
-/// **候选收集**（粒子 `i` 的 27 邻格边号，去重后写进 `seen`，返回条数）—— 从 `project`
-/// 抽出：那里卡在 god 门的**最长函数**棘轮上，本片（加摩擦）必须腾出降幅才能合法涨行；
-/// 桶内是插入序 = 边升序 ⇒ 去重后的次序确定（与原内联实现逐条一致）。
-fn collect(sheet: &mut ClothSheet, i: usize, inv: f32) -> usize {
-    let ci = cell_of(sheet.pos[i], inv);
-    let seen = &mut sheet.self_contacts.edges.seen;
-    seen.clear();
-    for dx in -1..=1 {
-        for dy in -1..=1 {
-            for dz in -1..=1 {
-                let key = (ci.0 + dx, ci.1 + dy, ci.2 + dz);
-                let Some(bucket) = sheet.self_contacts.edges.cells.get(&key) else {
-                    continue;
-                };
-                for &e in bucket {
-                    if !seen.contains(&e) {
-                        seen.push(e); // 同一条边落在多个格 ⇒ 去重
-                    }
-                }
-            }
-        }
-    }
-    seen.len()
-}
-
-/// **点-边投影**（点-点趟之后的顺序 Gauss-Seidel 一遍）：按自由粒子升序 × 27 邻格内
-/// 去重后的边候选，每个（粒子, 边）恰好解算一次。
-fn project(sheet: &mut ClothSheet, d_c: f32, inv: f32) -> u32 {
-    let n = sheet.pos.len();
-    let mut pairs = 0u32;
-    let friction = sheet.self_contacts.cfg.friction;
-    sheet.self_contacts.edges.rebuild(&sheet.pos, inv);
-    for i in 0..n {
-        if sheet.inv_mass[i] == 0.0 {
-            continue; // 钉住粒子不发起（与点-点同惯例）
-        }
-        // ②a 候选收集（抽成 `collect`，见它的注）。
-        let cand_len = collect(sheet, i, inv);
-        // ②b 解算（候选表此后只读；`pos` 是别的字段 ⇒ 整体借用相容）。
-        for ei in 0..cand_len {
-            let e = sheet.self_contacts.edges.seen[ei];
-            let [j32, k32] = sheet.self_contacts.edges.list[e as usize];
-            if sheet.self_contacts.is_forbidden(i as u32, j32)
-                || sheet.self_contacts.is_forbidden(i as u32, k32)
-            {
-                continue; // 端点与粒子成网格邻居 ⇒ 不解算（不与折痕处弹簧对顶）
-            }
-            let (j, k) = (j32 as usize, k32 as usize);
-            let (pj, pk) = (sheet.pos[j], sheet.pos[k]);
-            let ab = pk - pj;
-            let ab2 = ab.length_squared();
-            if ab2 < 1e-12 {
-                continue; // 退化边（两端点重合）⇒ 留给点-点
-            }
-            let pi = sheet.pos[i];
-            // 线段最近点（Ericson）：`u` 钳到 [0,1] ⇒ 端点处自然退化为点-点同式。
-            let u = ((pi - pj).dot(ab) / ab2).clamp(0.0, 1.0);
-            let c = pj + ab * u;
-            let d = pi - c;
-            let len = d.length();
-            if len >= d_c {
-                continue; // 不在接触距离内
-            }
-            if len < 1e-9 {
-                continue; // 同心退化：方向无定义（与点-点同惯例）
-            }
-            let w_i = sheet.inv_mass[i];
-            let (w_j, w_k) = (sheet.inv_mass[j], sheet.inv_mass[k]);
-            // 杠杆权重：投影点随 `u` 移动的有效逆质量（XPBD 边接触标准式）。
-            let w = w_i + w_j * (1.0 - u) * (1.0 - u) + w_k * u * u;
-            if w <= 0.0 {
-                continue; // j、k 都钉住（i 自由 ⇒ 保底）
-            }
-            let nrm = d * (1.0 / len);
-            let lam = (d_c - len) / w;
-            sheet.pos[i] += nrm * (w_i * lam);
-            sheet.pos[j] -= nrm * (w_j * (1.0 - u) * lam);
-            sheet.pos[k] -= nrm * (w_k * u * lam);
-            crate::cloth::cloth_edge_friction::resist_edge_slip(
-                (&mut sheet.pos, &sheet.prev, &sheet.inv_mass),
-                friction,
-                (i, j, k),
-                (u, w),
-                (nrm, d_c - len),
-            );
-            pairs += 1;
-        }
-    }
-    pairs
 }
 
 impl super::SelfContacts {

@@ -1,4 +1,10 @@
-//! fluid_step：从 lib.rs 按域拆出（纯搬移，语义未改）。
+//! fluid_step：**推进面**（`set_boundary_particles` / `step` / `phase_us` /
+//! `reset_phase_us`）—— **公开入口**留在 `FluidSystem` 上。
+//!
+//! **推进的内部步**（`substep` / `truncate_to_fluid` / `for_neighbors`）已搬进扩展 trait
+//! [`FluidPipelineExt`](crate::system::ext::FluidPipelineExt)（`system/ext/pipeline.rs`）——
+//! god 门处置方案「数据+管线同体的那一半」的执行面
+//! （见 `docs/KNOWLEDGE.md`「2026-10-22 · 三条 god 债务同时出榜」一节）。
 use super::*;
 
 impl FluidSystem {
@@ -46,22 +52,6 @@ impl FluidSystem {
         self.boundary_count()
     }
 
-    /// 清空边界粒子（截断回流体前缀；容量保留 ⇒ 稳态零分配）。
-    pub(crate) fn truncate_to_fluid(&mut self) {
-        let nf = self.n_fluid;
-        let ps = &mut self.dom.ps;
-        ps.pos.truncate(nf);
-        ps.vel.truncate(nf);
-        ps.dens.truncate(nf);
-        ps.press.truncate(nf);
-        ps.acc.truncate(nf);
-        ps.xsph.truncate(nf);
-        ps.pmass.truncate(nf);
-        ps.bforce.truncate(nf);
-        self.dom.bnd.spans.clear();
-        self.dom.bnd.breact.clear();
-    }
-
     /// 推进一个完整 tick（内部按 `cfg.substeps` 等分子步，经 `pbf::substep_of` 分派族；边界经统一提供者通道）。
     ///
     /// **C2（2026-10-01，`PLAN-COUPLING.md` §5 / D1(b)）**：`breact` 是 **tick 级累加器**——
@@ -88,44 +78,6 @@ impl FluidSystem {
         }
     }
 
-    pub(crate) fn substep(&mut self, dt: f32, providers: &dyn ProviderColliders) {
-        let nf = self.n_fluid;
-        if nf == 0 {
-            return; // 边界粒子不单独驱动（它们只随体走）
-        }
-        // 网格含**全部**粒子（邻域必须看得见边界粒子）；边界粒子的位置/速度每 tick
-        // 由 `set_boundary_particles` 整体重建，本子步内不动（运动学冻结）。
-        let t = vxl_phys_core::probe::start();
-        self.dom.grid.rebuild(&self.dom.ps.pos, self.dom.kern.h);
-        self.phase_us[0] += vxl_phys_core::probe::us(t);
-        let t = vxl_phys_core::probe::start();
-        self.density_pass(providers);
-        self.phase_us[1] += vxl_phys_core::probe::us(t);
-        let t = vxl_phys_core::probe::start();
-        self.pressure_pass();
-        self.phase_us[2] += vxl_phys_core::probe::us(t);
-        let t = vxl_phys_core::probe::start();
-        self.force_pass();
-        self.phase_us[3] += vxl_phys_core::probe::us(t);
-        // 半隐式欧拉：v ← v + dt·a + ε·xsph；CFL 限速防穿隧。
-        // **只积分流体粒子**（索引前缀）——边界粒子不作积分。
-        let vmax = self.cfg.max_speed_frac * self.dom.kern.h / dt;
-        let vmax2 = vmax * vmax;
-        let eps = self.cfg.xsph_viscosity;
-        for i in 0..nf {
-            let mut v = self.dom.ps.vel[i] + self.dom.ps.acc[i] * dt + self.dom.ps.xsph[i] * eps;
-            let s2 = v.length_squared();
-            if s2 > vmax2 {
-                v *= vmax / s2.sqrt();
-            }
-            self.dom.ps.vel[i] = v;
-            self.dom.ps.pos[i] += v * dt;
-        }
-        let t = vxl_phys_core::probe::start();
-        self.boundary_pass(providers);
-        self.phase_us[4] += vxl_phys_core::probe::us(t);
-    }
-
     /// **相位计时**（诊断）：`[网格, 密度, 压力, 力, 积分+边界]` 的**累计微秒**。
     /// 与 `reset_phase_us()` 配合取窗口差值（本函数不改行为、不进哈希）。
     pub fn phase_us(&self) -> [u64; 5] {
@@ -135,15 +87,5 @@ impl FluidSystem {
     /// 清零相位计时累加器（取窗口前调用）。
     pub fn reset_phase_us(&mut self) {
         self.phase_us = [0; 5];
-    }
-
-    /// 邻域公共体：粒子 i 的 27 邻域格（钳边）内、r ≤ h 的 j 交给 `f`。
-    /// 访问序 = 格坐标序（dz, dy, dx 固定）× 格内索引序 ⇒ 求和序是位置的确定函数。
-    /// **转发给 `UniformGrid::for_neighbors_in`**（并行相位在分块闭包里用同一实现）。
-    #[inline]
-    pub(crate) fn for_neighbors(&self, i: usize, f: impl FnMut(usize, Vec3, f32)) {
-        self.dom
-            .grid
-            .for_neighbors_in(&self.dom.ps.pos, self.dom.kern.h2, i, f);
     }
 }

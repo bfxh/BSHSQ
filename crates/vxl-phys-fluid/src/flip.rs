@@ -169,7 +169,7 @@
 //! 5. **粒子级重叠无约束**（见上"⚠️"）⇒ `densities()` 对 FLIP 是被动读数。凡是需要密度场
 //!    自洽的相位（`fluid_force.rs` 的负压钳零、表面张力、`density_pass` 的镜像鬼影边界）在
 //!    本族下都只是"顺带算出来的"，**不被求解器消费**——别在本族上调它们的参数期待效果。
-use crate::{FluidSystem, ProviderColliders, Vec3};
+use crate::{system::ext::FluidPipelineExt, FluidSystem, ProviderColliders, Vec3};
 
 // 网格层（建网格/分类/索引/三线性模板）拆在同名子模块里：`flip.rs` 一度 837 行、超 `god_gate`
 // 的 800 行硬线；拆开后两层各自远在限内，上面那整段口径说明也不必为了行数砍掉。

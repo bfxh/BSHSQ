@@ -12,7 +12,7 @@
 //! 于是有两个可直接读的量：**已撕边数** 与 **x 向跨度**（撕裂后持续增大）。
 use vxl_phys_core::interop::NoProviders;
 use vxl_phys_core::Vec3;
-use vxl_phys_soft::{ClothSheet, Stiffness};
+use vxl_phys_soft::{ClothSheet, ClothTearExt, Stiffness};
 
 const DT: f32 = 1.0 / 60.0;
 const N: usize = 4;
