@@ -27,7 +27,7 @@ fn medium_sample_center_reads_rest_density() {
 fn medium_sample_far_is_vacuum() {
     let mut f = still_block();
     f.step(1.0 / 60.0, &NoProviders);
-    let far = Vec3::new(0.025, 0.325 + 10.0 * f.h, 0.025);
+    let far = Vec3::new(0.025, 0.325 + 10.0 * f.dom.kern.h, 0.025);
     let s = f.sample(far);
     assert_eq!(s.density, 0.0, "核带外不应有密度");
     assert_eq!(s.occupied, 0.0, "核带外占用率应为 0");

@@ -139,19 +139,19 @@ pub(super) fn estimate_from_field(
     out: &mut Vec<[f32; 9]>,
 ) {
     let n = sys.n_fluid;
-    let pos = &sys.pos[..n];
-    ngrid.rebuild(pos, sys.h);
+    let pos = &sys.dom.ps.pos[..n];
+    ngrid.rebuild(pos, sys.dom.kern.h);
     out.clear();
     out.resize(n, [0.0; 9]);
-    let h2 = sys.h * sys.h;
-    let inv_h = 1.0 / sys.h;
+    let h2 = sys.dom.kern.h * sys.dom.kern.h;
+    let inv_h = 1.0 / sys.dom.kern.h;
     for (i, out_i) in out.iter_mut().enumerate() {
-        let vi = sys.vel[i];
+        let vi = sys.dom.ps.vel[i];
         let (mut m, mut dd, mut t) = ([0.0f32; 9], [0.0f32; 9], 0.0f32);
         ngrid.for_neighbors_in(pos, h2, i, |j, dij, r2| {
             // `dij = p_i − p_j`（网格给的是这个方向）⇒ 样本偏移取反。
             let w = 1.0 - r2.sqrt() * inv_h;
-            apic_accumulate(&mut m, &mut dd, &mut t, w, sys.vel[j] - vi, -dij);
+            apic_accumulate(&mut m, &mut dd, &mut t, w, sys.dom.ps.vel[j] - vi, -dij);
         });
         *out_i = affine_from_moments(&m, &dd, t).unwrap_or([0.0; 9]);
     }

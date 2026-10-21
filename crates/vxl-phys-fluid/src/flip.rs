@@ -250,8 +250,8 @@ impl FlipScratch {
         }
         let (nx, ny, nz) = (self.dims[0], self.dims[1], self.dims[2]);
         for i in 0..sys.n_fluid {
-            let p = sys.pos[i];
-            let v = sys.vel[i];
+            let p = sys.dom.ps.pos[i];
+            let v = sys.dom.ps.vel[i];
             let c = if apic { self.affine[i] } else { [0.0f32; 9] };
             let g = self.coord(p);
             let (i0, ux) = cell_axis(g.x);
@@ -470,11 +470,11 @@ impl FlipScratch {
     /// 不碰 APIC 的 `C`：那由本档 `p2g` 每子步从粒子场现算（模块头"APIC"节）。
     fn g2p(&mut self, sys: &mut FluidSystem, dt: f32) {
         let theta = sys.cfg.flip_ratio.clamp(0.0, 1.0);
-        let vmax = sys.cfg.max_speed_frac * sys.h / dt;
+        let vmax = sys.cfg.max_speed_frac * sys.dom.kern.h / dt;
         let vmax2 = vmax * vmax;
         let (nx, ny, nz) = (self.dims[0], self.dims[1], self.dims[2]);
         for i in 0..sys.n_fluid {
-            let p = sys.pos[i];
+            let p = sys.dom.ps.pos[i];
             let g = self.coord(p);
             let (i0, ux) = cell_axis(g.x);
             let (j0, uy) = cell_axis(g.y);
@@ -508,19 +508,19 @@ impl FlipScratch {
             }
             let vg = Vec3::new(acc[0], acc[1], acc[2]);
             let vg0 = Vec3::new(acc[3], acc[4], acc[5]);
-            let v_flip = sys.vel[i] + (vg - vg0);
+            let v_flip = sys.dom.ps.vel[i] + (vg - vg0);
             let mut v = v_flip * theta + vg * (1.0 - theta);
             let s2 = v.length_squared();
             if s2 > vmax2 {
                 v *= vmax / s2.sqrt();
             }
-            sys.vel[i] = v;
-            sys.pos[i] += v * dt;
+            sys.dom.ps.vel[i] = v;
+            sys.dom.ps.pos[i] += v * dt;
             // `pressures()` = 粒子所在单元压力（Pa）；夹到网格内。
             let ci = i0.min(nx - 1);
             let cj = j0.min(ny - 1);
             let ck = k0.min(nz - 1);
-            sys.press[i] = self.p[self.cell_idx(ci, cj, ck)];
+            sys.dom.ps.press[i] = self.p[self.cell_idx(ci, cj, ck)];
         }
     }
 }
@@ -539,12 +539,12 @@ pub(crate) fn substep(
         return; // 边界粒子不单独驱动（同 WCSPH/PBF 档）
     }
     // 每子步重累加反作用（清零归本函数、÷ 子步数归 `step`，C2 口径与 SPH 族一致）。
-    for f in sys.bforce[nf..].iter_mut() {
+    for f in sys.dom.ps.bforce[nf..].iter_mut() {
         *f = Vec3::ZERO;
     }
     // 相位 0/1：邻域网格 + SPH 密度（层流黏度相位与 `densities()` 口径；与 PBF 档同）。
     let t = vxl_phys_core::probe::start();
-    sys.grid.rebuild(&sys.pos, sys.h);
+    sys.dom.grid.rebuild(&sys.dom.ps.pos, sys.dom.kern.h);
     sys.phase_us[0] += vxl_phys_core::probe::us(t);
     let t = vxl_phys_core::probe::start();
     sys.density_pass(providers);

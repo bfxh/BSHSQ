@@ -21,7 +21,7 @@ mod scan;
 ///   无量纲的 `ε`（不编造 ε → Pa·s 换算；默认 0 ⇒ 旧口径）。`temperature` 报 0（仅热耦合域用）。
 impl MediumField for FluidSystem {
     fn sample(&self, x: Vec3) -> MediumSample {
-        if self.pos.is_empty() || self.grid.items.is_empty() || self.grid.nz == 0 {
+        if self.dom.ps.pos.is_empty() || self.dom.grid.items.is_empty() || self.dom.grid.nz == 0 {
             return MediumSample::VACUUM;
         }
         let (wsum, rho, vsum) = poly6_scan(self, x);
@@ -46,14 +46,14 @@ impl MediumField for FluidSystem {
             return; // 无近粒：动量不打空气（与 splat 场同口径）
         }
         // **严格守恒的分摊**：`k = 1/(Σw·m)` ⇒ `Σ_j m·Δv_j = momentum·(Σw_j)/Σw = momentum`。
-        let k = 1.0 / (wsum * self.mass);
-        let vel = &mut self.vel;
+        let k = 1.0 / (wsum * self.dom.kern.mass);
+        let vel = &mut self.dom.ps.vel;
         for_each_neighbor(
-            &self.grid,
-            &self.pos,
+            &self.dom.grid,
+            &self.dom.ps.pos,
             x,
-            self.h2,
-            self.k6,
+            self.dom.kern.h2,
+            self.dom.kern.k6,
             self.n_fluid,
             |j, w| vel[j] += momentum * (w * k),
         );

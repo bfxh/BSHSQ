@@ -58,27 +58,27 @@ pub fn surface_drag(
     let mut injected = Vec3::ZERO;
     for i in 0..n {
         // 自由表面 = **密度亏超过阈值**；`ρ ≤ 0`（含 NaN）= 还没算过密度 ⇒ 不驱动。
-        let rho = sys.dens[i];
+        let rho = sys.dom.ps.dens[i];
         if rho.is_nan() || rho <= 0.0 || rho >= surface {
             continue;
         }
-        let m = sys.pmass[i];
+        let m = sys.dom.ps.pmass[i];
         if m.is_nan() || m <= 0.0 {
             continue;
         }
-        let s = medium.sample(sys.pos[i]);
+        let s = medium.sample(sys.dom.ps.pos[i]);
         if s.density <= 0.0 || s.occupied <= 0.0 {
             continue;
         }
-        let u = s.velocity - sys.vel[i];
+        let u = s.velocity - sys.dom.ps.vel[i];
         let sp = u.length();
         if sp <= 0.0 {
             continue;
         }
         let dp = u * (0.5 * s.density * cfg.cd * area * sp * dt);
-        sys.vel[i] += dp * (1.0 / m);
+        sys.dom.ps.vel[i] += dp * (1.0 / m);
         injected += dp;
-        medium.deposit(sys.pos[i], -dp, 0.0, 0.0);
+        medium.deposit(sys.dom.ps.pos[i], -dp, 0.0, 0.0);
     }
     injected
 }

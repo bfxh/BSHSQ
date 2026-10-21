@@ -128,16 +128,16 @@ pub(crate) fn substep(sys: &mut FluidSystem, dt: f32, providers: &dyn ProviderCo
     let mut sc = PbfScratch {
         delta: vec![Vec3::ZERO; nf],
         iter: vec![Vec3::ZERO; nf],
-        lambda: vec![0.0; sys.pos.len()],
+        lambda: vec![0.0; sys.dom.ps.pos.len()],
     };
     // 每子步重累加反作用（清零归本函数、÷ 子步数归 `step`，C2 口径与 WCSPH 档一致）。
-    for f in sys.bforce[nf..].iter_mut() {
+    for f in sys.dom.ps.bforce[nf..].iter_mut() {
         *f = Vec3::ZERO;
     }
     let t = vxl_phys_core::probe::start();
     // 预测**前**先在 x_t 建一次网格 + 评一次密度：`predict` 的层流黏度相位吃 `dens`
     // （`laminar.rs` 用 `(ρ_i+ρ_j)/2`，μ = 0 时短路），这是本档唯一的 x_t 快照。
-    sys.grid.rebuild(&sys.pos, sys.h);
+    sys.dom.grid.rebuild(&sys.dom.ps.pos, sys.dom.kern.h);
     sys.phase_us[0] += vxl_phys_core::probe::us(t);
     let t = vxl_phys_core::probe::start();
     sys.density_pass(providers);
@@ -151,7 +151,7 @@ pub(crate) fn substep(sys: &mut FluidSystem, dt: f32, providers: &dyn ProviderCo
         // 上会漏/多算邻居）。每迭代重评也保确定性（网格构建与遍历序无关）
         // ⚠️ 代价：每子步比"只建一次"多 1 次密度评估（本档正确性优先，见文件头简化表）。
         let t = vxl_phys_core::probe::start();
-        sys.grid.rebuild(&sys.pos, sys.h);
+        sys.dom.grid.rebuild(&sys.dom.ps.pos, sys.dom.kern.h);
         sys.phase_us[0] += vxl_phys_core::probe::us(t);
         let t = vxl_phys_core::probe::start();
         sys.density_pass(providers);
@@ -177,20 +177,20 @@ fn iterations(cfg: &FluidConfig) -> u32 {
 ///
 /// 物理黏度入口与 WCSPH 档**同一个**（`laminar::pass`，μ = 0 自短路）。
 pub(crate) fn apply_forces(sys: &mut FluidSystem, dt: f32) {
-    for i in 0..sys.pos.len() {
-        sys.acc[i] = sys.cfg.gravity;
+    for i in 0..sys.dom.ps.pos.len() {
+        sys.dom.ps.acc[i] = sys.cfg.gravity;
     }
     crate::laminar::pass(sys);
-    let vmax = sys.cfg.max_speed_frac * sys.h / dt;
+    let vmax = sys.cfg.max_speed_frac * sys.dom.kern.h / dt;
     let vmax2 = vmax * vmax;
     let nf = sys.n_fluid;
     for i in 0..nf {
-        let mut v = sys.vel[i] + sys.acc[i] * dt;
+        let mut v = sys.dom.ps.vel[i] + sys.dom.ps.acc[i] * dt;
         let s2 = v.length_squared();
         if s2 > vmax2 {
             v *= vmax / s2.sqrt();
         }
-        sys.vel[i] = v;
+        sys.dom.ps.vel[i] = v;
     }
 }
 
@@ -198,7 +198,7 @@ pub(crate) fn apply_forces(sys: &mut FluidSystem, dt: f32) {
 fn predict(sys: &mut FluidSystem, dt: f32) {
     apply_forces(sys, dt);
     for i in 0..sys.n_fluid {
-        sys.pos[i] += sys.vel[i] * dt;
+        sys.dom.ps.pos[i] += sys.dom.ps.vel[i] * dt;
     }
 }
 
@@ -206,7 +206,7 @@ fn predict(sys: &mut FluidSystem, dt: f32) {
 ///
 /// 分子 = `|Σ_j ∇_{p_i}W_ij|²`（k = i 那项）+ `Σ_j |∇_{p_i}W_ij|²`（k = j 那些项）。
 fn lambda_pass(sys: &mut FluidSystem, sc: &mut PbfScratch) {
-    let (h, ks, nt) = (sys.h, sys.ks, sys.pos.len());
+    let (h, ks, nt) = (sys.dom.kern.h, sys.dom.kern.ks, sys.dom.ps.pos.len());
     let inv_rho = 1.0 / sys.cfg.rest_density;
     sc.lambda.resize(nt, 0.0);
     for i in 0..nt {
@@ -220,7 +220,7 @@ fn lambda_pass(sys: &mut FluidSystem, sc: &mut PbfScratch) {
             sq += kg * kg;
         });
         let denom = (g.length_squared() + sq) * (inv_rho * inv_rho) + LAMBDA_EPS;
-        let c = sys.dens[i] * inv_rho - 1.0;
+        let c = sys.dom.ps.dens[i] * inv_rho - 1.0;
         let lam = (-c / denom).clamp(-LAMBDA_CLAMP, LAMBDA_CLAMP);
         // **一边倒约束**（自由表面口径）：`C < 0` ⇒ `λ > 0` ⇒ 成对项是**吸引**，而"把邻域
         // 移回被截断的核内"几何上做不到 ⇒ 表面会变成**永不满足的常量拉力**（自己缩 →
@@ -244,7 +244,13 @@ fn lambda_pass(sys: &mut FluidSystem, sc: &mut PbfScratch) {
 /// 要的是**排斥** ⇒ 与 WCSPH 同一读法就必须取负。**漏掉它会变成"压缩处互吸"**：实测
 /// 反作用冲量大账残差 19%（水槽里 3 tick 打飞 4.8 m/s），补上后回到机器精度。
 fn project(sys: &mut FluidSystem, sc: &mut PbfScratch, dt: f32) {
-    let (h, h2, k6, ks, nf) = (sys.h, sys.h2, sys.k6, sys.ks, sys.n_fluid);
+    let (h, h2, k6, ks, nf) = (
+        sys.dom.kern.h,
+        sys.dom.kern.h2,
+        sys.dom.kern.k6,
+        sys.dom.kern.ks,
+        sys.n_fluid,
+    );
     let inv_rho = 1.0 / sys.cfg.rest_density;
     let inv_dt2 = 1.0 / (dt * dt);
     let supp = sys.cfg.tensile_instability_suppression;
@@ -257,7 +263,7 @@ fn project(sys: &mut FluidSystem, sc: &mut PbfScratch, dt: f32) {
         iter,
         lambda,
     } = sc;
-    let mut bforce = std::mem::take(&mut sys.bforce);
+    let mut bforce = std::mem::take(&mut sys.dom.ps.bforce);
     for v in iter[..nf].iter_mut() {
         *v = Vec3::ZERO;
     }
@@ -266,7 +272,7 @@ fn project(sys: &mut FluidSystem, sc: &mut PbfScratch, dt: f32) {
     // 不守恒：实测反作用冲量大账残差 1.85%（改成两遍后回到机器精度——`d`/`r` 取负后逐位同值）。
     for i in 0..nf {
         let lam_i = lambda[i];
-        let mi = sys.pmass[i];
+        let mi = sys.dom.ps.pmass[i];
         let mut dp = Vec3::ZERO;
         sys.for_neighbors(i, |j, d, r2| {
             let r = r2.sqrt();
@@ -307,9 +313,9 @@ fn project(sys: &mut FluidSystem, sc: &mut PbfScratch, dt: f32) {
     for i in 0..nf {
         let dp = iter[i];
         delta[i] += dp;
-        sys.pos[i] += dp;
+        sys.dom.ps.pos[i] += dp;
     }
-    sys.bforce = bforce;
+    sys.dom.ps.bforce = bforce;
 }
 
 /// 收尾：重评密度（投影后的**末态**密度——不可压误差档读的就是它）→ 速度回填
@@ -318,20 +324,20 @@ fn finish(sys: &mut FluidSystem, dt: f32, providers: &dyn ProviderColliders, sc:
     let nf = sys.n_fluid;
     let inv_dt = 1.0 / dt;
     let t = vxl_phys_core::probe::start();
-    sys.grid.rebuild(&sys.pos, sys.h);
+    sys.dom.grid.rebuild(&sys.dom.ps.pos, sys.dom.kern.h);
     sys.density_pass(providers);
     sys.phase_us[0] += vxl_phys_core::probe::us(t);
     let t = vxl_phys_core::probe::start();
     for i in 0..nf {
-        sys.vel[i] += sc.delta[i] * inv_dt;
+        sys.dom.ps.vel[i] += sc.delta[i] * inv_dt;
     }
     xsph(sys);
     // CFL 限速（与 CPU SPH 档**同一口径**：钳在"本子步速度定稿处"）。`predict` 里那次钳的
     // 是 x* 用的预测速度；`Δp/dt` 与 XSPH 都在这之后叠加 ⇒ 这里再钳一次，保证
     // `velocities()` 对外读数永不超出 `max_speed_frac·h/dt`（两族口径一致）。
-    let vmax = sys.cfg.max_speed_frac * sys.h * inv_dt;
+    let vmax = sys.cfg.max_speed_frac * sys.dom.kern.h * inv_dt;
     let vmax2 = vmax * vmax;
-    for v in sys.vel[..nf].iter_mut() {
+    for v in sys.dom.ps.vel[..nf].iter_mut() {
         let s2 = v.length_squared();
         if s2 > vmax2 {
             *v *= vmax / s2.sqrt();
@@ -355,17 +361,18 @@ fn xsph(sys: &mut FluidSystem) {
         return;
     }
     for i in 0..nf {
-        let vi = sys.vel[i];
-        let rho_i = sys.dens[i];
+        let vi = sys.dom.ps.vel[i];
+        let rho_i = sys.dom.ps.dens[i];
         let mut xs = Vec3::ZERO;
         sys.for_neighbors(i, |j, _d, r2| {
-            let tt = sys.h2 - r2;
-            let w = sys.k6 * tt * tt * tt;
-            xs += (sys.vel[j] - vi) * (sys.pmass[j] * 2.0 / (rho_i + sys.dens[j]) * w);
+            let tt = sys.dom.kern.h2 - r2;
+            let w = sys.dom.kern.k6 * tt * tt * tt;
+            xs += (sys.dom.ps.vel[j] - vi)
+                * (sys.dom.ps.pmass[j] * 2.0 / (rho_i + sys.dom.ps.dens[j]) * w);
         });
-        sys.xsph[i] = xs;
+        sys.dom.ps.xsph[i] = xs;
     }
     for i in 0..nf {
-        sys.vel[i] += sys.xsph[i] * eps;
+        sys.dom.ps.vel[i] += sys.dom.ps.xsph[i] * eps;
     }
 }

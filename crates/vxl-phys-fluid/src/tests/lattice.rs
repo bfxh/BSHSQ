@@ -39,7 +39,7 @@ fn grid_neighbors_equal_brute_force() {
         set.sort_unstable();
     }
     let mut brute: Vec<Vec<u32>> = vec![Vec::new(); n];
-    let h2 = f.h2;
+    let h2 = f.dom.kern.h2;
     let ps = f.positions();
     for i in 0..n {
         for j in 0..n {

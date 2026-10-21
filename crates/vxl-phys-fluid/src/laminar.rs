@@ -69,19 +69,26 @@ fn acc_of(v: &View, i: usize, nu2: f32) -> Vec3 {
 
 /// 从 `&mut FluidSystem` 逐字段借出：只读视图 + `acc` 可变（**字段级**借用 ⇒ 不冲突）。
 fn split(sys: &mut FluidSystem) -> (View<'_>, &mut [Vec3]) {
-    let (h, h2, ks, nf) = (sys.h, sys.h2, sys.ks, sys.n_fluid);
+    // 先把标量读出来（`Copy`）⇒ 后面只借**叶子字段**，借用互不相交。
+    let (h, h2, ks, nf) = (
+        sys.dom.kern.h,
+        sys.dom.kern.h2,
+        sys.dom.kern.ks,
+        sys.n_fluid,
+    );
+    let ps = &mut sys.dom.ps;
     let v = View {
-        pos: &sys.pos,
-        vel: &sys.vel,
-        dens: &sys.dens,
-        pmass: &sys.pmass,
-        grid: &sys.grid,
+        pos: &ps.pos,
+        vel: &ps.vel,
+        dens: &ps.dens,
+        pmass: &ps.pmass,
+        grid: &sys.dom.grid,
         h,
         h2,
         ks,
         n_fluid: nf,
     };
-    (v, &mut sys.acc)
+    (v, &mut ps.acc)
 }
 
 fn pass_serial(sys: &mut FluidSystem, nu2: f32) {
