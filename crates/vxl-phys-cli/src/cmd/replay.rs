@@ -113,12 +113,9 @@ mod tests {
     #[test]
     fn parses_record_line() {
         let l = "{\"tick\":120,\"state_hash\":\"0x0000000000000000000000000000abcd\"}";
-        let (t, h) = match parse_line(l) {
-            Some(v) => v,
-            None => {
-                assert!(false, "应当解析成功");
-                return;
-            }
+        assert!(parse_line(l).is_some(), "应当解析成功");
+        let Some((t, h)) = parse_line(l) else {
+            return;
         };
         assert_eq!(t, 120);
         assert_eq!(h, 0xabcd);

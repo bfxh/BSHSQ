@@ -96,8 +96,8 @@ mod tests {
             let h = if t >= 180 { t as u128 + 1 } else { t as u128 };
             b.observe(t, h);
         }
+        assert!(a.divergence(&b).is_some(), "应当检出");
         let Some(d) = a.divergence(&b) else {
-            assert!(false, "应当检出");
             return;
         };
         assert_eq!(d.first_bad, 180);
@@ -124,8 +124,8 @@ mod tests {
         let mut b = Recorder::new(60);
         a.observe(60, 1);
         b.observe(60, 2);
+        assert!(a.divergence(&b).is_some(), "应当检出");
         let Some(d) = a.divergence(&b) else {
-            assert!(false, "应当检出");
             return;
         };
         assert_eq!(d.first_bad, 60);
