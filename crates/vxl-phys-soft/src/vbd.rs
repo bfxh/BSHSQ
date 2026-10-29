@@ -115,7 +115,8 @@ pub(crate) fn apply_all_cloth(c: &mut ClothSheet, j: usize, b: &RigidProxy, vpos
     }
     let hits = std::mem::take(&mut c.body.hits);
     if iters > 0 {
-        apply_block_cloth(c, &hits, j, b, vpos, h, iters);
+        let ctx = BodyCtx { j, b, vpos, h };
+        apply_block_cloth(c, &hits, &ctx, iters);
     } else {
         for hit in &hits {
             ClothBodyExt::apply_body_hit(c, hit, j, b, vpos, h);
@@ -125,15 +126,8 @@ pub(crate) fn apply_all_cloth(c: &mut ClothSheet, j: usize, b: &RigidProxy, vpos
 }
 
 /// 布料边的 Jacobi 块施加（残余穿透口径，与绳子那条边同一套）。
-pub(crate) fn apply_block_cloth(
-    c: &mut ClothSheet,
-    hits: &[ClothHit],
-    j: usize,
-    b: &RigidProxy,
-    vpos: Vec3,
-    h: f32,
-    iters: u32,
-) {
+pub(crate) fn apply_block_cloth(c: &mut ClothSheet, hits: &[ClothHit], x: &BodyCtx, iters: u32) {
+    let (j, b, vpos, h) = (x.j, x.b, x.vpos, x.h);
     let mut applied = vec![0.0f32; hits.len()];
     for _ in 0..iters.max(1) {
         let (dvb, dxb, dispb) = (c.body.dv[j], c.body.dx[j], c.body.disp[j]);
