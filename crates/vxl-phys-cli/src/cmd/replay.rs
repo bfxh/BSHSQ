@@ -12,6 +12,14 @@ pub(super) fn replay_cmd(name: &str, ticks: usize, path: Option<&str>) -> Result
     }
 }
 
+/// 拆出**头部行**（`{"schema":...}`）与数据体。没有头部（旧文件）时头部为空串、整体当数据。
+fn split_header(text: &str) -> (&str, &str) {
+    match text.split_once('\n') {
+        Some((first, rest)) if first.trim_start().starts_with("{\"schema\"") => (first, rest),
+        _ => ("", text),
+    }
+}
+
 /// 从一行 JSONL（`{"tick":..,"state_hash":"0x.."}`）取出 `(tick, hash)`。
 fn parse_line(line: &str) -> Option<(u64, u128)> {
     let t0 = line.find("\"tick\":")? + "\"tick\":".len();
@@ -52,16 +60,28 @@ fn replay(name: &str, ticks: usize, path: &str) -> Result<String, String> {
         Err(e) => return Err(format!("读不了 {path}：{e}")),
     };
     let got = record_text(name, ticks)?;
-    let (wl, gl) = (want.lines().count(), got.lines().count());
+    // **头部校验**：第一行若是 `{"schema":...}`，就核对场景/ticks/周期——配错档位时先报这个，
+    // 而不是让人去猜"为什么哈希不一致"。
+    let (wh, wbody) = split_header(&want);
+    let (gh, gbody) = split_header(&got);
+    if wh != gh {
+        return Err(format!(
+            "FAIL：基线头部与本次不一致
+  基线 {wh}
+  本次 {gh}
+（场景/tick 数/周期不同 ⇒ 不是同一条基线）"
+        ));
+    }
+    let (wl, gl) = (wbody.lines().count(), gbody.lines().count());
     if wl != gl {
         return Err(format!(
             "FAIL：观测点行数不同（基线 {wl} vs 本次 {gl}）——tick 数或档位不一样？"
         ));
     }
-    let (rw, rg) = (to_recorder(&want, "基线")?, to_recorder(&got, "本次")?);
+    let (rw, rg) = (to_recorder(wbody, "基线")?, to_recorder(gbody, "本次")?);
     // **逐字比**（严格）：`0x0b71…` 与 `0xb71…` 数值相等但文本不同，篡改必须被抓到。
     // 差分只用来把"第一个不同的行"翻译成 **tick**，不改变判定口径。
-    for (i, (w, g)) in want.lines().zip(got.lines()).enumerate() {
+    for (i, (w, g)) in wbody.lines().zip(gbody.lines()).enumerate() {
         if w != g {
             let tick = parse_line(w)
                 .map(|(t, _)| t)
