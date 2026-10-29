@@ -128,11 +128,16 @@ pub(crate) fn apply_all_cloth(c: &mut ClothSheet, j: usize, b: &RigidProxy, vpos
 /// 布料边的 Jacobi 块施加（残余穿透口径，与绳子那条边同一套）。
 pub(crate) fn apply_block_cloth(c: &mut ClothSheet, hits: &[ClothHit], x: &BodyCtx, iters: u32) {
     let (j, b, vpos, h) = (x.j, x.b, x.vpos, x.h);
-    // ⚠️ **布料侧钳到一遍**（2026-10-29 实测）：布料的体反作用走 `dv`/`disp`（**下一帧**才进位置），
-    // 所以"本遍残余穿透"没有绳子那种良定义；即便用精确 λ 记残余，多遍也会把盒子**顶上去**
-    // （1/4/8 遍末 y = +0.0038 / +0.0108 / +0.0842）。⇒ 多遍在布料边上**不成立**，等体反作用
-    // 能同帧进位置的模型（M3.3）再放开。
+    // **M3.3（仅块模式）：体反作用同帧进位置**——默认路径的反作用走 `dv`/`disp`，下一帧才进位置，
+    // 所以"本遍残余"没有良定义（实测 1/4/8 遍把盒子一路顶到 +0.0842）。这里在块内维护一个
+    // **虚拟位姿**（`vpos_cur`）并把体的位置份额累加进 `body.dx`（门面在体解算后 `pos += dx`），
+    // 相当于把"下一帧生效"提前到本帧 ⇒ 残余 `λ·(w_p+w_b)` 才真的对应"穿透被消掉多少"。
+    // ⚠️ 仍**钳到一遍**：同帧反作用让单遍与现役几乎一致（末 y +0.0004 vs +0.0003），但多遍依旧
+    // 震荡（1/4/8 遍 = +0.0004 / +0.0136 / +0.0036）⇒ 残余口径还不是恒等式（λ 被速度钳位、
+    // make-up 走另一条腿）。放开要等残余能在**所有**分支上精确记账。
     let iters = iters.min(1);
+    let mut vpos_cur = vpos;
+    let mut shift = Vec3::ZERO;
     let mut applied = vec![0.0f32; hits.len()];
     for _ in 0..iters.max(1) {
         let (dvb, dxb, dispb) = (c.body.dv[j], c.body.dx[j], c.body.disp[j]);
@@ -150,14 +155,17 @@ pub(crate) fn apply_block_cloth(c: &mut ClothSheet, hits: &[ClothHit], x: &BodyC
             let w_p = c.inv_mass[hit.i as usize];
             let (dv0, dx0, d0) = (c.body.dv[j], c.body.dx[j], c.body.disp[j]);
             // **精确口径**（M3.2）：`apply_body_hit` 现在回传本次的 λ ⇒ 与绳子那条边同一个式子。
-            let lam = ClothBodyExt::apply_body_hit(c, &sub, j, b, vpos, h);
+            let lam = ClothBodyExt::apply_body_hit(c, &sub, j, b, vpos_cur, h);
             acc_dx += c.body.dx[j] - dx0;
             acc_disp += c.body.disp[j] - d0;
             acc_dv += c.body.dv[j] - dv0;
             applied[k] += lam * (w_p + b.inv_mass);
+            // 体沿 −n 让 `w_b·λ`：累进虚拟位姿，后续 hit 与下一遍才看得见
+            shift -= sub.n * (b.inv_mass * lam);
+            vpos_cur = vpos + shift;
         }
         c.body.dv[j] = dvb + acc_dv;
-        c.body.dx[j] = dxb + acc_dx;
+        c.body.dx[j] = dxb + acc_dx + shift;
         c.body.disp[j] = dispb + acc_disp;
     }
 }
