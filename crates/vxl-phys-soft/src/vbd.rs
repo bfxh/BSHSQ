@@ -4,7 +4,7 @@
 //! 代价是每次施加前 m log m 排序（实测占子步 3.6%–6.8%，见 `tests/vbd_sort_cost.rs`）。
 //! 本模块给另一条路：**Jacobi 块更新**（所有接触按同一迭代前状态解 λ，体的反作用一次性求和），
 //! 迭代到定点 ⇒ 结果只依赖**接触集合**，与施加顺序无关（判据见本文件的置换测试）。
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::cell::Cell;
 
 use vxl_phys_core::Vec3;
 
@@ -13,21 +13,28 @@ use crate::cloth_coupling::BodyHit as ClothHit;
 use crate::rigid::RigidProxy;
 use crate::rope::{BodyHit as RopeHit, Rope};
 
-/// 块求解的**遍数**（`0` = 关 = 现役"几何排序 + 就地 GS"）。进程级静态：由门面在**整次
-/// step 之外**用 `with_block_solver` 设定，step 内不变 ⇒ 不影响岛级并行的确定性。
-static BLOCK_ITERS: AtomicU32 = AtomicU32::new(0);
+thread_local! {
+    /// 块求解的**遍数**（`0` = 关 = 现役"几何排序 + 就地 GS"）。
+    ///
+    /// **必须是线程内的**：进程级静态会被并行测试与岛级并行互相踩（2026-10-30 被
+    /// `tests/vbd_invariants.rs` 的确定性用例抓到：同一场景跑两遍结果不同）。
+    #[allow(clippy::missing_const_for_thread_local)]
+    static BLOCK_ITERS: Cell<u32> = Cell::new(0);
+}
 
 /// 当前线程的块求解遍数（`0` = 关）。
 pub(crate) fn block_iters() -> u32 {
-    BLOCK_ITERS.load(Ordering::Relaxed)
+    BLOCK_ITERS.with(|c| c.get())
 }
 
 /// 在**块求解 N 遍**的上下文里跑 `f`（`0` = 关；退出时恢复原值，嵌套安全）。
 pub fn with_block_solver<R>(iters: u32, f: impl FnOnce() -> R) -> R {
-    let old = BLOCK_ITERS.swap(iters, Ordering::Relaxed);
-    let r = f();
-    BLOCK_ITERS.store(old, Ordering::Relaxed);
-    r
+    BLOCK_ITERS.with(|c| {
+        let old = c.replace(iters);
+        let r = f();
+        c.set(old);
+        r
+    })
 }
 
 /// 一次施加的上下文（体号 / 体代理 / 虚拟位姿 / 子步长）——打包成结构体是为了守住 args 门。
