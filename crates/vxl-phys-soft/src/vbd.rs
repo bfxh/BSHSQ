@@ -9,7 +9,33 @@
 //! 差别是本 M0 把顶点子问题退化成沿法线的 1 DOF（与现役 `body_hit_solve` 同口径），
 //! 以便先只验证**顺序无关**这一条判据。
 
+use std::cell::Cell;
+
 use vxl_phys_core::Vec3;
+
+use crate::rigid::RigidProxy;
+use crate::rope::{BodyHit, Rope};
+
+thread_local! {
+    /// 块求解的迭代数（`0` = 关 = 现役"几何排序 + 就地 GS"）。**线程内**：不跨线程共享，
+    /// 也就不影响岛级并行的确定性（每个解算线程用自己的开关）。
+    static BLOCK_ON: Cell<bool> = const { Cell::new(false) };
+}
+
+/// 当前线程是否开着块求解（默认关 = 现役"几何排序 + 就地 GS"）。
+pub(crate) fn enabled() -> bool {
+    BLOCK_ON.with(|c| c.get())
+}
+
+/// 在**块求解开/关**的上下文里跑 `f`（退出时恢复原值；嵌套调用也安全）。
+pub fn with_block_solver<R>(on: bool, f: impl FnOnce() -> R) -> R {
+    BLOCK_ON.with(|c| {
+        let old = c.replace(on);
+        let r = f();
+        c.set(old);
+        r
+    })
+}
 
 /// 一次接触（与 `rope::BodyHit` 同口径的最小集）。
 #[derive(Clone, Copy, Debug)]
@@ -83,8 +109,8 @@ pub fn solve_block(contacts: &[BlockContact], inv_mass_b: f32, iters: u32) -> Bl
 #[cfg(test)]
 mod tests {
     use super::{solve_block, BlockContact};
-    use vxl_phys_core::Vec3;
 
+    use vxl_phys_core::Vec3;
     fn contact_set() -> Vec<BlockContact> {
         // 33 个粒子压在一块 box 上（与 `rope` 判据同规模），法线朝上、深度按悬链形状递增
         (0..33u32)
@@ -168,4 +194,64 @@ mod tests {
         assert!((p + b - 0.051).abs() <= 1e-4, "未消掉穿透：{}", p + b);
         assert!((p / b - 50.0).abs() <= 0.5, "逆质量分担比例不对：{}", p / b);
     }
+}
+
+/// **施加段的唯一入口**：默认 = 几何排序 + 逐 hit 就地 GS（现役，逐位不变）；
+/// 块求解开 = **不排序** + 单遍 Jacobi 块。
+pub(crate) fn apply_all(r: &mut Rope, j: usize, b: &RigidProxy, vpos: Vec3, h: f32) {
+    if !crate::vbd::enabled() {
+        r.hits
+            .sort_by(|a, c| a.ord.total_cmp(&c.ord).then(a.x.total_cmp(&c.x)));
+    }
+    let hits = std::mem::take(&mut r.hits);
+    if crate::vbd::enabled() {
+        apply_block(r, &hits, j, b, vpos, h);
+    } else {
+        for hit in &hits {
+            r.apply_body_hit(hit, j, b, vpos, h);
+        }
+    }
+    r.hits = hits;
+}
+
+/// 对**同一个体**的一批命中做单遍 Jacobi 块施加。
+///
+/// ⚠️ **只做一遍**：`hit.depth` 是收集时的快照，多遍会把同一份穿透重复施加
+/// （2026-10-29 实测 8 遍把盒子直接压穿，末 y = −7.72）。多遍需要"残余穿透"口径（M2）。
+pub(crate) fn apply_block(
+    r: &mut Rope,
+    hits: &[BodyHit],
+    j: usize,
+    b: &RigidProxy,
+    vpos: Vec3,
+    h: f32,
+) {
+    let (dvb, dxb, dispb) = (r.body_dv[j], r.body_dx[j], r.body_disp[j]);
+    let (mut acc_dv, mut acc_dx, mut acc_disp) = (Vec3::ZERO, Vec3::ZERO, Vec3::ZERO);
+    for hit in hits {
+        // 冻结：本遍内每个 hit 都从同一起点读体状态
+        r.body_dv[j] = dvb;
+        r.body_dx[j] = dxb;
+        r.body_disp[j] = dispb;
+        let Some((lam, v_point)) = r.body_hit_solve(hit, j, b, vpos, h) else {
+            continue;
+        };
+        // `body_hit_solve` 里的**位置补足**（§8.4.9）也写 dx/disp ⇒ 先收进累计
+        acc_dx += r.body_dx[j] - dxb;
+        acc_disp += r.body_disp[j] - dispb;
+        let before = r.pos[hit.i as usize];
+        r.body_dv[j] = dvb;
+        r.body_dx[j] = dxb;
+        r.body_disp[j] = dispb;
+        r.body_hit_project(hit, h, lam, v_point);
+        if b.inv_mass > 0.0 {
+            r.body_hit_reaction(hit, j, b, vpos, h, before);
+            acc_dv += r.body_dv[j] - dvb;
+            acc_dx += r.body_dx[j] - dxb;
+            acc_disp += r.body_disp[j] - dispb;
+        }
+    }
+    r.body_dv[j] = dvb + acc_dv;
+    r.body_dx[j] = dxb + acc_dx;
+    r.body_disp[j] = dispb + acc_disp;
 }
