@@ -43,8 +43,9 @@
 ## 4. 复算命令
 
 ```bash
-cargo run --release -p vxl-phys --example m1_pile -- 16 1 1 600
-cargo run --release -p vxl-phys --example m1_pile -- 16 4 1 600
+# 交错 A/B（成对读数，不是两次单跑）——本机实测 B/A 中位 = 4.724（另一次 4.942）
+bash scripts/ab_config.sh m1_pile "16 1 1 600" "16 4 1 600" 3
 ```
 
-⚠️ 单跑不可信（本机漂移 ±5%、并发时 ±25%）；正式 A/B 走 `scripts/ab_perf.sh` 的交错协议。
+⚠️ 单跑不可信（本机漂移 ±5%、并发时 ±25%）；上面的比值就是这条协议下的成对读数。
+跨 ref 的比较仍走 `scripts/ab_perf.sh`。
