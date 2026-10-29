@@ -15,8 +15,8 @@
 use vxl_phys_core::{BodySet, Vec3};
 use xxhash_rust::xxh3::Xxh3;
 
-/// 单体内规范记录的字节数：1 + 3×4 + 4×4 + 3×4 + 3×4 = 53。
 pub const BODY_RECORD_BYTES: usize = 53;
+pub mod divergence;
 
 /// 状态哈希函数族（可替换实现；M0 规范实现 = `Xxh3Hash`）。
 pub trait StateHash {

@@ -1,5 +1,7 @@
 //! `replay` 子命令：与基线逐行对拍（纯搬移自 `lib.rs`）。
 
+use vxl_phys_replay::Recorder;
+
 use crate::record::record_text;
 
 /// `replay`：基线文件是**必需**的（缺了就是用法错误，不该静默什么都不比）。
@@ -10,28 +12,117 @@ pub(super) fn replay_cmd(name: &str, ticks: usize, path: Option<&str>) -> Result
     }
 }
 
-/// 重跑场景并与基线文件**逐字**比对（行数不同也算不一致 ⇒ 报首个差异观测点）。
+/// 拆出**头部行**（`{"schema":...}`）与数据体。没有头部（旧文件）时头部为空串、整体当数据。
+fn split_header(text: &str) -> (&str, &str) {
+    match text.split_once('\n') {
+        Some((first, rest)) if first.trim_start().starts_with("{\"schema\"") => (first, rest),
+        _ => ("", text),
+    }
+}
+
+/// 从一行 JSONL（`{"tick":..,"state_hash":"0x.."}`）取出 `(tick, hash)`。
+fn parse_line(line: &str) -> Option<(u64, u128)> {
+    let t0 = line.find("\"tick\":")? + "\"tick\":".len();
+    let t1 = line[t0..].find(',')? + t0;
+    let tick: u64 = line[t0..t1].trim().parse().ok()?;
+    let h = "\"state_hash\":\"0x";
+    let h0 = line.find(h)? + h.len();
+    let h1 = line[h0..].find('"')? + h0;
+    let hash = u128::from_str_radix(line[h0..h1].trim(), 16).ok()?;
+    Some((tick, hash))
+}
+
+/// 解析整份 JSONL。**任何一行解析失败都必须报错**——曾经用 `filter_map` 静默丢弃，
+/// 结果"篡改一个哈希"被丢掉后两边都"一致"，对拍假 PASS（被 `cli` 的篡改用例抓到）。
+fn to_recorder(text: &str, who: &str) -> Result<Recorder, String> {
+    let mut hashes = Vec::new();
+    for (i, l) in text.lines().enumerate() {
+        if l.trim().is_empty() {
+            continue;
+        }
+        match parse_line(l) {
+            Some(v) => hashes.push(v),
+            None => {
+                return Err(format!(
+                    "FAIL：{who} 第 {} 行与观测点格式不一致（不是合法观测点）：{l}",
+                    i + 1
+                ))
+            }
+        }
+    }
+    Ok(Recorder { period: 1, hashes })
+}
+
+/// 重跑场景并与基线**按 tick 对齐**比对：不一致时报**首个发散 tick**（基线/本次两侧哈希）。
 fn replay(name: &str, ticks: usize, path: &str) -> Result<String, String> {
     let want = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) => return Err(format!("读不了 {path}：{e}")),
     };
     let got = record_text(name, ticks)?;
-    for (i, (w, g)) in want.lines().zip(got.lines()).enumerate() {
-        if w != g {
-            return Err(format!(
-                "FAIL：第 {} 个观测点起不一致\n  基线 {w}\n  本次 {g}\n（跨机器/跨版本复现失败：先确认档位与版本）",
-                i + 1
-            ));
-        }
+    // **头部校验**：第一行若是 `{"schema":...}`，就核对场景/ticks/周期——配错档位时先报这个，
+    // 而不是让人去猜"为什么哈希不一致"。
+    let (wh, wbody) = split_header(&want);
+    let (gh, gbody) = split_header(&got);
+    if wh != gh {
+        return Err(format!(
+            "FAIL：基线头部与本次不一致
+  基线 {wh}
+  本次 {gh}
+（场景/tick 数/周期不同 ⇒ 不是同一条基线）"
+        ));
     }
-    let (wl, gl) = (want.lines().count(), got.lines().count());
+    let (wl, gl) = (wbody.lines().count(), gbody.lines().count());
     if wl != gl {
         return Err(format!(
             "FAIL：观测点行数不同（基线 {wl} vs 本次 {gl}）——tick 数或档位不一样？"
         ));
     }
+    let (rw, rg) = (to_recorder(wbody, "基线")?, to_recorder(gbody, "本次")?);
+    // **逐字比**（严格）：`0x0b71…` 与 `0xb71…` 数值相等但文本不同，篡改必须被抓到。
+    // 差分只用来把"第一个不同的行"翻译成 **tick**，不改变判定口径。
+    for (i, (w, g)) in wbody.lines().zip(gbody.lines()).enumerate() {
+        if w != g {
+            let tick = parse_line(w)
+                .map(|(t, _)| t)
+                .or_else(|| parse_line(g).map(|(t, _)| t));
+            let d = rw.divergence(&rg);
+            return Err(format!(
+                "FAIL：首个发散观测点 tick={:?}（第 {} 行，逐字不一致）
+  基线 {w}
+  本次 {g}
+  {}",
+                tick,
+                i + 1,
+                match d {
+                    Some(d) => d.report(),
+                    None => "（两侧哈希数值相同 ⇒ 纯文本差异，如前导零/大小写）".to_string(),
+                }
+            ));
+        }
+    }
     Ok(format!(
         "PASS：{name} / {ticks} tick / {gl} 个观测点与 {path} 逐字一致\n"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_line;
+
+    #[test]
+    fn parses_record_line() {
+        let l = "{\"tick\":120,\"state_hash\":\"0x0000000000000000000000000000abcd\"}";
+        assert!(parse_line(l).is_some(), "应当解析成功");
+        let Some((t, h)) = parse_line(l) else {
+            return;
+        };
+        assert_eq!(t, 120);
+        assert_eq!(h, 0xabcd);
+    }
+
+    #[test]
+    fn rejects_other_lines() {
+        assert!(parse_line("hello").is_none());
+    }
 }
