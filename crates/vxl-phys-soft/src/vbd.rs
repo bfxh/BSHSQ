@@ -13,21 +13,27 @@ use crate::cloth_coupling::BodyHit as ClothHit;
 use crate::rigid::RigidProxy;
 use crate::rope::{BodyHit as RopeHit, Rope};
 
-/// 块求解的**遍数**（`0` = 关 = 现役"几何排序 + 就地 GS"）。进程级静态：由门面在**整次
-/// step 之外**用 `with_block_solver` 设定，step 内不变 ⇒ 不影响岛级并行的确定性。
-static BLOCK_ITERS: AtomicU32 = AtomicU32::new(0);
+thread_local! {
+    /// 块求解的**遍数**（`0` = 关 = 现役"几何排序 + 就地 GS"）。
+    ///
+    /// **必须是线程内的**：进程级静态会被并行测试与岛级并行互相踩（2026-10-30 被
+    /// `tests/vbd_invariants.rs` 的确定性用例抓到：同一场景跑两遍结果不同）。
+    static BLOCK_ITERS: AtomicU32 = const { AtomicU32::new(0) };
+}
 
 /// 当前线程的块求解遍数（`0` = 关）。
 pub(crate) fn block_iters() -> u32 {
-    BLOCK_ITERS.load(Ordering::Relaxed)
+    BLOCK_ITERS.with(|c| c.load(Ordering::Relaxed))
 }
 
 /// 在**块求解 N 遍**的上下文里跑 `f`（`0` = 关；退出时恢复原值，嵌套安全）。
 pub fn with_block_solver<R>(iters: u32, f: impl FnOnce() -> R) -> R {
-    let old = BLOCK_ITERS.swap(iters, Ordering::Relaxed);
-    let r = f();
-    BLOCK_ITERS.store(old, Ordering::Relaxed);
-    r
+    BLOCK_ITERS.with(|c| {
+        let old = c.swap(iters, Ordering::Relaxed);
+        let r = f();
+        c.store(old, Ordering::Relaxed);
+        r
+    })
 }
 
 /// 一次施加的上下文（体号 / 体代理 / 虚拟位姿 / 子步长）——打包成结构体是为了守住 args 门。
@@ -132,9 +138,10 @@ pub(crate) fn apply_block_cloth(c: &mut ClothSheet, hits: &[ClothHit], x: &BodyC
     // 所以"本遍残余"没有良定义（实测 1/4/8 遍把盒子一路顶到 +0.0842）。这里在块内维护一个
     // **虚拟位姿**（`vpos_cur`）并把体的位置份额累加进 `body.dx`（门面在体解算后 `pos += dx`），
     // 相当于把"下一帧生效"提前到本帧 ⇒ 残余 `λ·(w_p+w_b)` 才真的对应"穿透被消掉多少"。
-    // ⚠️ 仍**钳到一遍**：同帧反作用让单遍与现役几乎一致（末 y +0.0004 vs +0.0003），但多遍依旧
-    // 震荡（1/4/8 遍 = +0.0004 / +0.0136 / +0.0036）⇒ 残余口径还不是恒等式（λ 被速度钳位、
-    // make-up 走另一条腿）。放开要等残余能在**所有**分支上精确记账。
+    // ⚠️ **多遍仍不收敛 ⇒ 钳到一遍**（2026-10-30 实测，三段拆分 + 精确记账之后）：
+    // 1/4/8 遍末 y = −0.0005 / +0.0179 / +0.0066 ⇒ 震荡。单遍已与现役齐平（−0.0005 vs +0.0003、
+    // 应变完全相同 0.0098），所以这**不影响**单遍质量；多遍的残余来源还没定（摩擦每遍重施？），
+    // 按 A75 判据④记**负结果**，继续钳一遍。
     let iters = iters.min(1);
     let mut vpos_cur = vpos;
     let mut shift = Vec3::ZERO;
@@ -154,14 +161,21 @@ pub(crate) fn apply_block_cloth(c: &mut ClothSheet, hits: &[ClothHit], x: &BodyC
             sub.depth = resid;
             let w_p = c.inv_mass[hit.i as usize];
             let (dv0, dx0, d0) = (c.body.dv[j], c.body.dx[j], c.body.disp[j]);
-            // **精确口径**（M3.2）：`apply_body_hit` 现在回传本次的 λ ⇒ 与绳子那条边同一个式子。
-            let lam = ClothBodyExt::apply_body_hit(c, &sub, j, b, vpos_cur, h);
+            // ① 纯读求解 → ② make-up 先落地（与现役同位置：λ ≤ 0 也要）→ ③ 推出 + 摩擦 + 反作用
+            let s = c.solve_body_hit(&sub, j, b, vpos_cur, h);
+            c.body.dx[j] -= s.make_up;
+            c.body.disp[j] -= s.make_up;
+            if s.lam > 0.0 {
+                let before = c.pos[hit.i as usize];
+                c.project_body_hit(&sub, &s, h);
+                c.react_body_hit(&sub, j, &s, h, before);
+            }
             acc_dx += c.body.dx[j] - dx0;
             acc_disp += c.body.disp[j] - d0;
             acc_dv += c.body.dv[j] - dv0;
-            applied[k] += lam * (w_p + b.inv_mass);
-            // 体沿 −n 让 `w_b·λ`：累进虚拟位姿，后续 hit 与下一遍才看得见
-            shift -= sub.n * (b.inv_mass * lam);
+            // ④ **唯一账本写入源**（含钳位与 make-up 两条腿）
+            applied[k] += s.closing(w_p, b.inv_mass);
+            shift -= sub.n * (b.inv_mass * s.lam_geom);
             vpos_cur = vpos + shift;
         }
         c.body.dv[j] = dvb + acc_dv;

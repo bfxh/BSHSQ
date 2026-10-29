@@ -91,6 +91,47 @@ pub(crate) trait ClothBodyExt {
         vpos: Vec3,
         h: f32,
     ) -> f32;
+
+    /// **三段拆分之①（纯读）**：解 λ / 接触点速度 / make-up。不写任何状态 ⇒ 可重入。
+    fn solve_body_hit(
+        &self,
+        hit: &BodyHit,
+        j: usize,
+        b: &RigidProxy,
+        vpos: Vec3,
+        h: f32,
+    ) -> HitSolve;
+
+    /// **三段拆分之②**：粒子法向推出 + 摩擦（只动粒子位置）。
+    fn project_body_hit(&mut self, hit: &BodyHit, s: &HitSolve, h: f32);
+
+    /// **三段拆分之③**：反作用两腿（`dv` / `disp`）。
+    fn react_body_hit(&mut self, hit: &BodyHit, j: usize, s: &HitSolve, h: f32, before: Vec3);
+}
+
+/// 一次体接触的**解**（三段拆分的中间量；块求解多遍时靠它做残余记账）。
+///
+/// 为什么必须由求解本身给出：钳位截掉的那份**不消穿透**、make-up 补的那份**改穿透但不进
+/// 反作用** —— 在外面按 `λ·(w_p+w_b)` 记账会同时低估与高估，多遍必然震荡。
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct HitSolve {
+    /// 实际施加的 λ（已被速度钳位截断）。
+    pub(crate) lam: f32,
+    /// 几何解（未被钳位）——make-up 与"体总让位"都按它算。
+    pub(crate) lam_geom: f32,
+    /// 接触点相对速度（摩擦与法向共用口径）。
+    pub(crate) v_point: Vec3,
+    /// 位置补足（沿 +n 的 `w_b·(λ_geom − λ)`）。
+    pub(crate) make_up: Vec3,
+    /// 体的逆质量（反作用要用；放进解里，避免函数再多一个参数撞 args 门）。
+    pub(crate) w_b: f32,
+}
+
+impl HitSolve {
+    /// **本遍真正消掉的穿透** = 粒子让的 `w_p·λ` + 体让的 `w_b·λ_geom`（含 make-up 那份）。
+    pub(crate) fn closing(&self, w_p: f32, w_b: f32) -> f32 {
+        w_p * self.lam + w_b * self.lam_geom
+    }
 }
 
 impl ClothBodyExt for ClothSheet {
@@ -255,5 +296,61 @@ impl ClothBodyExt for ClothSheet {
         self.body.dv[j] += impulse * w_b;
         self.body.disp[j] += impulse * (w_b * h);
         lam
+    }
+
+    fn solve_body_hit(
+        &self,
+        hit: &BodyHit,
+        j: usize,
+        b: &RigidProxy,
+        vpos: Vec3,
+        h: f32,
+    ) -> HitSolve {
+        let i = hit.i as usize;
+        let n = hit.n;
+        let inv_h = 1.0 / h;
+        let w_p = self.inv_mass[i];
+        let w_b = b.inv_mass;
+        let v_p = (self.pos[i] - self.prev[i]) * inv_h;
+        let v_b = b.linvel + self.body.dv[j];
+        let v_point = v_b + b.angvel.cross(hit.q - vpos);
+        let approach = (v_point - v_p).dot(n);
+        let lam_geom = hit.depth / (w_p + w_b);
+        let lam_vel = if approach > 0.0 {
+            approach * h / (w_p + w_b)
+        } else {
+            0.0
+        };
+        let lam = lam_geom.min(lam_vel);
+        let make_up = if lam_geom > lam {
+            n * (w_b * (lam_geom - lam))
+        } else {
+            Vec3::ZERO
+        };
+        HitSolve {
+            lam,
+            lam_geom,
+            v_point,
+            make_up,
+            w_b,
+        }
+    }
+
+    fn project_body_hit(&mut self, hit: &BodyHit, s: &HitSolve, h: f32) {
+        let i = hit.i as usize;
+        let n = hit.n;
+        let w_p = self.inv_mass[i];
+        self.pos[i] += n * (w_p * s.lam);
+        self.apply_body_friction(i, n, s.v_point, w_p, s.lam, h);
+    }
+
+    fn react_body_hit(&mut self, hit: &BodyHit, j: usize, s: &HitSolve, h: f32, before: Vec3) {
+        let i = hit.i as usize;
+        let inv_h = 1.0 / h;
+        let w_p = self.inv_mass[i];
+        let d = self.pos[i] - before;
+        let impulse = d * (-inv_h / w_p);
+        self.body.dv[j] += impulse * s.w_b;
+        self.body.disp[j] += impulse * (s.w_b * h);
     }
 }

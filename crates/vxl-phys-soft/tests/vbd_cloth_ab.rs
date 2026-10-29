@@ -129,7 +129,7 @@ fn cloth_block_vs_scalar_ab() {
     }
     // ③ 单遍块与现役的末态**几乎相同**（同帧反作用后实测差 1e-4 量级；旧版是 3.5e-3）
     assert!(
-        (b.box_y - a.box_y).abs() < 0.01,
+        (b.box_y - a.box_y).abs() < 2e-3,
         "块 1 遍与现役末 y 差过大：{} vs {}",
         b.box_y,
         a.box_y
