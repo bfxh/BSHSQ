@@ -20,7 +20,6 @@ const G: Vec3 = Vec3::new(0.0, -9.81, 0.0);
 /// 与 `rope.rs` 的 `BodyHit` 同布局的替身（只为量排序成本；不参与物理）。
 #[derive(Clone, Copy)]
 struct Hit {
-    i: u32,
     ord: f32,
     x: f32,
 }
@@ -30,8 +29,7 @@ fn hits(n: usize) -> Vec<Hit> {
         .map(|i| {
             let t = i as f32 / (n.max(2) - 1) as f32;
             Hit {
-                i: i as u32,
-                ord: (t * 6.2831).sin(),
+                ord: (t * std::f32::consts::TAU).sin(),
                 x: -t,
             }
         })

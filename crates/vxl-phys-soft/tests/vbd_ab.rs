@@ -24,7 +24,7 @@ struct R {
     ms_per_step: f64,
 }
 
-fn run(block: bool) -> R {
+fn run(iters: u32) -> R {
     let mut r = Rope::line(
         Vec3::new(-0.5, 1.0, 0.0),
         Vec3::new(0.5, 1.0, 0.0),
@@ -53,8 +53,8 @@ fn run(block: bool) -> R {
             inv_mass: 1.0,
         };
         let one = [proxy];
-        if block {
-            vbd::with_block_solver(true, || {
+        if iters > 0 {
+            vbd::with_block_solver(iters, || {
                 r.step(DT, G, &NoProviders, 0, &one);
             });
         } else {
@@ -91,8 +91,10 @@ fn run(block: bool) -> R {
 
 #[test]
 fn block_solver_ab_same_scene() {
-    let a = run(false);
-    let b = run(true);
+    let a = run(0);
+    let b = run(1);
+    let c = run(4);
+    let d = run(8);
     println!(
         "[AB] 现役(off)：末 y={:+.4} v={:+.3} x={:+.4} |x|max={:.4} 末接触={} | {:.1} µs/步",
         a.y,
@@ -102,14 +104,21 @@ fn block_solver_ab_same_scene() {
         a.contact_end,
         a.ms_per_step * 1e3
     );
+    for (tag, r) in [("块1", &b), ("块4", &c), ("块8", &d)] {
+        println!(
+            "[AB] {tag}  ：末 y={:+.4} v={:+.3} x={:+.4} |x|max={:.4} 末接触={} | {:.1} µs/步",
+            r.y,
+            r.v,
+            r.x,
+            r.xmax,
+            r.contact_end,
+            r.ms_per_step * 1e3
+        );
+    }
     println!(
-        "[AB] 块(=on)：末 y={:+.4} v={:+.3} x={:+.4} |x|max={:.4} 末接触={} | {:.1} µs/步",
-        b.y,
-        b.v,
-        b.x,
-        b.xmax,
-        b.contact_end,
-        b.ms_per_step * 1e3
+        "[AB] 收敛 |Δy(4→8)|={:.4} |Δx(4→8)|={:.4}",
+        (d.y - c.y).abs(),
+        (d.x - c.x).abs()
     );
     println!(
         "[AB] 差：Δy={:+.4} Δv={:+.3} Δx={:+.4} | 时间比 {:.2}×",

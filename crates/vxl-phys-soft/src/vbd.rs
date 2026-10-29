@@ -1,95 +1,145 @@
-//! **VBD 块求解（M0 原型）**：粒子↔刚体接触的**块坐标下降**施加，**不依赖几何排序**。
+//! **VBD 块求解**：粒子↔刚体接触的**块坐标下降**施加，**不依赖几何排序**。
 //!
-//! 现役做法（`rope.rs` / `cloth/ext/body.rs`）是**先按几何序排序、再就地 Gauss-Seidel**
-//! （`body_dv` 顺序推进）——顺序无关是"排出来的"，代价是每次施加前 m log m 排序。
+//! 现役做法（`rope.rs`）是**先按几何序排序、再就地 Gauss-Seidel**——顺序无关是"排出来的"，
+//! 代价是每次施加前 m log m 排序（实测占子步 3.6%–6.8%，见 `tests/vbd_sort_cost.rs`）。
 //! 本模块给另一条路：**Jacobi 块更新**（所有接触按同一迭代前状态解 λ，体的反作用一次性求和），
-//! 迭代到定点 ⇒ 结果只依赖**接触集合**，与施加顺序无关（顺序只影响浮点求和的舍入，见测试读数）。
-//!
-//! 与 VBD 论文的对应：体是"块"、每个接触粒子是"顶点"，块与顶点交替精确求解局部子问题；
-//! 差别是本 M0 把顶点子问题退化成沿法线的 1 DOF（与现役 `body_hit_solve` 同口径），
-//! 以便先只验证**顺序无关**这一条判据。
-
-use std::cell::Cell;
+//! 迭代到定点 ⇒ 结果只依赖**接触集合**，与施加顺序无关（判据见本文件的置换测试）。
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use vxl_phys_core::Vec3;
 
 use crate::rigid::RigidProxy;
 use crate::rope::{BodyHit, Rope};
 
-thread_local! {
-    /// 块求解的迭代数（`0` = 关 = 现役"几何排序 + 就地 GS"）。**线程内**：不跨线程共享，
-    /// 也就不影响岛级并行的确定性（每个解算线程用自己的开关）。
-    static BLOCK_ON: Cell<bool> = const { Cell::new(false) };
+/// 块求解的**遍数**（`0` = 关 = 现役"几何排序 + 就地 GS"）。进程级静态：由门面在**整次
+/// step 之外**用 `with_block_solver` 设定，step 内不变 ⇒ 不影响岛级并行的确定性。
+static BLOCK_ITERS: AtomicU32 = AtomicU32::new(0);
+
+/// 当前线程的块求解遍数（`0` = 关）。
+pub(crate) fn block_iters() -> u32 {
+    BLOCK_ITERS.load(Ordering::Relaxed)
 }
 
-/// 当前线程是否开着块求解（默认关 = 现役"几何排序 + 就地 GS"）。
-pub(crate) fn enabled() -> bool {
-    BLOCK_ON.with(|c| c.get())
+/// 在**块求解 N 遍**的上下文里跑 `f`（`0` = 关；退出时恢复原值，嵌套安全）。
+pub fn with_block_solver<R>(iters: u32, f: impl FnOnce() -> R) -> R {
+    let old = BLOCK_ITERS.swap(iters, Ordering::Relaxed);
+    let r = f();
+    BLOCK_ITERS.store(old, Ordering::Relaxed);
+    r
 }
 
-/// 在**块求解开/关**的上下文里跑 `f`（退出时恢复原值；嵌套调用也安全）。
-pub fn with_block_solver<R>(on: bool, f: impl FnOnce() -> R) -> R {
-    BLOCK_ON.with(|c| {
-        let old = c.replace(on);
-        let r = f();
-        c.set(old);
-        r
-    })
+/// 一次施加的上下文（体号 / 体代理 / 虚拟位姿 / 子步长）——打包成结构体是为了守住 args 门。
+pub(crate) struct BodyCtx<'a> {
+    pub j: usize,
+    pub b: &'a RigidProxy,
+    pub vpos: Vec3,
+    pub h: f32,
 }
 
-/// 一次接触（与 `rope::BodyHit` 同口径的最小集）。
+/// **施加段的唯一入口**：默认 = 几何排序 + 逐 hit 就地 GS（现役，**逐位不变**）；
+/// 块求解开 = **不排序** + Jacobi 块（带残余穿透口径，可多遍）。
+pub(crate) fn apply_all(r: &mut Rope, j: usize, b: &RigidProxy, vpos: Vec3, h: f32) {
+    let iters = block_iters();
+    if iters == 0 {
+        r.hits
+            .sort_by(|a, c| a.ord.total_cmp(&c.ord).then(a.x.total_cmp(&c.x)));
+    }
+    let hits = std::mem::take(&mut r.hits);
+    if iters > 0 {
+        let ctx = BodyCtx { j, b, vpos, h };
+        apply_block(r, &hits, &ctx, iters);
+    } else {
+        for hit in &hits {
+            r.apply_body_hit(hit, j, b, vpos, h);
+        }
+    }
+    r.hits = hits;
+}
+
+/// 对**同一个体**的一批命中做 Jacobi 块施加（带**残余穿透**口径，支持多遍）。
+///
+/// 残余口径：`hit.depth` 是收集时的**快照**；第 k 遍只施加**还没被消掉的那一份**
+/// （`applied[i]` 记该接触已消掉的穿透）。没有它，多遍会把同一份穿透重复施加
+/// （M1 实测 8 遍把盒子压穿，末 y = −7.72）。
+pub(crate) fn apply_block(r: &mut Rope, hits: &[BodyHit], c: &BodyCtx, iters: u32) {
+    let (j, b, vpos, h) = (c.j, c.b, c.vpos, c.h);
+    let mut applied = vec![0.0f32; hits.len()];
+    for _ in 0..iters.max(1) {
+        let (dvb, dxb, dispb) = (r.body_dv[j], r.body_dx[j], r.body_disp[j]);
+        let (mut acc_dv, mut acc_dx, mut acc_disp) = (Vec3::ZERO, Vec3::ZERO, Vec3::ZERO);
+        for (k, hit) in hits.iter().enumerate() {
+            // 冻结：本遍内每个 hit 都从同一起点读体状态
+            r.body_dv[j] = dvb;
+            r.body_dx[j] = dxb;
+            r.body_disp[j] = dispb;
+            let resid = hit.depth - applied[k];
+            if resid <= 0.0 {
+                continue;
+            }
+            let mut sub = *hit;
+            sub.depth = resid;
+            let Some((lam, v_point)) = r.body_hit_solve(&sub, j, b, vpos, h) else {
+                continue;
+            };
+            // `body_hit_solve` 里的**位置补足**（§8.4.9）也写 dx/disp ⇒ 先收进累计
+            acc_dx += r.body_dx[j] - dxb;
+            acc_disp += r.body_disp[j] - dispb;
+            let before = r.pos[hit.i as usize];
+            r.body_dv[j] = dvb;
+            r.body_dx[j] = dxb;
+            r.body_disp[j] = dispb;
+            r.body_hit_project(&sub, h, lam, v_point);
+            if b.inv_mass > 0.0 {
+                r.body_hit_reaction(&sub, j, b, vpos, h, before);
+                acc_dv += r.body_dv[j] - dvb;
+                acc_dx += r.body_dx[j] - dxb;
+                acc_disp += r.body_disp[j] - dispb;
+            }
+            applied[k] += lam * (r.inv_mass[hit.i as usize] + b.inv_mass);
+        }
+        r.body_dv[j] = dvb + acc_dv;
+        r.body_dx[j] = dxb + acc_dx;
+        r.body_disp[j] = dispb + acc_disp;
+    }
+}
+
+/// 一次接触（与 `rope::BodyHit` 同口径的最小集；供 `solve_block` 的纯函数判据使用）。
 #[derive(Clone, Copy, Debug)]
 pub struct BlockContact {
-    /// 粒子号（仅用于把修正写回对应粒子；求解本身不看它）。
     pub particle: u32,
-    /// 粒子的逆质量。
     pub inv_mass_p: f32,
-    /// 接触法线（由体指向粒子）。
     pub n: Vec3,
-    /// 本子步的穿透深度（> 0 才需要修正）。
     pub depth: f32,
 }
 
-/// 块求解的配置与结果。
+/// 纯函数版块求解的读数。
 #[derive(Clone, Debug)]
 pub struct BlockSolve {
-    /// 迭代遍数（Jacobi 遍；定点收敛后与遍数无关，见测试的 §收敛）。
     pub iters: u32,
-    /// 每遍的体反作用（累加后一次性施加，**不在遍内推进**）。
     pub body_dv: Vec3,
-    /// 每个接触的粒子位置修正（与 `contacts` 同序）。
     pub corrections: Vec<Vec3>,
 }
 
-/// 对**同一体的整组接触**做块坐标下降：返回体反作用与逐粒子修正。
-///
-/// 关键性质（M0 判据）：`corrections` 与 `body_dv` 只依赖 `contacts` 的**集合**，
-/// 把 `contacts` 任意置换，结果在浮点舍入内一致——因为每遍的 λ 都由**上一遍末状态**算，
-/// 体的反作用在遍内是求和、不参与其它接触的 λ。
+/// 纯函数版：对**同一体的整组接触**做 Jacobi 块下降（无引擎状态，用于顺序无关性判据）。
 pub fn solve_block(contacts: &[BlockContact], inv_mass_b: f32, iters: u32) -> BlockSolve {
     let n = contacts.len();
-    // 粒子沿各自法线的累计让位；体的累计位移（沿 −n 分担）。
     let mut p_disp = vec![0.0f32; n];
     let mut b_disp = Vec3::ZERO;
     for _ in 0..iters.max(1) {
-        // ① 全部 λ 按**迭代前**的同一状态解出（Jacobi：本遍内互不影响 ⇒ 与施加顺序无关）
         let mut lam = vec![0.0f32; n];
         for (k, c) in contacts.iter().enumerate() {
             let w = c.inv_mass_p + inv_mass_b;
             if w <= 0.0 {
                 continue;
             }
-            // 残余穿透：初始穿透 − 粒子已让的 − 体已让的（体沿 −n 走 ⇒ 沿 +n 的闭合是 −b_disp·n）
             let resid = c.depth - p_disp[k] + b_disp.dot(c.n);
             lam[k] = (resid / w).max(0.0);
         }
-        // ② 体的反作用**一次求和**（不在遍内推进 ⇒ 不与 ① 互为因果）
         let mut sum = Vec3::ZERO;
         for (k, c) in contacts.iter().enumerate() {
             sum += c.n * lam[k];
         }
         b_disp -= sum * inv_mass_b;
-        // ③ 粒子各自让位
         for (k, c) in contacts.iter().enumerate() {
             p_disp[k] += lam[k] * c.inv_mass_p;
         }
@@ -111,8 +161,8 @@ mod tests {
     use super::{solve_block, BlockContact};
 
     use vxl_phys_core::Vec3;
+
     fn contact_set() -> Vec<BlockContact> {
-        // 33 个粒子压在一块 box 上（与 `rope` 判据同规模），法线朝上、深度按悬链形状递增
         (0..33u32)
             .map(|i| {
                 let t = i as f32 / 32.0;
@@ -126,7 +176,6 @@ mod tests {
             .collect()
     }
 
-    /// 确定性 LCG 置换（不引入 rand 依赖）。
     fn permute(v: &[BlockContact], seed: u32) -> Vec<BlockContact> {
         let mut idx: Vec<u32> = (0..v.len() as u32).collect();
         let mut s = seed.wrapping_mul(1664525).wrapping_add(1013904223) | 1;
@@ -142,20 +191,16 @@ mod tests {
     #[test]
     fn block_solve_is_permutation_invariant_without_geometry_sort() {
         let base = contact_set();
-        let inv_b = 1.0f32; // 1 kg 盒
-        let r0 = solve_block(&base, inv_b, 24);
+        let r0 = solve_block(&base, 1.0, 24);
         let mut worst_b = 0.0f32;
         let mut worst_p = 0.0f32;
         for seed in 0..16u32 {
             let perm = permute(&base, seed);
-            let r = solve_block(&perm, inv_b, 24);
+            let r = solve_block(&perm, 1.0, 24);
             worst_b = worst_b.max((r.body_dv - r0.body_dv).length());
-            // 按粒子号对齐比较（置换后顺序不同）
             for (k, c) in perm.iter().enumerate() {
-                let orig = base.iter().position(|o| o.particle == c.particle);
-                if let Some(o) = orig {
-                    let d = (r.corrections[k] - r0.corrections[o]).length();
-                    worst_p = worst_p.max(d);
+                if let Some(o) = base.iter().position(|o| o.particle == c.particle) {
+                    worst_p = worst_p.max((r.corrections[k] - r0.corrections[o]).length());
                 }
             }
         }
@@ -164,7 +209,6 @@ mod tests {
         assert!(worst_p <= 1e-6, "粒子修正随置换变化：{worst_p:.3e}");
     }
 
-    /// 迭代收敛：遍数翻倍后末态变化很小（定点存在）。
     #[test]
     fn block_solve_converges_with_iterations() {
         let c = contact_set();
@@ -175,7 +219,6 @@ mod tests {
         assert!(d <= 1e-5, "未收敛到定点：{d:.3e}");
     }
 
-    /// 守恒向：体与粒子的反向位移按逆质量比例（w_p = 50、w_b = 1 ⇒ 粒子让 50/51）。
     #[test]
     fn block_solve_shares_penetration_by_inverse_mass() {
         let c = vec![BlockContact {
@@ -194,64 +237,4 @@ mod tests {
         assert!((p + b - 0.051).abs() <= 1e-4, "未消掉穿透：{}", p + b);
         assert!((p / b - 50.0).abs() <= 0.5, "逆质量分担比例不对：{}", p / b);
     }
-}
-
-/// **施加段的唯一入口**：默认 = 几何排序 + 逐 hit 就地 GS（现役，逐位不变）；
-/// 块求解开 = **不排序** + 单遍 Jacobi 块。
-pub(crate) fn apply_all(r: &mut Rope, j: usize, b: &RigidProxy, vpos: Vec3, h: f32) {
-    if !crate::vbd::enabled() {
-        r.hits
-            .sort_by(|a, c| a.ord.total_cmp(&c.ord).then(a.x.total_cmp(&c.x)));
-    }
-    let hits = std::mem::take(&mut r.hits);
-    if crate::vbd::enabled() {
-        apply_block(r, &hits, j, b, vpos, h);
-    } else {
-        for hit in &hits {
-            r.apply_body_hit(hit, j, b, vpos, h);
-        }
-    }
-    r.hits = hits;
-}
-
-/// 对**同一个体**的一批命中做单遍 Jacobi 块施加。
-///
-/// ⚠️ **只做一遍**：`hit.depth` 是收集时的快照，多遍会把同一份穿透重复施加
-/// （2026-10-29 实测 8 遍把盒子直接压穿，末 y = −7.72）。多遍需要"残余穿透"口径（M2）。
-pub(crate) fn apply_block(
-    r: &mut Rope,
-    hits: &[BodyHit],
-    j: usize,
-    b: &RigidProxy,
-    vpos: Vec3,
-    h: f32,
-) {
-    let (dvb, dxb, dispb) = (r.body_dv[j], r.body_dx[j], r.body_disp[j]);
-    let (mut acc_dv, mut acc_dx, mut acc_disp) = (Vec3::ZERO, Vec3::ZERO, Vec3::ZERO);
-    for hit in hits {
-        // 冻结：本遍内每个 hit 都从同一起点读体状态
-        r.body_dv[j] = dvb;
-        r.body_dx[j] = dxb;
-        r.body_disp[j] = dispb;
-        let Some((lam, v_point)) = r.body_hit_solve(hit, j, b, vpos, h) else {
-            continue;
-        };
-        // `body_hit_solve` 里的**位置补足**（§8.4.9）也写 dx/disp ⇒ 先收进累计
-        acc_dx += r.body_dx[j] - dxb;
-        acc_disp += r.body_disp[j] - dispb;
-        let before = r.pos[hit.i as usize];
-        r.body_dv[j] = dvb;
-        r.body_dx[j] = dxb;
-        r.body_disp[j] = dispb;
-        r.body_hit_project(hit, h, lam, v_point);
-        if b.inv_mass > 0.0 {
-            r.body_hit_reaction(hit, j, b, vpos, h, before);
-            acc_dv += r.body_dv[j] - dvb;
-            acc_dx += r.body_dx[j] - dxb;
-            acc_disp += r.body_disp[j] - dispb;
-        }
-    }
-    r.body_dv[j] = dvb + acc_dv;
-    r.body_dx[j] = dxb + acc_dx;
-    r.body_disp[j] = dispb + acc_disp;
 }
