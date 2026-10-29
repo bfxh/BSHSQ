@@ -70,8 +70,8 @@ impl ImpulseSolver {
                 continue; // 双醒：无需唤醒；双睡：不在清醒岛内
             }
             let (s, w) = if sa { (b, a) } else { (a, b) };
-            let (kin_deep, hot, fast) = super::wake_signal::wake_signal(bodies, m, w, s, config);
-            if kin_deep || wake_gate_k == 0 || fast {
+            let (bypass, hot) = super::wake_signal::wake_signal(bodies, m, w, s, config);
+            if bypass {
                 // 现行（或强撞直通）：任一 hot 邻居立即唤醒
                 if hot {
                     bodies.awake[s] = true;

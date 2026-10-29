@@ -50,8 +50,16 @@ pub(crate) fn carried_bodies(
     out
 }
 
-/// 唤醒信号 `(kin_deep, hot, fast)`。
+/// 唤醒判定 `(bypass, hot)`。
 ///
+/// - `bypass`：本流形**不受接触数门约束**的情形——`kin_deep`（几何门）、`kin_moving`
+///   （运动学支撑在动）、强撞直通、或门本身关着。
+/// - `hot`：相对运动达阈（达阈才真的唤醒）。
+///
+/// - `kin_moving`：**运动学支撑在动**（`kin ∧ hot`）。宿主驱动是确定输入、不是抖动 ⇒ 与
+///   `kin_deep` 同档绕过 `wake_gate_k`：一块平台托一个箱天然只有 1 条流形，计数永远到不了 K，
+///   没有这一支时**睡着的载荷永不醒**，平台从它底下滑走（睡体 = 隐形传送带；2026-10-28 实测
+///   0.10/0.30 m/s 下 120 tick 内唤醒 tick = None、载荷 Δx = 0.0000 m）。
 /// - `kin_deep`：运动学支撑的**深度门**（慢速下速度阈值永不成立）。几何信号不是抖动 ⇒ 它必须
 ///   绕过 `wake_gate_k`：接触数门防的是"被 1–2 个抖动邻居碰"，而一块平台托一个载荷天然只有
 ///   1 条流形，累计永远到不了 K（`kinematic_wake.rs` W3）。
@@ -67,7 +75,7 @@ pub(crate) fn wake_signal(
     w: usize,
     s: usize,
     config: &PhysConfig,
-) -> (bool, bool, bool) {
+) -> (bool, bool) {
     let kin = bodies.is_kinematic(w);
     let kin_deep = kin && m.points.iter().any(|p| p.depth > 0.5 * config.contact_skin);
     let rel = if kin {
@@ -88,9 +96,7 @@ pub(crate) fn wake_signal(
         rel > SUBISLAND_WAKE_MULT * config.sleep_linear
             || bodies.angvel(w).length() > SUBISLAND_WAKE_MULT * config.sleep_angular
     };
-    (
-        kin_deep,
-        hot,
-        rel > WAKE_GATE_FAST_MULT * config.sleep_linear,
-    )
+    let fast = rel > WAKE_GATE_FAST_MULT * config.sleep_linear;
+    let bypass = kin_deep || (kin && hot) || config.wake_gate_k == 0 || fast;
+    (bypass, hot)
 }
