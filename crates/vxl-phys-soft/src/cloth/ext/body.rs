@@ -181,16 +181,9 @@ impl ClothBodyExt for ClothSheet {
                 q,
             });
         }
-        // ② 按**几何序**排（§8.4.24）。
-        self.body
-            .hits
-            .sort_by(|a, c| a.ord.total_cmp(&c.ord).then(a.z.total_cmp(&c.z)));
-        let hits = std::mem::take(&mut self.body.hits);
-        // ③ 施加（顺序 Gauss-Seidel：`body.dv` 就地推进 ⇒ 后面的粒子看到"已被推走的体"）。
-        for hit in &hits {
-            self.apply_body_hit(hit, j, b, vpos, h);
-        }
-        self.body.hits = hits; // 归还暂存（`mem::take` 的配对）
+        // ②③ 施加：默认 = 几何排序 + 逐 hit 就地 GS；块求解开 = 不排序 + Jacobi 块
+        // （与 rope 那条边同一套，见 `vbd::apply_all_cloth`）。
+        crate::vbd::apply_all_cloth(self, j, b, vpos, h);
     }
 
     fn apply_body_hit(&mut self, hit: &BodyHit, j: usize, b: &RigidProxy, vpos: Vec3, h: f32) {

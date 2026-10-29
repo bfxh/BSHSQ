@@ -8,8 +8,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 use vxl_phys_core::Vec3;
 
+use crate::cloth::{ClothBodyExt, ClothSheet};
+use crate::cloth_coupling::BodyHit as ClothHit;
 use crate::rigid::RigidProxy;
-use crate::rope::{BodyHit, Rope};
+use crate::rope::{BodyHit as RopeHit, Rope};
 
 /// 块求解的**遍数**（`0` = 关 = 现役"几何排序 + 就地 GS"）。进程级静态：由门面在**整次
 /// step 之外**用 `with_block_solver` 设定，step 内不变 ⇒ 不影响岛级并行的确定性。
@@ -61,7 +63,7 @@ pub(crate) fn apply_all(r: &mut Rope, j: usize, b: &RigidProxy, vpos: Vec3, h: f
 /// 残余口径：`hit.depth` 是收集时的**快照**；第 k 遍只施加**还没被消掉的那一份**
 /// （`applied[i]` 记该接触已消掉的穿透）。没有它，多遍会把同一份穿透重复施加
 /// （M1 实测 8 遍把盒子压穿，末 y = −7.72）。
-pub(crate) fn apply_block(r: &mut Rope, hits: &[BodyHit], c: &BodyCtx, iters: u32) {
+pub(crate) fn apply_block(r: &mut Rope, hits: &[RopeHit], c: &BodyCtx, iters: u32) {
     let (j, b, vpos, h) = (c.j, c.b, c.vpos, c.h);
     let mut applied = vec![0.0f32; hits.len()];
     for _ in 0..iters.max(1) {
@@ -100,6 +102,65 @@ pub(crate) fn apply_block(r: &mut Rope, hits: &[BodyHit], c: &BodyCtx, iters: u3
         r.body_dv[j] = dvb + acc_dv;
         r.body_dx[j] = dxb + acc_dx;
         r.body_disp[j] = dispb + acc_disp;
+    }
+}
+
+/// **布料边的施加入口**（与 `apply_all` 同构；命中集合在 `ClothSheet::body` 里）。
+pub(crate) fn apply_all_cloth(c: &mut ClothSheet, j: usize, b: &RigidProxy, vpos: Vec3, h: f32) {
+    let iters = block_iters();
+    if iters == 0 {
+        c.body
+            .hits
+            .sort_by(|a, d| a.ord.total_cmp(&d.ord).then(a.z.total_cmp(&d.z)));
+    }
+    let hits = std::mem::take(&mut c.body.hits);
+    if iters > 0 {
+        apply_block_cloth(c, &hits, j, b, vpos, h, iters);
+    } else {
+        for hit in &hits {
+            ClothBodyExt::apply_body_hit(c, hit, j, b, vpos, h);
+        }
+    }
+    c.body.hits = hits;
+}
+
+/// 布料边的 Jacobi 块施加（残余穿透口径，与绳子那条边同一套）。
+pub(crate) fn apply_block_cloth(
+    c: &mut ClothSheet,
+    hits: &[ClothHit],
+    j: usize,
+    b: &RigidProxy,
+    vpos: Vec3,
+    h: f32,
+    iters: u32,
+) {
+    let mut applied = vec![0.0f32; hits.len()];
+    for _ in 0..iters.max(1) {
+        let (dvb, dxb, dispb) = (c.body.dv[j], c.body.dx[j], c.body.disp[j]);
+        let (mut acc_dv, mut acc_dx, mut acc_disp) = (Vec3::ZERO, Vec3::ZERO, Vec3::ZERO);
+        for (k, hit) in hits.iter().enumerate() {
+            c.body.dv[j] = dvb;
+            c.body.dx[j] = dxb;
+            c.body.disp[j] = dispb;
+            let resid = hit.depth - applied[k];
+            if resid <= 0.0 {
+                continue;
+            }
+            let mut sub = *hit;
+            sub.depth = resid;
+            let before = c.pos[hit.i as usize];
+            let (dv0, dx0, d0) = (c.body.dv[j], c.body.dx[j], c.body.disp[j]);
+            ClothBodyExt::apply_body_hit(c, &sub, j, b, vpos, h);
+            acc_dx += c.body.dx[j] - dx0;
+            acc_disp += c.body.disp[j] - d0;
+            acc_dv += c.body.dv[j] - dv0;
+            let _ = before;
+            // 残余按"已被消掉的穿透"累计：λ 未暴露 ⇒ 用位移口径近似（粒子让了多少就减多少）
+            applied[k] += (c.pos[hit.i as usize] - before).dot(sub.n).max(0.0);
+        }
+        c.body.dv[j] = dvb + acc_dv;
+        c.body.dx[j] = dxb + acc_dx;
+        c.body.disp[j] = dispb + acc_disp;
     }
 }
 
