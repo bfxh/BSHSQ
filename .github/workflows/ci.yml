@@ -489,7 +489,15 @@ jobs:
       - name: 交叉工具链 + QEMU
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu qemu-user-static
+          # ⚠️ **别按名字装 `qemu-user-static`**（2026-10-29 实测）：新镜像里它是**虚包**
+          # （`qemu-user-binfmt` / `qemu-user-binfmt-hwe` 两个 provider）⇒ apt 直接拒绝：
+          # `E: Package 'qemu-user-static' has no installation candidate`（退出 100）。
+          # 而 `qemu-user-binfmt` 现在只有 ~1.7 KB（仅 binfmt 注册规则），二进制在 `qemu-user`
+          # （动态版，`/usr/bin/qemu-aarch64`）。本 job 用 cargo RUNNER 显式调用、不依赖
+          # binfmt 注册 ⇒ 装 `qemu-user`，并把写死的 RUNNER 名 `qemu-aarch64-static` 链好。
+          sudo apt-get install -y gcc-aarch64-linux-gnu qemu-user
+          sudo ln -sf "$(command -v qemu-aarch64-static || command -v qemu-aarch64)" \
+            /usr/local/bin/qemu-aarch64-static
       - name: aarch64 determinism（10 轮，QEMU 实跑）
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
@@ -574,7 +582,9 @@ jobs:
   # 入口 `scripts/local_gate.py` 是 **CI 专用**；本地全量验证仍走 `scripts/gate_all.sh`
   # （行为门 / 金样门 / 计时独占锁）。两者范围不同、不是重复入口——分支此前把自用的
   # local_gate 撤成指路牌，是因为当时它和 gate_all 功能重合；main 这版只跑静态细粒度门。
-  # 动作按本仓纪律钉 SHA：setup-python 的 v7 与 v7.0.0 同尖端（合 P9 的注释规则）。
+  # 动作按本仓纪律钉 SHA。⚠️ **注释必须写该 SHA 真正对应的版本**：`v7` 这个可移动标签
+  # 已指向 7.1.0（`6d4fd22b`），而这里钉的是 v7.0.0（`5fda3b95`，与 naming-gate.yml 同一枚）
+  # ⇒ 写 `# v7` 会被 zizmor 的 `ref-version-mismatch` 判红（2026-10-29 实测）。
   ratchet:
     name: 棘轮门禁
     runs-on: ubuntu-latest
@@ -582,7 +592,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
       - name: 跑门禁（dag/rayon/unwrap/unsafe/linelen/usize/glob/todo/god/cyc/nest/args + selftest + probe）

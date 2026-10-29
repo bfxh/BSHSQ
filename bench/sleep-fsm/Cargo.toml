@@ -1,0 +1,17 @@
+[package]
+name = "bshsq-sleep-fsm"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "睡眠/唤醒判据的三值（Kleene K3）阈值空间审计：不跑物理，只审判据"
+
+# 独立 workspace（同 `bench/realism-probe`）：`trit-core` 只进这个工具的依赖图，
+# 不进引擎的 Cargo.lock（`scripts/deps_lock.py` 只扫根 + workspace members）。
+[dependencies]
+trit-core = "0.11"
+
+[workspace]
+
+[profile.release]
+lto = "thin"
