@@ -4,7 +4,7 @@
 //! 代价是每次施加前 m log m 排序（实测占子步 3.6%–6.8%，见 `tests/vbd_sort_cost.rs`）。
 //! 本模块给另一条路：**Jacobi 块更新**（所有接触按同一迭代前状态解 λ，体的反作用一次性求和），
 //! 迭代到定点 ⇒ 结果只依赖**接触集合**，与施加顺序无关（判据见本文件的置换测试）。
-use std::cell::Cell;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use vxl_phys_core::Vec3;
 
@@ -18,21 +18,20 @@ thread_local! {
     ///
     /// **必须是线程内的**：进程级静态会被并行测试与岛级并行互相踩（2026-10-30 被
     /// `tests/vbd_invariants.rs` 的确定性用例抓到：同一场景跑两遍结果不同）。
-    #[allow(clippy::missing_const_for_thread_local)]
-    static BLOCK_ITERS: Cell<u32> = Cell::new(0);
+    static BLOCK_ITERS: AtomicU32 = const { AtomicU32::new(0) };
 }
 
 /// 当前线程的块求解遍数（`0` = 关）。
 pub(crate) fn block_iters() -> u32 {
-    BLOCK_ITERS.with(|c| c.get())
+    BLOCK_ITERS.with(|c| c.load(Ordering::Relaxed))
 }
 
 /// 在**块求解 N 遍**的上下文里跑 `f`（`0` = 关；退出时恢复原值，嵌套安全）。
 pub fn with_block_solver<R>(iters: u32, f: impl FnOnce() -> R) -> R {
     BLOCK_ITERS.with(|c| {
-        let old = c.replace(iters);
+        let old = c.swap(iters, Ordering::Relaxed);
         let r = f();
-        c.set(old);
+        c.store(old, Ordering::Relaxed);
         r
     })
 }
