@@ -119,7 +119,7 @@ pub(crate) fn apply_all_cloth(c: &mut ClothSheet, j: usize, b: &RigidProxy, vpos
         apply_block_cloth(c, &hits, &ctx, iters);
     } else {
         for hit in &hits {
-            ClothBodyExt::apply_body_hit(c, hit, j, b, vpos, h);
+            let _lam = ClothBodyExt::apply_body_hit(c, hit, j, b, vpos, h);
         }
     }
     c.body.hits = hits;
@@ -128,6 +128,11 @@ pub(crate) fn apply_all_cloth(c: &mut ClothSheet, j: usize, b: &RigidProxy, vpos
 /// 布料边的 Jacobi 块施加（残余穿透口径，与绳子那条边同一套）。
 pub(crate) fn apply_block_cloth(c: &mut ClothSheet, hits: &[ClothHit], x: &BodyCtx, iters: u32) {
     let (j, b, vpos, h) = (x.j, x.b, x.vpos, x.h);
+    // ⚠️ **布料侧钳到一遍**（2026-10-29 实测）：布料的体反作用走 `dv`/`disp`（**下一帧**才进位置），
+    // 所以"本遍残余穿透"没有绳子那种良定义；即便用精确 λ 记残余，多遍也会把盒子**顶上去**
+    // （1/4/8 遍末 y = +0.0038 / +0.0108 / +0.0842）。⇒ 多遍在布料边上**不成立**，等体反作用
+    // 能同帧进位置的模型（M3.3）再放开。
+    let iters = iters.min(1);
     let mut applied = vec![0.0f32; hits.len()];
     for _ in 0..iters.max(1) {
         let (dvb, dxb, dispb) = (c.body.dv[j], c.body.dx[j], c.body.disp[j]);
@@ -142,15 +147,14 @@ pub(crate) fn apply_block_cloth(c: &mut ClothSheet, hits: &[ClothHit], x: &BodyC
             }
             let mut sub = *hit;
             sub.depth = resid;
-            let before = c.pos[hit.i as usize];
+            let w_p = c.inv_mass[hit.i as usize];
             let (dv0, dx0, d0) = (c.body.dv[j], c.body.dx[j], c.body.disp[j]);
-            ClothBodyExt::apply_body_hit(c, &sub, j, b, vpos, h);
+            // **精确口径**（M3.2）：`apply_body_hit` 现在回传本次的 λ ⇒ 与绳子那条边同一个式子。
+            let lam = ClothBodyExt::apply_body_hit(c, &sub, j, b, vpos, h);
             acc_dx += c.body.dx[j] - dx0;
             acc_disp += c.body.disp[j] - d0;
             acc_dv += c.body.dv[j] - dv0;
-            let _ = before;
-            // 残余按"已被消掉的穿透"累计：λ 未暴露 ⇒ 用位移口径近似（粒子让了多少就减多少）
-            applied[k] += (c.pos[hit.i as usize] - before).dot(sub.n).max(0.0);
+            applied[k] += lam * (w_p + b.inv_mass);
         }
         c.body.dv[j] = dvb + acc_dv;
         c.body.dx[j] = dxb + acc_dx;
