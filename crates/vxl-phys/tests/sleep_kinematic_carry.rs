@@ -149,6 +149,12 @@ fn sleeping_cargo_is_carried_by_rotating_kinematic_platform() {
 
 /// ③ 叠箱：只有底层直接接触平台，上层只能靠"底层醒了并在动"传播唤醒。
 ///    判据 = 三层都醒、高度不变（不解体）、滞后在容差内（实测 1/5/9 tick、Δx 差 ≤ 0.04 m）。
+///
+///    **为什么不是 1/1/1**（2026-10-29 实测 + 读码）：宽相**睡眠体不做查询**
+///    （`vxl-phys-broad` 的 `awake_larger_pairs_with_sleeping_smaller` 正是这条规则的回归），
+///    整叠睡着时上层体连流形都没有、不在岛图里 ⇒ 岛内传播无从下手；上层是被"底层滑出后
+///    相对速度越过 8×阈（强撞直通）"逐层叫醒的。要改成 1 tick 得让睡眠体也查询或走 warm 缓存，
+///    那是宽相预算的取舍，不在本门范围内（本门只钉"不解体 + 跟随"）。
 #[test]
 fn sleeping_stack_on_kinematic_platform_wakes_level_by_level() {
     let mut w = World::new(cfg(8));
