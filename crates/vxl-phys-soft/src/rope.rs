@@ -43,17 +43,17 @@ struct VirtRot {
 /// （0.5 kg：`+0.098 → −0.124`）⇒ 那是**顺序偏差**，不是物理。把施加顺序改成**物理量的函数**
 /// （`|Δx|` 降序 = 两端先、向中间收；次级键取粒子自己的 `x`）⇒ 翻转数组不再改变任何东西。
 #[derive(Clone, Copy)]
-struct BodyHit {
+pub(crate) struct BodyHit {
     /// 粒子号。
-    i: u32,
+    pub(crate) i: u32,
     /// 排序主键：粒子自己的 `x`（**物理量** ⇒ 施加顺序与**数组方向无关**）。
-    ord: f32,
+    pub(crate) ord: f32,
     /// 排序次键：`−|Δx|`（同 `x` 不可能出现 ⇒ 仅作确定性兜底）。
-    x: f32,
+    pub(crate) x: f32,
     /// 该次接触的法线 / 穿透 / 接触点（`box_hit` 的读数）。
-    n: Vec3,
-    depth: f32,
-    q: Vec3,
+    pub(crate) n: Vec3,
+    pub(crate) depth: f32,
+    pub(crate) q: Vec3,
 }
 
 /// 绳索：等距粒子链 + XPBD 距离约束 + 点-形状接触。
@@ -105,7 +105,7 @@ pub struct Rope {
     /// 接触查询缓冲（复用，免每粒子每子步一次堆分配）。
     buf: Vec<vxl_phys_core::interop::InteropContact>,
     /// **体接触的收集暂存**（§8.4.24；复用免分配）：先收全部命中、排序、再施加 ⇒ 与数组方向无关。
-    hits: Vec<BodyHit>,
+    pub(crate) hits: Vec<BodyHit>,
     /// **粒子↔刚体反作用**（累加**冲量**，每 tick 开头清空）：门面把 `torque` 按
     /// `angular_impulse_contract` 契约（`÷dt_sub`）注入；`impulse` 暂只记账未被消费（§2 B4）。
     pub reactions: Vec<RigidReaction>,
@@ -114,7 +114,7 @@ pub struct Rope {
     pub body_dv: Vec<Vec3>,
     /// 子步内**虚拟位移**（同上序）：体自己走的 + 我们推开的，**增量累加** —— 见 `project_body_contacts`
     /// 里那条"不能乘整段时间"的注（那是所有"参数怎么调都逃逸"的真凶）。
-    body_disp: Vec<Vec3>,
+    pub(crate) body_disp: Vec<Vec3>,
     /// **虚拟转动**（朝向 / 上一朝向 / 角速度反作用；见 [`VirtRot`]）。
     vrot: VirtRot,
     /// **角反作用开关**（计划 2c-3，**默认开** since 2026-10-01）：开 ⇒ 按库仑/冲量口径把 `r × J`
@@ -492,14 +492,7 @@ impl Rope {
             // （§8.4.24.1）⇒ 施加顺序变了就是换了一条 GS 路径。**取 `x` 升序的好处是**：
             // 对"绳沿 `x` 铺开、索引即左→右"的常规场景，它与**原来的数组顺序逐位等价**（既有读数全不动），
             // 而它**只依赖几何、不依赖数组方向** ⇒ 把数组反转不再改变任何结果（那正是 §8.4.23 的病灶）。
-            self.hits
-                .sort_by(|a, c| a.ord.total_cmp(&c.ord).then(a.x.total_cmp(&c.x)));
-            let hits = std::mem::take(&mut self.hits);
-            // **③ 施加**（顺序 Gauss-Seidel：`body_dv` 就地推进 —— 只是顺序变成了物理序）。
-            for hit in &hits {
-                self.apply_body_hit(hit, j, b, vpos, h);
-            }
-            self.hits = hits; // 归还暂存（`mem::take` 的配对；`hits` 的借用到此结束）
+            crate::vbd::apply_all(self, j, b, vpos, h);
         }
     }
 
@@ -507,7 +500,14 @@ impl Rope {
     /// 门"最长函数 ≤ 120 行"）：`body_hit_solve` 解 λ + 位置补足 → `body_hit_project` 法向推出 +
     /// 库仑锥摩擦 → `body_hit_reaction` 反作用回填 + 就地推进虚拟状态（Gauss-Seidel）。
     /// **逐位不变**：运算顺序、常量、分支照搬（`w_p`/`friction`/`inv_h` 在 helper 内重读，值同）。
-    fn apply_body_hit(&mut self, hit: &BodyHit, j: usize, b: &RigidProxy, vpos: Vec3, h: f32) {
+    pub(crate) fn apply_body_hit(
+        &mut self,
+        hit: &BodyHit,
+        j: usize,
+        b: &RigidProxy,
+        vpos: Vec3,
+        h: f32,
+    ) {
         let Some((lam, v_point)) = self.body_hit_solve(hit, j, b, vpos, h) else {
             return;
         };
@@ -522,7 +522,7 @@ impl Rope {
     /// **① λ 解 + 位置补足**（`apply_body_hit` 前半）：返回 `(λ, v_point)`。两体按逆质量分担的几何解
     /// `λ_geom` → 速度钳位 `λ_vel`（= 无恢复系数）。`None` = `λ ≤ 0`（本子步不再接近）⇒ 调用方提前
     /// 返回（**位置补足仍已按原顺序施加**）。
-    fn body_hit_solve(
+    pub(crate) fn body_hit_solve(
         &mut self,
         hit: &BodyHit,
         j: usize,
@@ -574,7 +574,7 @@ impl Rope {
 
     /// **② 法向推出 + 库仑锥摩擦**（`apply_body_hit` 中段）：位移 = `w_p·λ`；切向按库仑锥限制滑移
     /// （预算取 `μ·w_p·λ` = 该接触**实际**施加的法向冲量口径，不是几何穿透量 `depth`）。
-    fn body_hit_project(&mut self, hit: &BodyHit, h: f32, lam: f32, v_point: Vec3) {
+    pub(crate) fn body_hit_project(&mut self, hit: &BodyHit, h: f32, lam: f32, v_point: Vec3) {
         let i = hit.i as usize;
         let n = hit.n;
         let w_p = self.inv_mass[i];
@@ -597,7 +597,7 @@ impl Rope {
 
     /// **③ 反作用回填 + 就地推进虚拟状态**（`apply_body_hit` 末段；仅 `b.inv_mass > 0` 调用）：
     /// 粒子动量变化取反作用在体表接触点 ⇒ 平移/角冲量；就地推进 = 同一子步后续粒子看到已推走的体。
-    fn body_hit_reaction(
+    pub(crate) fn body_hit_reaction(
         &mut self,
         hit: &BodyHit,
         j: usize,

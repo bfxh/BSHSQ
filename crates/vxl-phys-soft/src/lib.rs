@@ -3,7 +3,6 @@
 //! - [`cloth`]：**布料闭环**（三角网 + XPBD 距离/弯曲约束 + 薄壳质量 + 提供者/刚体接触与反作用 + 自碰撞/自摩擦 + 撕裂/塑性 + 气动）——判据见 crate 内 `tests/cloth_*.rs`（13 个）；
 //! - [`rope`]：**绳索最小闭环**（XPBD 链 + 点-形状接触 + 摩擦）——判据在 `tests/rope_minimal.rs` 与 `crates/vxl-phys/tests/rope_scene.rs`；
 //! - [`rigid`]：**粒子↔刚体耦合**（Akinci 式最小实现：代理视图 + 穿透查询 + 反作用回填）。**仍待落地**（2026-10-07 更正：点-边对自摩擦、体积/气压、刚度档表等均已落地）：**GPU 档**（**面元力矩**刚体侧早已落地 + 有判据，布料侧按边界不单列）；逐条见 `docs/SURVEY-SOFT-CLOTH-AND-CONVERSION.md`。
-
 #![forbid(unsafe_code)]
 
 pub mod cloth;
@@ -16,6 +15,7 @@ pub mod cloth_tear;
 pub mod params;
 pub mod rigid;
 pub mod rope;
+pub mod vbd;
 pub use params::{ClothConstraints, SelfCollision, Stiffness, TearStrain};
 pub use rigid::{RigidProxy, RigidReaction};
 pub use rope::Rope;

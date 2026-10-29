@@ -83,7 +83,14 @@ pub(crate) trait ClothBodyExt {
     /// **接触柔度 `α_c = 0`**（硬接触）：与 rope 的**默认值**同口径 —— rope 那个旋钮实测
     /// `α_c = 1e-4` 反而太软（60 tick 就沉到 `y ≈ 0.26`）。本片**不引入**该旋钮：布片接触点多，
     /// 柔度应当连同"多点如何分担"一起作为独立切片量。
-    fn apply_body_hit(&mut self, hit: &BodyHit, j: usize, b: &RigidProxy, vpos: Vec3, h: f32);
+    fn apply_body_hit(
+        &mut self,
+        hit: &BodyHit,
+        j: usize,
+        b: &RigidProxy,
+        vpos: Vec3,
+        h: f32,
+    ) -> f32;
 }
 
 impl ClothBodyExt for ClothSheet {
@@ -181,19 +188,19 @@ impl ClothBodyExt for ClothSheet {
                 q,
             });
         }
-        // ② 按**几何序**排（§8.4.24）。
-        self.body
-            .hits
-            .sort_by(|a, c| a.ord.total_cmp(&c.ord).then(a.z.total_cmp(&c.z)));
-        let hits = std::mem::take(&mut self.body.hits);
-        // ③ 施加（顺序 Gauss-Seidel：`body.dv` 就地推进 ⇒ 后面的粒子看到"已被推走的体"）。
-        for hit in &hits {
-            self.apply_body_hit(hit, j, b, vpos, h);
-        }
-        self.body.hits = hits; // 归还暂存（`mem::take` 的配对）
+        // ②③ 施加：默认 = 几何排序 + 逐 hit 就地 GS；块求解开 = 不排序 + Jacobi 块
+        // （与 rope 那条边同一套，见 `vbd::apply_all_cloth`）。
+        crate::vbd::apply_all_cloth(self, j, b, vpos, h);
     }
 
-    fn apply_body_hit(&mut self, hit: &BodyHit, j: usize, b: &RigidProxy, vpos: Vec3, h: f32) {
+    fn apply_body_hit(
+        &mut self,
+        hit: &BodyHit,
+        j: usize,
+        b: &RigidProxy,
+        vpos: Vec3,
+        h: f32,
+    ) -> f32 {
         let i = hit.i as usize;
         let n = hit.n;
         let inv_h = 1.0 / h;
@@ -233,7 +240,7 @@ impl ClothBodyExt for ClothSheet {
             self.body.disp[j] -= make_up;
         }
         if lam <= 0.0 {
-            return;
+            return 0.0;
         }
         let before = self.pos[i];
         // 法向推出（位移 = `w_p·λ`）。
@@ -247,5 +254,6 @@ impl ClothBodyExt for ClothSheet {
         let impulse = d * (-inv_h / w_p);
         self.body.dv[j] += impulse * w_b;
         self.body.disp[j] += impulse * (w_b * h);
+        lam
     }
 }
