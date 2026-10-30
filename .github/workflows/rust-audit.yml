@@ -42,10 +42,11 @@ jobs:
         with:
           persist-credentials: false
 
+      # ⚠️ **不要用 `taiki-e/install-action` 装 cargo-geiger**：它只认自己内置清单里的
+      # 工具/版本，`cargo-geiger@0.14.0` 不在清单里 ⇒ 该步直接 `::error::install-action:`
+      # （2026-10-30 复跑日志实证）。改用 cargo 自己的安装（-locked 钉死依赖）。
       - name: 装 cargo-geiger@0.14.0（钉版本，与基线同款）
-        uses: taiki-e/install-action@30eab0fabba9ea3f522099957e668b21876aa39e # v2.66.6
-        with:
-          tool: cargo-geiger@0.14.0
+        run: cargo install cargo-geiger --version 0.14.0 --locked
 
       # 虚拟清单需进成员目录跑；根二进制 vxl-phys-cli 依赖覆盖全 workspace 树。
       - name: cargo-geiger（unsafe 闸门，ratchet）
