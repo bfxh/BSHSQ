@@ -55,7 +55,10 @@ jobs:
           GEOUT: ${{ github.workspace }}/geiger.txt
           GEBASE: ${{ github.workspace }}/scripts/geiger-baseline.json
         run: |
-          cargo geiger > "$GEOUT" 2>&1 || true
+          # ⚠️ **必须在成员目录里跑**：根是**虚拟清单**，`cargo geiger` 在根上统计口径不同
+          # （实测 1186 vs 基线 680）。基线 `scripts/geiger-baseline.json` 的 method 写明：
+          # "根二进制 vxl-phys-cli（虚拟清单需进成员目录跑），逐 crate 去重求和，39 crate rows"。
+          (cd crates/vxl-phys-cli && cargo geiger) > "$GEOUT" 2>&1 || true
           python - <<'PY'
           import json, re, sys, os
           base = json.load(open(os.environ['GEBASE']))['unsafe_fns']
