@@ -1,8 +1,8 @@
 //! **每子步开销占比**（M1 性能档：先量成本结构，再决定"让检测更便宜"往哪投）。
 //!
 //! 用法：
-//! `cargo run --release -p vxl-phys --example substep_cost -- [tower|pile5|m1pile] [ticks] [iters] [substeps,csv] [threads]`
-//! 默认 `m1pile 120 3 1,4 1`。每档跑两遍（顺序交错），便于看出热漂移。
+//! `cargo run --release -p vxl-phys --example substep_cost -- [tower|pile5|m1pile] [ticks] [iters] [substeps,csv] [threads] [passes]`
+//! 默认 `m1pile 120 3 1,4 1 2`。默认每档跑两遍（顺序交错），便于看出热漂移；结构读数取 1 遍即可。
 //!
 //! 口径：`World::timings()` 的**引擎侧**累计（不含外层墙钟），单位 ms/tick；
 //! `wall` 是 `Instant` 实测，两者之差 = 引擎没计的其它开销。本工具只读，不改任何行为。
@@ -19,6 +19,8 @@ struct Args {
     iters: u32,
     substeps: Vec<u32>,
     threads: usize,
+    /// 交错遍数（结构读数取 1 即可；跨构建比绝对毫秒要 ≥2）。
+    passes: u32,
 }
 
 fn parse_args() -> Args {
@@ -31,7 +33,9 @@ fn parse_args() -> Args {
         .map(|s| s.split(',').filter_map(|x| x.parse().ok()).collect())
         .unwrap_or_else(|| vec![1, 4]);
     let threads = a.next().and_then(|s| s.parse().ok()).unwrap_or(1);
+    let passes = a.next().and_then(|s| s.parse().ok()).unwrap_or(2);
     Args {
+        passes,
         mode,
         ticks,
         iters,
@@ -191,7 +195,7 @@ fn report(a: &Args, substeps: u32, pass: u32, r: &Row) {
 fn main() {
     let a = parse_args();
     // 两遍顺序交错（1,4,1,4）：单跑不可信，热漂移要看得见。
-    for pass in 1..=2 {
+    for pass in 1..=a.passes {
         for &ss in &a.substeps {
             let r = measure(&a.mode, a.ticks, a.iters, ss, a.threads);
             report(&a, ss, pass, &r);
