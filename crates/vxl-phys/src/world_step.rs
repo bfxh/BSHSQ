@@ -15,6 +15,8 @@ pub(crate) mod narrow_tier;
 mod splat_dynamics;
 mod viscous;
 
+pub mod contact_probe;
+
 impl World {
     /// 推进一个固定 60Hz tick（内部按 config.substeps 细分，§4.2）。
     pub fn step(&mut self) {
@@ -35,6 +37,7 @@ impl World {
         };
         for k in 0..substeps {
             self.substep(dt, k == 0, reuse);
+            contact_probe::on_substep(self.tick, k, &self.manifolds);
         }
         self.domain_pass();
         // **转换窗口（V2）**：tick 末、各域轮次之后（契约卡的时间戳），下一 tick 宽相之前。
