@@ -280,6 +280,7 @@ fn bytes_u32(v: &[u32]) -> Vec<u8> {
 }
 
 struct Gpu {
+    bd: wgpu::Buffer,
     vel: wgpu::Buffer,
     con: wgpu::Buffer,
     imp: wgpu::Buffer,
@@ -288,6 +289,10 @@ struct Gpu {
     p_build: wgpu::ComputePipeline,
     p_sweep: wgpu::ComputePipeline,
     p_apply: wgpu::ComputePipeline,
+    scatter: wgpu::ComputePipeline,
+    par: wgpu::Buffer,
+    upd_idx: wgpu::Buffer,
+    upd_rec: wgpu::Buffer,
     n_b: u32,
     n_c: u32,
 }
@@ -312,6 +317,8 @@ struct Bufs {
     off: wgpu::Buffer,
     items: wgpu::Buffer,
     par: wgpu::Buffer,
+    upd_idx: wgpu::Buffer,
+    upd_rec: wgpu::Buffer,
 }
 
 fn mk_bufs(device: &wgpu::Device, d: &Data) -> Bufs {
@@ -341,11 +348,14 @@ fn mk_bufs(device: &wgpu::Device, d: &Data) -> Bufs {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         }),
+        upd_idx: mk("upd_idx", d.n_b),
+        upd_rec: mk("upd_rec", d.n_b * WB),
     }
 }
 
 struct Pipes {
     bg: wgpu::BindGroup,
+    scatter: wgpu::ComputePipeline,
     iw: wgpu::ComputePipeline,
     build: wgpu::ComputePipeline,
     sweep: wgpu::ComputePipeline,
@@ -377,6 +387,8 @@ fn make_pipes(device: &wgpu::Device, b: &Bufs) -> Pipes {
         st(6, false),
         st(7, true),
         st(8, true),
+        st(10, true),
+        st(11, true),
     ];
     entries.push(wgpu::BindGroupLayoutEntry {
         binding: 9,
@@ -419,6 +431,8 @@ fn make_pipes(device: &wgpu::Device, b: &Bufs) -> Pipes {
         (7, &b.off),
         (8, &b.items),
         (9, &b.par),
+        (10, &b.upd_idx),
+        (11, &b.upd_rec),
     ] {
         bgs.push(wgpu::BindGroupEntry {
             binding,
@@ -432,6 +446,7 @@ fn make_pipes(device: &wgpu::Device, b: &Bufs) -> Pipes {
     });
     Pipes {
         bg,
+        scatter: pipe("scatter_records"),
         iw: pipe("make_iw"),
         build: pipe("build"),
         sweep: pipe("contact_sweep"),
@@ -458,6 +473,7 @@ fn setup(device: &wgpu::Device, queue: &wgpu::Queue, d: &Data) -> (Gpu, u64) {
     let up_us = t.elapsed().as_micros() as u64;
     let p = make_pipes(device, &b);
     let g = Gpu {
+        bd: b.bd,
         vel: b.vel,
         con: b.con,
         imp: b.imp,
@@ -466,6 +482,10 @@ fn setup(device: &wgpu::Device, queue: &wgpu::Queue, d: &Data) -> (Gpu, u64) {
         p_build: p.build,
         p_sweep: p.sweep,
         p_apply: p.apply,
+        scatter: p.scatter,
+        par: b.par,
+        upd_idx: b.upd_idx,
+        upd_rec: b.upd_rec,
         n_b: d.n_b as u32,
         n_c: d.n_c as u32,
     };
@@ -531,6 +551,65 @@ fn readback(device: &wgpu::Device, queue: &wgpu::Queue, buf: &wgpu::Buffer, n: u
         .collect()
 }
 
+/// B1：差量上传 + 散写。判据 = 同步后**卡上体表与主机逐字节相同**（max|Δ| 必须 0）。
+fn delta_test(device: &wgpu::Device, queue: &wgpu::Queue, g: &Gpu, d: &Data) -> (u64, usize, f32) {
+    let k = d.n_b / 4;
+    let mut bd2 = d.bd.clone();
+    let mut idx: Vec<u8> = Vec::with_capacity(k * 4);
+    let mut rec: Vec<f32> = Vec::with_capacity(k * WB);
+    for t in 0..k {
+        let b = (t * 4) % d.n_b;
+        idx.extend_from_slice(&(b as u32).to_le_bytes());
+        for c in 0..WB {
+            let mut v = d.bd[b * WB + c];
+            if c < 3 {
+                v += 0.01; // 位姿微动（散写是否生效一眼可见）
+            }
+            rec.push(v);
+            bd2[b * WB + c] = v;
+        }
+    }
+    let mut pb: Vec<u8> = Vec::with_capacity(32);
+    pb.extend_from_slice(&(d.n_c as u32).to_le_bytes());
+    pb.extend_from_slice(&(d.n_b as u32).to_le_bytes());
+    pb.extend_from_slice(&0.2f32.to_le_bytes());
+    pb.extend_from_slice(&0.005f32.to_le_bytes());
+    pb.extend_from_slice(&(1.0f32 / 240.0).to_le_bytes());
+    pb.extend_from_slice(&(k as u32).to_le_bytes());
+    pb.extend_from_slice(&[0u8; 8]);
+
+    let t = Instant::now();
+    queue.write_buffer(&g.upd_idx, 0, &idx);
+    queue.write_buffer(&g.upd_rec, 0, &bytes(&rec));
+    queue.write_buffer(&g.par, 0, &pb);
+    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    {
+        let (x, y) = groups(k as u32);
+        let mut cp = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("delta"),
+            timestamp_writes: None,
+        });
+        cp.set_bind_group(0, &g.bg, &[]);
+        cp.set_pipeline(&g.scatter);
+        cp.dispatch_workgroups(x, y, 1);
+    }
+    queue.submit(Some(enc.finish()));
+    device
+        .poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        })
+        .ok();
+    let us = t.elapsed().as_micros() as u64;
+
+    let back = readback(device, queue, &g.bd, d.n_b * WB);
+    let mut diff = 0.0f32;
+    for (i, v) in back.iter().enumerate().take(d.n_b * WB) {
+        diff = diff.max((v - bd2[i]).abs());
+    }
+    (us, k, diff)
+}
+
 fn main() {
     let ticks: u32 = std::env::args()
         .nth(1)
@@ -579,9 +658,14 @@ fn main() {
     for (i, x) in gv.iter().enumerate().take(d.n_b * WV) {
         dv = dv.max((x - vel_c[i]).abs());
     }
+    let (d_us, d_k, d_diff) = delta_test(&device, &queue, &g, &d);
     println!(
         "上传（全量体表+接触表）：{up_us} us（{} KB）",
         (d.n_b * WB + d.n_c * WC) * 4 / 1024
+    );
+    println!(
+        "B1 差量：{d_k} 体（{} KB，2 次 write + 散写核）= {d_us} us · 同步后 max|Δ| {d_diff:.0e}（判据 = 0）",
+        d_k * (WB * 4 + 4) / 1024
     );
     println!("主机参考（构建 + {SWEEPS} 扫 Jacobi）：{cpu_us} us");
     println!("卡上全链（make_iw + build + {SWEEPS}×(sweep+apply)，一次提交）：{chain_us} us");

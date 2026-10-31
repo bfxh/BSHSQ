@@ -15,7 +15,8 @@ struct Params {
     beta: f32,
     slop: f32,
     dt: f32,
-    _p0: f32,
+    /// B1：本趟要散写的体数（0 = 整趟跳过）。
+    n_upd: u32,
     _p1: f32,
     _p2: f32,
 };
@@ -30,6 +31,9 @@ struct Params {
 @group(0) @binding(7) var<storage, read> off: array<f32>;
 @group(0) @binding(8) var<storage, read> items: array<f32>;
 @group(0) @binding(9) var<uniform> P: Params;
+/// B1 增量：`upd_idx[i]` 体号 → 记录 `upd_rec[i*11 .. i*11+11]`。
+@group(0) @binding(10) var<storage, read> upd_idx: array<f32>;
+@group(0) @binding(11) var<storage, read> upd_rec: array<f32>;
 
 fn ub(v: f32) -> u32 {
     return bitcast<u32>(v);
@@ -77,6 +81,21 @@ fn tangents(n: vec3<f32>) -> Tangents {
     }
     let t1 = normalize(cross(n, r));
     return Tangents(t1, cross(n, t1));
+}
+
+/// B1：把变动记录散写进常驻体表（与主核同一次提交 ⇒ 省一趟同步）。
+@compute @workgroup_size(64)
+fn scatter_records(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = gid.x + gid.y * (65535u * 64u);
+    if (i >= P.n_upd) {
+        return;
+    }
+    let b = bitcast<u32>(upd_idx[i]);
+    let dst = b * 11u;
+    let src = i * 11u;
+    for (var k = 0u; k < 11u; k = k + 1u) {
+        bd[dst + k] = upd_rec[src + k];
+    }
 }
 
 /// 每体：`M = R·diag·Rᵀ`（B1 的常驻量；位姿变化时重算）。
