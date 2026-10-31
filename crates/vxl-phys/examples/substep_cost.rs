@@ -85,6 +85,13 @@ fn build(mode: &str, iters: u32, substeps: u32, threads: usize) -> World {
 }
 
 struct Row {
+    /// 最大组占墙钟/流形的比例（岛级并行的天花板：最大岛决定 scope 墙钟）。
+    max_group_wall_pct: f64,
+    max_group_manif_pct: f64,
+    /// 求解内部三段（本次解算快照）：约束构建 / 热启动预施加 / 迭代扫掠。
+    build_pct: f64,
+    warm_pct: f64,
+    iter_pct: f64,
     awake: u32,
     contacts: u32,
     islands: u32,
@@ -114,7 +121,19 @@ fn measure(mode: &str, ticks: u32, iters: u32, substeps: u32, threads: usize) ->
     let h = w.health();
     let d = &w.solver.island_diag;
     let us = |v: u64| v as f64 / 1000.0 / ticks as f64;
+    let sum_us: u64 = d.group_us.iter().sum();
+    let sum_mf: u32 = d.group_manifs.iter().sum();
+    let pct_of = |a: u64, b: u64| 100.0 * a as f64 / (b.max(1)) as f64;
+    let solve3 = d.build_us + d.warm_us + d.iter_us;
     Row {
+        max_group_wall_pct: pct_of(d.group_us.iter().copied().max().unwrap_or(0), sum_us),
+        max_group_manif_pct: pct_of(
+            d.group_manifs.iter().copied().max().unwrap_or(0) as u64,
+            sum_mf as u64,
+        ),
+        build_pct: pct_of(d.build_us, solve3),
+        warm_pct: pct_of(d.warm_us, solve3),
+        iter_pct: pct_of(d.iter_us, solve3),
         awake: h.awake_bodies,
         contacts: h.contacts,
         islands: d.islands,
@@ -136,7 +155,7 @@ fn report(a: &Args, substeps: u32, pass: u32, r: &Row) {
     println!(
         "[{}] pass{} ss={} iters={} threads={} | awake {} contacts {} islands {} groups {} manifolds {} | wall {:7.2} ms/tick | engine {:7.2} \
          | broad {:6.2} ({:5.1}%) narrow {:6.2} ({:5.1}%) solve {:6.2} ({:5.1}%) \
-         integ {:5.2} ({:4.1}%) fields {:5.2} ({:4.1}%) ccd {:5.2} ({:4.1}%)",
+         integ {:5.2} ({:4.1}%) fields {:5.2} ({:4.1}%) ccd {:5.2} ({:4.1}%)          | 最大组墙钟 {:4.1}% 流形 {:4.1}% | solve内 构建 {:4.1}% 热启动 {:4.1}% 迭代 {:4.1}%",
         a.mode,
         pass,
         substeps,
@@ -161,6 +180,11 @@ fn report(a: &Args, substeps: u32, pass: u32, r: &Row) {
         pct(r.fields),
         r.ccd,
         pct(r.ccd),
+        r.max_group_wall_pct,
+        r.max_group_manif_pct,
+        r.build_pct,
+        r.warm_pct,
+        r.iter_pct,
     );
 }
 
