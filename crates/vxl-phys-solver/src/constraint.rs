@@ -311,6 +311,7 @@ pub(crate) fn build_constraint(
     }
     let mut pts = [PointConstraint::default(); 4];
     let mut npts = 0u8;
+    let _loop_t = crate::build_seg::LoopGuard::new(m.a);
     for cp in &m.points {
         let warm_pt = match_warm_point(cp, m, warmm, &warm_world, warm_n, match_dist);
         let g = resolve_anchor(cp, warm_pt, pos_a, pos_b, &rot_a, &rot_b, m.normal);
@@ -318,7 +319,6 @@ pub(crate) fn build_constraint(
         let rb = g.pt_world - pos_b;
         let (nmass, tmass1, tmass2, tcross) =
             contact_masses(bodies, a, b, ra, rb, m.normal, t1, t2);
-
         let va = bodies.velocity_at(a, ra);
         let vb = bodies.velocity_at(b, rb);
         let vn = (vb - va).dot(m.normal);

@@ -192,6 +192,24 @@ fn report(a: &Args, substeps: u32, pass: u32, r: &Row) {
     );
 }
 
+/// 构建内部三段（需 `ISLAND_SEG_PROBE = true` 重编才有数；关时 0 样本 ⇒ 不打印）。
+fn report_build() {
+    let (ns, n) = vxl_phys_solver::build_seg::take();
+    if n == 0 {
+        return;
+    }
+    let pre = ns[0].saturating_sub(ns[1]);
+    let pct = |x: u64| 100.0 * x as f64 / ns[0].max(1) as f64;
+    println!(
+        "[build] 流形级抽样 1/{}（样本 {} 个流形，均 {:.0} ns/流形）：预处理 {:.1}% / 点循环 {:.1}%",
+        vxl_phys_solver::build_seg::SAMPLE_MOD,
+        n,
+        ns[0] as f64 / n.max(1) as f64,
+        pct(pre),
+        pct(ns[1])
+    );
+}
+
 fn main() {
     let a = parse_args();
     // 两遍顺序交错（1,4,1,4）：单跑不可信，热漂移要看得见。
@@ -199,6 +217,7 @@ fn main() {
         for &ss in &a.substeps {
             let r = measure(&a.mode, a.ticks, a.iters, ss, a.threads);
             report(&a, ss, pass, &r);
+            report_build();
         }
     }
 }
