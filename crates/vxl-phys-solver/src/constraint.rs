@@ -5,6 +5,8 @@ use vxl_phys_narrow::ContactPoint;
 use crate::warm_match::match_warm_point;
 
 mod friction;
+#[cfg(test)]
+mod point_bench;
 use friction::{friction_frame, material_of, tangent_setup};
 
 /// **切向目标速度** = 锚点漂移回拉 + **传送带带速**（K5）。
