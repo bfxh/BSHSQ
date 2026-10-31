@@ -11,6 +11,7 @@ pub(crate) mod fluid_stepper;
 mod medium;
 mod medium_sample;
 pub(crate) mod nan_guard;
+mod narrow_pass;
 pub(crate) mod narrow_tier;
 mod splat_dynamics;
 mod viscous;
@@ -37,7 +38,7 @@ impl World {
         };
         for k in 0..substeps {
             self.substep(dt, k == 0, reuse);
-            contact_probe::on_substep(self.tick, k, &self.manifolds);
+            contact_probe::on_substep(self, k);
         }
         self.domain_pass();
         // **转换窗口（V2）**：tick 末、各域轮次之后（契约卡的时间戳），下一 tick 宽相之前。
@@ -312,14 +313,7 @@ impl World {
             self.narrow.set_predict_dt(predict_dt);
             // 卡上窄相档（§17.9）：未注册 / 跑不通 / `predict_dt > 0` ⇒ 整趟回退 CPU（不半途混用）。
             if !self.narrow_tier_pass(&pairs, predict_dt) {
-                self.narrow.collide(
-                    &self.bodies,
-                    &pairs,
-                    self.terrain.slice(),
-                    &self.providers,
-                    &mut self.manifolds,
-                    self.jobs.as_ref(),
-                );
+                narrow_pass::run(self, &pairs, first);
             }
             self.timings.narrowphase_us += vxl_phys_core::probe::us(t0);
             self.pairs = pairs;
