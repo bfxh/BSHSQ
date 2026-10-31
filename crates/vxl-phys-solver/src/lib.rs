@@ -17,12 +17,11 @@ pub mod joints;
 
 use std::collections::HashMap;
 
-use vxl_phys_core::{BodySet, JobSystem, Mat3, PhysConfig};
+use vxl_phys_core::{BodySet, JobSystem, Mat3, PhysConfig, Vec3};
 use vxl_phys_narrow::Manifold;
 
-use vxl_phys_core::Vec3;
-
 // ── 按域拆出的子模块（子目录 src/）
+pub mod build_seg;
 mod cfg;
 mod constraint;
 mod helpers;
@@ -33,6 +32,7 @@ pub mod stats;
 mod types;
 mod warm;
 mod warm_data;
+pub mod warm_match;
 pub(crate) use self::shock_budget::island_shock_budget;
 pub use self::{cfg::*, stats::*, types::*};
 pub(crate) use self::{constraint::*, helpers::*, island::*, warm::*, warm_data::*};

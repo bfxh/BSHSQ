@@ -158,6 +158,7 @@ fn build_island_constraints(
 ) {
     cbuf.clear();
     for &mi in &isl.manifs {
+        let t_total = crate::build_seg::start_total(manifolds[mi].a);
         build_constraint(
             cbuf,
             &manifolds[mi],
@@ -168,6 +169,7 @@ fn build_island_constraints(
             e_threshold,
             sp,
         );
+        crate::build_seg::add(0, t_total);
     }
 }
 
