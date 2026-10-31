@@ -83,7 +83,7 @@ pub(crate) fn add(slot: usize, t: Option<vxl_phys_core::probe::Stamp>) {
 pub fn take() -> ([u64; 5], u64) {
     ACC.with(|c| {
         let mut b = c.borrow_mut();
-        let v = std::mem::replace(&mut *b, [0; 6]);
+        let v = std::mem::take(&mut *b);
         ([v[0], v[1], v[2], v[3], v[4]], v[5])
     })
 }
