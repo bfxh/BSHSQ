@@ -10,7 +10,7 @@
 //!
 //! 抽样：每 `SAMPLE_MOD` 个流形取 1 个（按 `m.a.is_multiple_of(SAMPLE_MOD)`，确定性、
 //! 无计数器），只对样本流形读 2 次钟。累计**纳秒**（`probe::us` 会把亚微秒截断成 0）。
-use std::cell::Cell;
+use std::cell::RefCell;
 
 /// 抽样模数（每 N 个流形取 1 个）。
 pub const SAMPLE_MOD: u32 = 16;
@@ -18,7 +18,7 @@ pub const SAMPLE_MOD: u32 = 16;
 thread_local! {
     /// `[总, material_pair, friction_frame, 锚点世界, 点循环, 样本数]`。（1.99 连 `const { … }` 写法也判红，同 `contact_probe`。）
     #[allow(clippy::missing_const_for_thread_local)]
-    static ACC: Cell<[u64; 6]> = const { Cell::new([0; 6]) };
+    static ACC: RefCell<[u64; 6]> = const { RefCell::new([0; 6]) };
 }
 
 /// 整次 `build_constraint` 的计时起点（调用方用；`None` = 未抽样）。
@@ -70,12 +70,11 @@ pub(crate) fn add(slot: usize, t: Option<vxl_phys_core::probe::Stamp>) {
     if let Some(t) = t {
         let ns = vxl_phys_core::probe::ns(t);
         ACC.with(|c| {
-            let mut v = c.get();
+            let mut v = c.borrow_mut();
             v[slot] += ns;
             if slot == 0 {
                 v[5] += 1;
             }
-            c.set(v);
         });
     }
 }
@@ -83,7 +82,8 @@ pub(crate) fn add(slot: usize, t: Option<vxl_phys_core::probe::Stamp>) {
 /// 读取并清零：`([总, material_pair, friction, 锚点世界, 点循环], 样本流形数)`。
 pub fn take() -> ([u64; 5], u64) {
     ACC.with(|c| {
-        let v = c.replace([0; 6]);
+        let mut b = c.borrow_mut();
+        let v = std::mem::replace(&mut *b, [0; 6]);
         ([v[0], v[1], v[2], v[3], v[4]], v[5])
     })
 }
