@@ -254,6 +254,26 @@ fn tangential_drift(
     }
 }
 
+/// 锚点当前世界位置（≤4 点定长数组，零分配；匹配/复用判定共用）。
+fn warm_anchors(
+    wm: Option<&WarmManifold>,
+    pos_a: Vec3,
+    rot_a: &vxl_phys_core::Mat3,
+    pos_b: Vec3,
+    rot_b: &vxl_phys_core::Mat3,
+) -> ([Vec3; 4], usize) {
+    let mut warm_world = [Vec3::ZERO; 4];
+    let mut warm_n = 0usize;
+    if let Some(wm) = wm {
+        for w in wm.pts() {
+            warm_world[warm_n] =
+                (pos_a + rot_a.mul_vec3(w.la) + pos_b + rot_b.mul_vec3(w.lb)) * 0.5;
+            warm_n += 1;
+        }
+    }
+    (warm_world, warm_n)
+}
+
 /// 构建单个流形的接触约束（预计算质量项/bias/warm）。摩擦/恢复按材质对
 /// 组合（§4.4/§4.5）；静+动档 μ 随预解相对切向速度在 [μk, μs] 线化过渡
 /// （vt 取首个接触点，确定性）。切向基提升到流形级（原为每点重算）。
@@ -272,7 +292,8 @@ pub(crate) fn build_constraint(
     if !bodies.is_dynamic(a) && !bodies.is_dynamic(b) {
         return;
     }
-    let (mu, e) = material_pair(bodies, m, a, b);
+    let seg = crate::build_seg::sampled(m.a);
+    let (mu, e) = crate::seg_time!(seg, 1, material_pair(bodies, m, a, b));
 
     // 槽位表查找：索引给槽号，数据在稠密槽位里（回写按槽号原位写）。
     //
@@ -290,7 +311,7 @@ pub(crate) fn build_constraint(
         Some(&warm_slots[warm_slot as usize].1)
     };
     // K5：各向异性 ⇒ 切向基取主轴投影 + 带速（`None` ⇒ 原路径，逐位不变）。
-    let frame = friction_frame(bodies, a, b, m.normal, m);
+    let frame = crate::seg_time!(seg, 2, friction_frame(bodies, a, b, m.normal, m));
     let (t1, t2, mu_stick, belt) = tangent_setup(frame, m.normal, mu);
     let pos_a = bodies.position[a];
     let pos_b = bodies.position[b];
@@ -299,16 +320,8 @@ pub(crate) fn build_constraint(
     // 切向漂移判断跨帧稳定（裁剪点每帧重算的几何噪声被消除）。
     let rot_a = vxl_phys_core::Mat3::from_quat(bodies.rot(a));
     let rot_b = vxl_phys_core::Mat3::from_quat(bodies.rot(b));
-    // 锚点当前世界位置（≤4 点定长数组，零分配；匹配/复用判定共用）。
-    let mut warm_world = [Vec3::ZERO; 4];
-    let mut warm_n = 0usize;
-    if let Some(wm) = warmm {
-        for w in wm.pts() {
-            warm_world[warm_n] =
-                (pos_a + rot_a.mul_vec3(w.la) + pos_b + rot_b.mul_vec3(w.lb)) * 0.5;
-            warm_n += 1;
-        }
-    }
+    let (warm_world, warm_n) =
+        crate::seg_time!(seg, 3, warm_anchors(warmm, pos_a, &rot_a, pos_b, &rot_b));
     let mut pts = [PointConstraint::default(); 4];
     let mut npts = 0u8;
     let _loop_t = crate::build_seg::LoopGuard::new(m.a);

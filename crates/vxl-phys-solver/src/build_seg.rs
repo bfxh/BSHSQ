@@ -16,9 +16,9 @@ use std::cell::Cell;
 pub const SAMPLE_MOD: u32 = 16;
 
 thread_local! {
-    /// `[预处理纳秒, 点循环纳秒, 样本点数]`。（1.99 连 `const { … }` 写法也判红，同 `contact_probe`。）
+    /// `[总, material_pair, friction_frame, 锚点世界, 点循环, 样本数]`。（1.99 连 `const { … }` 写法也判红，同 `contact_probe`。）
     #[allow(clippy::missing_const_for_thread_local)]
-    static ACC: Cell<[u64; 3]> = const { Cell::new([0; 3]) };
+    static ACC: Cell<[u64; 6]> = const { Cell::new([0; 6]) };
 }
 
 /// 整次 `build_constraint` 的计时起点（调用方用；`None` = 未抽样）。
@@ -40,9 +40,20 @@ impl LoopGuard {
     }
 }
 
+/// 计时一个表达式（1 行插入；`seg` 为 false 时零成本）。
+#[macro_export]
+macro_rules! seg_time {
+    ($seg:expr, $slot:expr, $e:expr) => {{
+        let t = ($seg).then(vxl_phys_core::probe::start);
+        let out = $e;
+        $crate::build_seg::add($slot, t);
+        out
+    }};
+}
+
 impl Drop for LoopGuard {
     fn drop(&mut self) {
-        add(1, self.t);
+        add(4, self.t);
     }
 }
 
@@ -51,7 +62,10 @@ pub(crate) fn sampled(a: u32) -> bool {
     crate::ISLAND_SEG_PROBE && a.is_multiple_of(SAMPLE_MOD)
 }
 
-/// 记录一段（`None` = 未抽样，零成本）。`slot`：0 = 整次构建（同时计样本流形数），1 = 点循环。
+/// 记录一段（`None` = 未抽样，零成本）。
+///
+/// 槽位：0 = 整次构建（同时计样本流形数）、1 = `material_pair`、2 = `friction_frame + tangent_setup`、
+/// 3 = 锚点世界位置、4 = 点循环；"其余" = 0 − (1+2+3+4)（入口 / warm 槽查找 / 2×quat→Mat3 / push）。
 pub(crate) fn add(slot: usize, t: Option<vxl_phys_core::probe::Stamp>) {
     if let Some(t) = t {
         let ns = vxl_phys_core::probe::ns(t);
@@ -59,17 +73,17 @@ pub(crate) fn add(slot: usize, t: Option<vxl_phys_core::probe::Stamp>) {
             let mut v = c.get();
             v[slot] += ns;
             if slot == 0 {
-                v[2] += 1;
+                v[5] += 1;
             }
             c.set(v);
         });
     }
 }
 
-/// 读取并清零：`([整次构建 ns, 点循环 ns], 样本流形数)`；预处理 = 两者之差。
-pub fn take() -> ([u64; 2], u64) {
+/// 读取并清零：`([总, material_pair, friction, 锚点世界, 点循环], 样本流形数)`。
+pub fn take() -> ([u64; 5], u64) {
     ACC.with(|c| {
-        let v = c.replace([0; 3]);
-        ([v[0], v[1]], v[2])
+        let v = c.replace([0; 6]);
+        ([v[0], v[1], v[2], v[3], v[4]], v[5])
     })
 }

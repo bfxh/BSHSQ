@@ -198,15 +198,18 @@ fn report_build() {
     if n == 0 {
         return;
     }
-    let pre = ns[0].saturating_sub(ns[1]);
     let pct = |x: u64| 100.0 * x as f64 / ns[0].max(1) as f64;
+    let rest = ns[0].saturating_sub(ns[1] + ns[2] + ns[3] + ns[4]);
     println!(
-        "[build] 流形级抽样 1/{}（样本 {} 个流形，均 {:.0} ns/流形）：预处理 {:.1}% / 点循环 {:.1}%",
+        "[build] 抽样 1/{}（{} 流形，均 {:.0} ns/流形）= material_pair {:.1}% + friction_frame {:.1}%          + 锚点世界 {:.1}% + 点循环 {:.1}% + 其余 {:.1}%",
         vxl_phys_solver::build_seg::SAMPLE_MOD,
         n,
         ns[0] as f64 / n.max(1) as f64,
-        pct(pre),
-        pct(ns[1])
+        pct(ns[1]),
+        pct(ns[2]),
+        pct(ns[3]),
+        pct(ns[4]),
+        pct(rest)
     );
 }
 
