@@ -42,7 +42,7 @@ mod world_ccd;
 mod world_health;
 mod world_kinematic;
 mod world_soft;
-mod world_step;
+pub mod world_step;
 mod world_struct;
 pub(crate) use self::props::*;
 pub use self::world_step::{conversion::VoxelConversionExt, destruction::DestructionExt};

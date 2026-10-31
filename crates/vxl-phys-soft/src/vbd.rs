@@ -18,6 +18,7 @@ thread_local! {
     ///
     /// **必须是线程内的**：进程级静态会被并行测试与岛级并行互相踩（2026-10-30 被
     /// `tests/vbd_invariants.rs` 的确定性用例抓到：同一场景跑两遍结果不同）。
+    #[allow(clippy::missing_const_for_thread_local)]
     static BLOCK_ITERS: AtomicU32 = const { AtomicU32::new(0) };
 }
 
