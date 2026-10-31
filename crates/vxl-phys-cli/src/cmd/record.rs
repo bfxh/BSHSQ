@@ -27,10 +27,18 @@ pub(super) fn record_text(name: &str, ticks: usize) -> Result<String, String> {
     let mut w = scene(name)?;
     // **头部行**（`schema` 前缀）：把"这条基线是什么场景/多少 tick/什么周期"写进文件本身。
     // 没有它时，跨版本对拍只能看到"哈希不同"，分不清是引擎变了还是场景/档位配错了。
+    // **构建标识**也进头部：跨机器/跨构建对拍失败时，能一眼分辨"换了构建"还是"物理变了"。
+    // `vxl-phys` 是工作区包（脚本/门会改它），这里只取 crate 自报告的版本 + 目标三元组。
     let mut s = format!(
-        "{{\"schema\":1,\"scene\":\"{}\",\"ticks\":{},\"period\":{}}}
+        "{{\"schema\":1,\"scene\":\"{}\",\"ticks\":{},\"period\":{},\"engine\":\"{}\",\"target\":\"{}-{}\",\"profile\":\"{}\"}}
 ",
-        name, ticks, PERIOD
+        name,
+        ticks,
+        PERIOD,
+        env!("CARGO_PKG_VERSION"),
+        std::env::consts::ARCH,
+        std::env::consts::OS,
+        if cfg!(debug_assertions) { "debug" } else { "release" }
     );
     for t in 0..ticks as u64 {
         w.step();
