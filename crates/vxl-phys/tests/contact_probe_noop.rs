@@ -90,7 +90,8 @@ fn probe_does_not_perturb_dynamics() {
     assert_eq!(baseline.len(), probed.len(), "体数变了");
     for (i, (a, b)) in baseline.iter().zip(probed.iter()).enumerate() {
         assert_eq!(
-            a, b,
+            a,
+            b,
             "体 {} 的第 {} 个分量位不一致：探针改变了动力学",
             i / 6,
             i % 6
