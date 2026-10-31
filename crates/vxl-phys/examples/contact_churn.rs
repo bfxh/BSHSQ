@@ -261,6 +261,30 @@ fn report(a: &Args, churn: &Churn, cover: &Cover, loc: &LocStats) {
     );
 }
 
+/// warm 匹配读数（求解器自带的只读计数器，见 `vxl_phys_solver::stats`）。
+fn report_warm() {
+    let (e, f, m) = vxl_phys_solver::warm_match_stats_take();
+    let t = (e + f + m).max(1) as f64;
+    println!(
+        "[warm] 精确 {}（{:.1}%） / 回退 {}（{:.1}%） / 未匹配 {}（{:.1}%）",
+        e,
+        100.0 * e as f64 / t,
+        f,
+        100.0 * f as f64 / t,
+        m,
+        100.0 * m as f64 / t
+    );
+    let (d, dist, j) = vxl_phys_solver::warm_match::miss_gate_take();
+    println!(
+        "[warm] 未匹配拒因：深度门 {} / 距离门 {} / 深度跳变门 {}（自检：和 {} == 未匹配 {}）",
+        d,
+        dist,
+        j,
+        d + dist + j,
+        m
+    );
+}
+
 fn main() {
     let a = parse_args();
     let mut w = build_world(a.layers, a.side);
@@ -274,4 +298,5 @@ fn main() {
     contact_probe::enable(false);
     let (churn, cover) = analyze(&rows);
     report(&a, &churn, &cover, &loc);
+    report_warm();
 }

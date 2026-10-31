@@ -2,6 +2,8 @@
 use super::*;
 use vxl_phys_narrow::ContactPoint;
 
+use crate::warm_match::match_warm_point;
+
 mod friction;
 use friction::{friction_frame, material_of, tangent_setup};
 
@@ -54,92 +56,6 @@ fn material_pair(bodies: &BodySet, m: &Manifold, a: usize, b: usize) -> (f32, f3
     } else {
         vxl_phys_core::Material::combine(&mat_a, &mat_b)
     }
-}
-
-/// warm starting 匹配：① 特征 ID 精确匹配（带距离护栏，锚点当前世界位置量距）；
-/// ② 近邻回退（无特征或 ID 未命中）。命中/回退/未命中都进诊断计数。
-fn match_warm_point(
-    cp: &ContactPoint,
-    m: &Manifold,
-    warmm: Option<&WarmManifold>,
-    warm_world: &[Vec3; 4],
-    warm_n: usize,
-    match_dist: f32,
-) -> Option<WarmPoint> {
-    let mut warm_pt: Option<WarmPoint> = None;
-    if let Some(wm) = warmm {
-        if warm_n > 0 && wm.normal.dot(m.normal) > 0.95 {
-            if cp.feature != 0 {
-                warm_pt = (0..warm_n)
-                    .find(|&k| {
-                        wm.points[k].feature == cp.feature
-                            && (warm_world[k] - cp.point).length_squared() < match_dist * match_dist
-                    })
-                    .map(|k| wm.points[k]);
-                if warm_pt.is_some() {
-                    WARM_EXACT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                }
-            }
-            if warm_pt.is_none() {
-                // **回退分支单独收紧接受半径**（上一轮实测结论的直接产物）：
-                // 回退（特征未命中）按 4×skin ≈4cm 接受时会把**错配锚点**也认下来
-                // ⇒ 帧间「漂移」= 两点真实错位 ⇒ 暖启动冲量过驱动速度
-                // ⇒ 堆族永不入睡（实测：整个关掉回退使 col45 45/45、
-                // pile5 1985/2000 全睡且位置更准，但塔崩）。⇒ 收到 **1×skin**：
-                // 只认「确实还是同一个材料点」的候选；拒配 ⇒ 按新接触处理、不暖启动。
-                let fb = match_dist * 0.25;
-                warm_pt = (0..warm_n)
-                    .filter(|&k| {
-                        // 接触状态门（非距离信号）：分离/预期接触不继承
-                        // 上一帧的暖冲量（错配冲量过驱动间歇角点接触）。
-                        if cp.depth <= FB_DEPTH_MIN {
-                            return false;
-                        }
-                        if (warm_world[k] - cp.point).length_squared() >= fb * fb {
-                            return false;
-                        }
-                        // 深度跳变门（非距离信号）：|本帧裁剪深度 − 锚点烘焙深度|
-                        // 超限 ⇒ 拒配。见 FB_DEPTH_JUMP 注（含「恒等式陷阱」教训）。
-                        let w = wm.points[k];
-                        (cp.depth - w.depth0).abs() <= FB_DEPTH_JUMP
-                    })
-                    .min_by(|&x, &y| {
-                        (warm_world[x] - cp.point)
-                            .length_squared()
-                            .total_cmp(&(warm_world[y] - cp.point).length_squared())
-                    })
-                    .map(|k| wm.points[k]);
-                if let Some(w) = warm_pt {
-                    use std::sync::atomic::Ordering::Relaxed;
-                    WARM_FALLBACK.fetch_add(1, Relaxed);
-                    // 参考面代理：法向是否变（见 `warm_normal_flip_take` 注）。
-                    if wm.normal.dot(m.normal) < 0.99999 {
-                        WN_FLIP.fetch_add(1, Relaxed);
-                    } else {
-                        WN_SAME.fetch_add(1, Relaxed);
-                    }
-                    // 成因分解（诊断，只计数）：见 `vxl_phys_narrow::feature_kind` 注。
-                    let (s_new, c_new) = vxl_phys_narrow::feature_kind(cp.feature);
-                    let (s_old, c_old) = vxl_phys_narrow::feature_kind(w.feature);
-                    if s_new != s_old {
-                        WB_SIDE.fetch_add(1, Relaxed);
-                    } else if c_new != c_old {
-                        WB_CLIP.fetch_add(1, Relaxed);
-                    } else if vxl_phys_narrow::feature_hash_part(cp.feature)
-                        != vxl_phys_narrow::feature_hash_part(w.feature)
-                    {
-                        WB_HASH.fetch_add(1, Relaxed);
-                    } else {
-                        WB_SAME.fetch_add(1, Relaxed);
-                    }
-                }
-            }
-            if warm_pt.is_none() {
-                WARM_MISS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            }
-        }
-    }
-    warm_pt
 }
 
 /// 复用判定后的有效几何：世界点、有效深度、烘焙深度、双局部锚点、分离向量。
