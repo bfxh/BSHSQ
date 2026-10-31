@@ -310,7 +310,7 @@ fn setup(device: &wgpu::Device, queue: &wgpu::Queue, data: &Data, bv0: &[f32], p
     .concat();
     queue.write_buffer(&par, 0, &pbytes);
 
-    let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("solve"),
         source: wgpu::ShaderSource::Wgsl(include_str!("gpu_solve_probe.wgsl").into()),
     });
@@ -355,7 +355,7 @@ fn setup(device: &wgpu::Device, queue: &wgpu::Queue, data: &Data, bv0: &[f32], p
         device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some(entry),
             layout: Some(&pl),
-            module: &module,
+            module: &shader,
             entry_point: Some(entry),
             compilation_options: Default::default(),
             cache: None,
