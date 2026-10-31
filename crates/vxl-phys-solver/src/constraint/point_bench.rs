@@ -10,10 +10,10 @@ use crate::types::SolverParams;
 use vxl_phys_core::{BodySet, PhysConfig, Quat, Shape, Vec3};
 use vxl_phys_narrow::ContactPoint;
 
-const N: u32 = 1_000_000;
+const N: u64 = 1_000_000;
 
-fn bench<T>(name: &str, f: impl Fn() -> T) -> f64 {
-    // 预热
+/// 跑 `N` 次，返回**每调用 0.1 ns**（整数；§5 严格 f32 ⇒ 本文件不出现 `f64`）。
+fn bench<T>(name: &str, f: impl Fn() -> T) -> u64 {
     for _ in 0..1000 {
         std::hint::black_box(f());
     }
@@ -21,9 +21,9 @@ fn bench<T>(name: &str, f: impl Fn() -> T) -> f64 {
     for _ in 0..N {
         std::hint::black_box(f());
     }
-    let ns = t0.elapsed().as_nanos() as f64 / N as f64;
-    println!("{name:28} {ns:8.1} ns/call");
-    ns
+    let ns10 = (t0.elapsed().as_nanos() as u64) * 10 / N;
+    println!("{name:28} {} ns/call", ns10 / 10); // print:allow（`#[ignore]` 手动微基准的固定读数；默认测试与生产路径都不跑）
+    ns10
 }
 
 #[test]
@@ -54,7 +54,7 @@ fn point_blocks() {
         feature: 7,
     };
 
-    println!("---- 单次调用（1e6 次平均）----");
+    println!("---- 单次调用（1e6 次平均，0.1ns）----"); // print:allow（同上）
     let masses = bench("contact_masses + cross", || {
         (
             contact_masses(&bodies, a, b, ra, rb, n, t1, t2),
@@ -125,19 +125,12 @@ fn point_blocks() {
             ),
         )
     });
-    println!("---- 合计（每点一次）----");
+    println!("---- 合计（每点一次，0.1ns）----"); // print:allow（同上）
+    let sum10 = masses + vel + anchor_miss + soft + tan + warm;
     println!(
-        "sum = {:.1} ns/点（不含 warm 匹配的键查找、结构体写入、循环开销）",
-        masses + vel + anchor_miss + soft + tan + warm
-    );
-    println!(
-        "三方向批量 = {wide:.1} ns（原 {masses:.1}，比 {:.2}×）",
-        masses / wide.max(0.1)
-    );
-    println!(
-        "其中 quat→Mat3 = {quat:.1} ns × [contact_masses 内约 6–8 次] ≈ {:.0} ns；apply_world_inv_inertia = {awi:.1} ns",
-        quat * 7.0
-    );
+        "[point-bench] sum={} (0.1ns) ns/点 wide={} masses={} quat={} awi={}",
+        sum10, wide, masses, quat, awi
+    ); // print:allow（同上）
 }
 
 /// 造一个"命中"的 warm 流形（4 点，特征号与 `cp` 对上）。
