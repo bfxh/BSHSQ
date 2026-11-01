@@ -80,7 +80,7 @@ jobs:
       # 工具逐个安装（首次 CI 实测：合并写法 `tool: a,b,c` 在安装步失败——exit 76；
       # 拆成独立步骤后失败可归因到具体工具，且各自的 manifest/版本独立解析）。
       - name: 安装 typos
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           # **钉版本**（2026-09-21 实测教训：install-action 默认装 @latest，日志里赫然写着
           # `installing cargo-machete@latest`——工具自己发新版就能把分支判红而代码没动过）。
@@ -98,7 +98,7 @@ jobs:
           sudo install -m 0755 actionlint /usr/local/bin/actionlint
           actionlint --version
       - name: 安装 zizmor
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: zizmor@1.30.1     # 钉版本，理由同 typos（@latest 会自己漂）
       - name: 拼写（typos；豁免项见 _typos.toml）
@@ -143,7 +143,7 @@ jobs:
       - name: 依赖红线（外部依赖 / 构建依赖增量门）
         run: python3 scripts/deps_lock.py
       - name: 安装依赖审计工具
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-deny@0.20.2,cargo-machete@0.9.2   # 钉版本，理由同 typos（实测日志见 @latest）
       - name: 依赖审计（公告 / 许可白名单 / 禁用 / 来源；配置见 deny.toml）
@@ -162,7 +162,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: rustdoc 警告即错误（含 broken intra-doc links）
         env:
           RUSTDOCFLAGS: -D warnings
@@ -196,7 +196,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Clang 工具链（clang 行）
         if: contains(matrix.label, 'Clang')
         run: sudo apt-get update && sudo apt-get install -y clang lld
@@ -275,7 +275,7 @@ jobs:
           echo "sorted_copies_boundary 重试 3 次仍失败：不再当抖动，按真失败处理（issue #30）"
           exit 1
       # 失败尝试的诊断包（issue #30）：**只在真有日志时**上传（成功路径上一个文件都不剩）。
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           # ⚠️ **不能用 `matrix.label`**：矩阵 job 里它是 `MSVC / x86_64` 这种带 `/` 的字符串，
@@ -302,7 +302,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Test (debug 档；debug_assert 生效)
         run: cargo test --workspace --exclude vxl-phys-gpu
 
@@ -314,10 +314,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # nightly
         with:
           components: miri
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: miri test -p vxl-phys-core
         env:
           MIRIFLAGS: -Zmiri-strict-provenance
@@ -332,7 +332,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: loom 模型测试
         env:
           RUSTFLAGS: --cfg loom
@@ -347,10 +347,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # nightly
         with:
           components: rust-src
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: TSan 并行契约测试
         env:
           RUSTFLAGS: -Zsanitizer=thread
@@ -368,10 +368,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@2c76c034f9e32a5d6e2c104dc4df23a22476db04 # nightly
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # nightly
         with:
           components: rust-src
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: ASan core 单测
         env:
           RUSTFLAGS: -Zsanitizer=address
@@ -401,7 +401,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Clang 工具链（clang 行）
         if: contains(matrix.label, 'Clang')
         run: sudo apt-get update && sudo apt-get install -y clang lld
@@ -466,7 +466,7 @@ jobs:
         env:
           RUSTFLAGS: ${{ matrix.linker }}
         run: cargo run --release -p vxl-phys --example m1_collision_row -- row-${{ matrix.label }}.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gates-${{ matrix.label }}
           path: |
@@ -485,7 +485,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           targets: aarch64-unknown-linux-gnu
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: 交叉工具链 + QEMU
         run: |
           sudo apt-get update
@@ -521,7 +521,7 @@ jobs:
         run: |
           cargo run --release -q --target aarch64-unknown-linux-gnu -p vxl-phys \
             --example m3_collapse -- 1200 64
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: gates-GCC-aarch64
           path: determinism-GCC-aarch64.txt
@@ -532,7 +532,7 @@ jobs:
     needs: [determinism, determinism-arm64]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with: { path: arts }
       - name: gate_scene.hash.final 全等断言（x86_64 三编译器）
         run: |
@@ -592,7 +592,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.11"
       - name: 跑门禁（dag/rayon/unwrap/unsafe/linelen/usize/glob/todo/god/cyc/nest/args + selftest + probe）
@@ -619,9 +619,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: 安装 cargo-llvm-cov
-        uses: taiki-e/install-action@3f74d7c16a4242f1c95561e98edc25d36adb4375 # v2.87.12
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-llvm-cov@0.9.1     # 钉版本，理由同 typos（@latest 会自己漂）
       - name: 覆盖率（全量测试 + 摘要）
@@ -630,7 +630,7 @@ jobs:
           # 本 job 是 continue-on-error 的报告层，但"cov 根本没产出"不该记成成功（artifact 会误导）。
           set -o pipefail
           cargo llvm-cov --workspace --release --json --output-path cov.json --summary-only | tee cov-summary.txt
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: coverage
@@ -661,14 +661,14 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: gold-sample
       # 唯一配方来源（fmt / clippy / col45 / pile5 / tower25 / m3 / m4 / m5 全判冻结基线）。
       # ⚠️ 不写 working-directory：脚本用 BASH_SOURCE 自己找仓库根，末参 `.` 只是占位。
       - name: 金样门（唯一配方来源：scripts/gate_gold.sh）
         run: mkdir -p "$GOLD_LOG_DIR" && bash scripts/gate_gold.sh .
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: gold-sample
@@ -690,7 +690,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       # 日志落工作区（脚本默认那条 `C:/…` 是给 Windows 本地留的；CI 上显式给路径，别凭空造 `C:` 目录）。
       # ⚠️ `SCALE_TIME_REPORT=1`（2026-10-06 首次上场实测后加）：runner 只有 4 vCPU、冻结值取自
       #    本机 8 线程 ⇒ 计时实测 **2.53×** 冻结值 —— 按 `SPEC` §5「性能门只在参考硬件判定」，
@@ -709,7 +709,7 @@ jobs:
           cargo run --release -q -p vxl-phys --example m1_islands > islands.txt 2>&1 || true
           tail -4 islands.txt
           grep -q "逐位一致" islands.txt || { echo "::error::m1_islands 未产出「串行/并行末态哈希逐位一致」（崩了或没跑到）"; exit 1; }
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: scale-gate
@@ -730,7 +730,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: bench/realism-probe
       # 两档都跑：不变量档（守真实性不退化）+ 逐字档（跨机复现同一组数字）。
@@ -756,7 +756,7 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: 感官输出门（确定性 + 预算 + 基线）
         run: bash scripts/gate_sense.sh .
 
