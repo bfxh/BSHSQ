@@ -142,14 +142,13 @@ fn mv(iw: &[f32], b: usize, v: V3) -> V3 {
     )
 }
 
-#[allow(clippy::too_many_arguments)]
-fn cmass(iw: &[f32], ia: usize, ib: usize, im_a: f32, im_b: f32, ra: V3, rb: V3, d: V3) -> f32 {
-    let mut k = im_a + im_b;
-    if im_a > 0.0 {
-        k += mv(iw, ia, ra.cross(d)).cross(ra).dot(d);
+fn cmass(iw: &[f32], a: &Side, b: &Side, d: V3) -> f32 {
+    let mut k = a.im + b.im;
+    if a.im > 0.0 {
+        k += mv(iw, a.b, a.r.cross(d)).cross(a.r).dot(d);
     }
-    if im_b > 0.0 {
-        k += mv(iw, ib, rb.cross(d)).cross(rb).dot(d);
+    if b.im > 0.0 {
+        k += mv(iw, b.b, b.r.cross(d)).cross(b.r).dot(d);
     }
     if k > 1e-12 {
         1.0 / k
@@ -162,6 +161,14 @@ fn tangents(n: V3) -> (V3, V3) {
     let r = if n.x.abs() > 0.9 { V3::Y } else { V3::X };
     let t1 = n.cross(r).normalize();
     (t1, n.cross(t1))
+}
+
+/// 接触的一侧（体号 / 逆质量 / 力臂）：把成对的三个参数收成一个，
+/// 免得参考函数顶在形参棘轮（>7）上——**只是传参形状变了，算式一字未动**。
+struct Side {
+    b: usize,
+    im: f32,
+    r: V3,
 }
 
 /// 主机参考整链：构建 + `SWEEPS` 扫。
@@ -188,9 +195,21 @@ fn cpu_build(d: &Data, con: &mut Vec<f32>) {
         let rb = pt - V3::new(d.bd[ib * WB], d.bd[ib * WB + 1], d.bd[ib * WB + 2]);
         let (im_a, im_b) = (d.bd[ia * WB + 7], d.bd[ib * WB + 7]);
         let (t1, t2) = tangents(n);
-        let kn = cmass(&d.iw, ia, ib, im_a, im_b, ra, rb, n);
-        let kt1 = cmass(&d.iw, ia, ib, im_a, im_b, ra, rb, t1);
-        let kt2 = cmass(&d.iw, ia, ib, im_a, im_b, ra, rb, t2);
+        let (sa, sb) = (
+            Side {
+                b: ia,
+                im: im_a,
+                r: ra,
+            },
+            Side {
+                b: ib,
+                im: im_b,
+                r: rb,
+            },
+        );
+        let kn = cmass(&d.iw, &sa, &sb, n);
+        let kt1 = cmass(&d.iw, &sa, &sb, t1);
+        let kt2 = cmass(&d.iw, &sa, &sb, t2);
         let w = i * WCON;
         con[w..w + 6].copy_from_slice(&[ra.x, ra.y, ra.z, rb.x, rb.y, rb.z]);
         con[w + 6] = kn;

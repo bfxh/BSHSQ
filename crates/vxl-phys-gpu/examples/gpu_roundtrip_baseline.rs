@@ -4,9 +4,7 @@
 //! 读数口径：`World` 累计 + `NarrowTierStats` 分项 + GPU 档内 `prof`（`[4]` = 提交+映射+等）。
 //!
 //! 运行：`cargo run --release -p vxl-phys-gpu --example gpu_roundtrip_baseline -- [ticks]`
-use vxl_phys::{
-    BodyBuildExt, HeightField, NarrowTierExt, PhysConfig, Quat, Shape, Vec3, World,
-};
+use vxl_phys::{BodyBuildExt, HeightField, NarrowTierExt, PhysConfig, Quat, Shape, Vec3, World};
 use vxl_phys_gpu::narrow::NarrowTier;
 
 const SIDE: usize = 20;
@@ -91,7 +89,11 @@ fn main() {
         for t in 0..6 {
             b.step();
             let now = b.narrow_tier_stats().calls;
-            println!("   [诊断] tick {t}: 本 tick 进档 {} 次 · 常驻 {}", now - prev, b.narrow_resident_active());
+            println!(
+                "   [诊断] tick {t}: 本 tick 进档 {} 次 · 常驻 {}",
+                now - prev,
+                b.narrow_resident_active()
+            );
             prev = now;
         }
     }

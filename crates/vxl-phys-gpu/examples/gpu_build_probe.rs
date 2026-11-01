@@ -112,25 +112,23 @@ fn tangents(n: Vec3) -> (Vec3, Vec3) {
     (t1, n.cross(t1))
 }
 
-#[allow(clippy::too_many_arguments)]
-fn contact_mass(
-    iw: &[f32],
-    ia: usize,
-    ib: usize,
-    im_a: f32,
-    im_b: f32,
-    ra: Vec3,
-    rb: Vec3,
-    d: Vec3,
-) -> f32 {
-    let mut k = im_a + im_b;
-    if im_a > 0.0 {
-        let w = mv(iw, ia, ra.cross(d));
-        k += w.cross(ra).dot(d);
+/// 接触的一侧（体号 / 逆质量 / 力臂）：把成对的三个参数收成一个，免得参考函数顶在
+/// 形参棘轮（>7）上——**只是传参形状变了，算式一字未动**。
+struct Side {
+    b: usize,
+    im: f32,
+    r: Vec3,
+}
+
+fn contact_mass(iw: &[f32], a: &Side, b: &Side, d: Vec3) -> f32 {
+    let mut k = a.im + b.im;
+    if a.im > 0.0 {
+        let w = mv(iw, a.b, a.r.cross(d));
+        k += w.cross(a.r).dot(d);
     }
-    if im_b > 0.0 {
-        let w = mv(iw, ib, rb.cross(d));
-        k += w.cross(rb).dot(d);
+    if b.im > 0.0 {
+        let w = mv(iw, b.b, b.r.cross(d));
+        k += w.cross(b.r).dot(d);
     }
     if k > 1e-12 {
         1.0 / k
@@ -155,9 +153,21 @@ fn cpu_ref(f: &Fixture) -> Vec<f32> {
         let ra = pt - pa;
         let rb = pt - pb;
         let (t1, t2) = tangents(n);
-        let kn = contact_mass(&f.iw, ia, ib, im_a, im_b, ra, rb, n);
-        let kt1 = contact_mass(&f.iw, ia, ib, im_a, im_b, ra, rb, t1);
-        let kt2 = contact_mass(&f.iw, ia, ib, im_a, im_b, ra, rb, t2);
+        let (sa, sb) = (
+            Side {
+                b: ia,
+                im: im_a,
+                r: ra,
+            },
+            Side {
+                b: ib,
+                im: im_b,
+                r: rb,
+            },
+        );
+        let kn = contact_mass(&f.iw, &sa, &sb, n);
+        let kt1 = contact_mass(&f.iw, &sa, &sb, t1);
+        let kt2 = contact_mass(&f.iw, &sa, &sb, t2);
         let mut kc = (im_a + im_b) * t1.dot(t2);
         if im_a > 0.0 {
             kc += ra.cross(t1).dot(mv(&f.iw, ia, ra.cross(t2)));

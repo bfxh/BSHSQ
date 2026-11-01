@@ -13,6 +13,7 @@ mod medium_sample;
 pub(crate) mod nan_guard;
 mod narrow_pass;
 pub(crate) mod narrow_tier;
+pub(crate) mod solve_tier;
 mod splat_dynamics;
 mod viscous;
 
@@ -323,19 +324,8 @@ impl World {
         //      **按 tick 合并**（`first` 清空、其余子步取峰值）：只留末子步的快照会让快撞消失。
         self.record_impacts(first);
         // 5) 求解 + 岛级休眠（唤醒语义在岛内：外部唤醒/新接触自动传播全岛）。
-        //    关节：唤醒传播必须**赶在接触解算之前**（否则关节链在"已判沉睡"
-        //    的岛上晚一步醒），关节冲量本身在接触解算之后施加。
-        let t0 = vxl_phys_core::probe::start();
-        self.joints.wake(&mut self.bodies);
-        self.solver.solve(
-            &mut self.bodies,
-            &self.manifolds,
-            &self.config,
-            dt,
-            self.jobs.as_ref(),
-        );
-        self.joints.solve(&mut self.bodies, &self.config, dt);
-        self.timings.solve_us += vxl_phys_core::probe::us(t0);
+        //    抽成自由函数 `solve_pass`（那里带"卡上求解档"的分支；同 `integrate_velocity_pass` 先例）。
+        solve_pass(self, dt);
         // 5.5) **油膜（切向黏性）**：解算之后按黏性收切向残余速度（`film_drag > 0` 才进）。
         film::pass(self, dt);
         // 6) 位置积分。
@@ -357,6 +347,23 @@ impl World {
     }
 }
 
+/// 5) 求解（接触 + 关节）。从 `substep` 抽出，为的是把"卡上求解档"的分支放在**这里**而不是
+/// 塞进 `substep`（那里是全文件最长函数）；⚠️ **自由函数而不是方法**（`World` 方法数顶在棘轮上）。
+///
+/// 关节的唤醒传播必须**赶在接触解算之前**（否则关节链在"已判沉睡"的岛上晚一步醒），
+/// 关节冲量本身在接触解算之后施加。
+fn solve_pass(w: &mut World, dt: f32) {
+    let t0 = vxl_phys_core::probe::start();
+    w.joints.wake(&mut w.bodies);
+    // 卡上求解档（`PLAN-gpu.md` §30 B 片）：未注册 / 超容量 / 后端报错 ⇒ **整趟**回退 CPU。
+    if !w.solve_tier_pass(dt, false) {
+        w.solver
+            .solve(&mut w.bodies, &w.manifolds, &w.config, dt, w.jobs.as_ref());
+    }
+    w.joints.solve(&mut w.bodies, &w.config, dt);
+    w.timings.solve_us += vxl_phys_core::probe::us(t0);
+}
+
 /// 2) 速度积分（含计时累加）。从 `substep` 抽出（那里是全文件最长函数）；⚠️ **自由函数而不是方法**——`World` 的方法数顶在 god 门类型账（76，只准减）。
 fn stabilization_pass(w: &mut World, dt: f32) {
     // **无偏置趟**（Rapier TGS-Soft 语义：带偏置趟 → 位置积分 → 无偏置趟）：去穿透已由位置推进
@@ -365,8 +372,11 @@ fn stabilization_pass(w: &mut World, dt: f32) {
     // 从 `substep` 抽出（腾出 CCD 预算收口那一行；同 `integrate_velocity_pass` 的先例）。
     if w.config.stabilization_iterations > 0 {
         let t0 = vxl_phys_core::probe::start();
-        w.solver
-            .solve_unbiased(&mut w.bodies, &w.manifolds, &w.config, dt, w.jobs.as_ref());
+        // 同一张档：卡上档把 `cleanup` 折进参数（`bias = 0`），不注册时逐字走原来的 CPU 调用。
+        if !w.solve_tier_pass(dt, true) {
+            w.solver
+                .solve_unbiased(&mut w.bodies, &w.manifolds, &w.config, dt, w.jobs.as_ref());
+        }
         w.timings.solve_us += vxl_phys_core::probe::us(t0);
     }
 }

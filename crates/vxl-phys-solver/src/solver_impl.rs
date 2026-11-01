@@ -4,6 +4,8 @@
 //! scatter / warm 回写 / 休眠」八个 helper（纯搬移，探针位置与状态写入序逐条保持）。
 use super::*;
 
+#[path = "solver_impl/island_build.rs"] // 并查集分岛 + 岛桶；`solve_phase` 与卡上档两条编排链共用
+mod island_build;
 #[path = "solver_impl/sleep.rs"] // 休眠族；拆子模块的理由见该文件头注
 mod sleep;
 #[path = "solver_impl/wake_signal.rs"] // 唤醒判据；`sleep.rs` 受文件行数棘轮
@@ -155,91 +157,6 @@ impl ImpulseSolver {
         self.sleep_pass(bodies, islands, manifolds, config, dt, cleanup);
         self.island_pool = pool;
         self.last_phase_us = (d_island, d_solve, vxl_phys_core::probe::us(t_sleep), 0);
-    }
-
-    /// 1) 并查集分岛（直接对流形；双静态对不入岛）。固定规则：小索引为根（确定性）。
-    ///    ⚠️ **运动学体进岛**（A 档，`PLAN-kinematic.md` §2）：判据是"**非静态 × 非静态**"。
-    ///    代价已实测并被接受：一部平台会把它托着的所有塔并成**一个**岛
-    ///    （探针⑦：静态支撑 7 个岛 → 动态/运动学支撑 1 个岛），而本仓并行是岛级。
-    ///    缓冲跨帧复用（`self.parent`），避免每帧 20 万级 alloc/fill。
-    fn build_union_find(&mut self, bodies: &BodySet, manifolds: &[Manifold]) -> Vec<u32> {
-        let n = bodies.len();
-        let mut parent = std::mem::take(&mut self.parent);
-        parent.clear();
-        parent.extend(0..n as u32);
-        for m in manifolds {
-            let (a, b) = (m.a as usize, m.b as usize);
-            if bodies.is_dynamic_or_kinematic(a) && bodies.is_dynamic_or_kinematic(b) {
-                union_small_root(&mut parent, m.a, m.b);
-            }
-        }
-        parent
-    }
-
-    /// 2) 岛桶。体按索引升序；岛内流形按全局流形序（§4.14 确定性模式）。
-    ///    只有「与清醒体连通」的体参与建岛：
-    ///    - 第一遍：清醒动体建岛（睡眠体不建岛 → 全睡眠帧岛构建 ≈ O(查是否为空)）；
-    ///    - 第二遍：睡眠动体若其连通分量已被激活（root 已在槽位表）则并入——
-    ///      保证「被撞唤醒」的接触对里有沉睡侧的体（求解冲量要施加到它并唤醒）。
-    ///
-    ///    岛池跨帧复用（Vec 容量保留），全清醒场景（10 万岛）不再逐帧分配。
-    fn fill_island_buckets(
-        &mut self,
-        bodies: &BodySet,
-        manifolds: &[Manifold],
-        parent: &mut [u32],
-    ) -> (Vec<Island>, usize) {
-        let n = bodies.len();
-        let mut root_slot: HashMap<u32, usize> = HashMap::new();
-        let mut pool = std::mem::take(&mut self.island_pool);
-        let mut islands_used = 0usize;
-        for i in 0..n {
-            if !(bodies.is_dynamic_or_kinematic(i) && bodies.awake[i]) {
-                continue;
-            }
-            let r = find_small_root(parent, i as u32);
-            let slot = *root_slot.entry(r).or_insert_with(|| {
-                if islands_used == pool.len() {
-                    pool.push(Island {
-                        bodies: Vec::new(),
-                        manifs: Vec::new(),
-                    });
-                }
-                let s = islands_used;
-                pool[s].bodies.clear();
-                pool[s].manifs.clear();
-                islands_used += 1;
-                s
-            });
-            pool[slot].bodies.push(i as u32);
-        }
-        if !root_slot.is_empty() {
-            // 睡眠侧并入（其根已被清醒体激活的连通分量）。
-            for i in 0..n {
-                if !bodies.is_dynamic(i) || bodies.awake[i] {
-                    continue;
-                }
-                let r = find_small_root(parent, i as u32);
-                if let Some(&slot) = root_slot.get(&r) {
-                    pool[slot].bodies.push(i as u32);
-                }
-            }
-            for (mi, m) in manifolds.iter().enumerate() {
-                let (a, b) = (m.a as usize, m.b as usize);
-                if !bodies.is_dynamic(a) && !bodies.is_dynamic(b) {
-                    continue;
-                }
-                let root = if bodies.is_dynamic(a) {
-                    find_small_root(parent, m.a)
-                } else {
-                    find_small_root(parent, m.b)
-                };
-                if let Some(&slot) = root_slot.get(&root) {
-                    pool[slot].manifs.push(mi);
-                }
-            }
-        }
-        (pool, islands_used)
     }
 
     /// 3) 清醒岛分组 + gather：把组内岛体速度拷进组内 scratch（顺序 = 岛序 = scatter 序）。

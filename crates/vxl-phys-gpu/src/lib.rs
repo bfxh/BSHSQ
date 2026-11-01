@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 pub mod acoustic;
+pub mod backend;
 pub mod bbox;
 pub mod broad;
 pub mod grid;
@@ -15,37 +16,5 @@ pub mod mapped;
 pub mod narrow;
 pub mod pipeline;
 pub mod probe;
-
-/// GPU 后端统一入口。
-pub trait PhysGpuBackend: Send + Sync {
-    fn name(&self) -> &'static str;
-    /// 是否可用（设备枚举 + 特性检测）。
-    fn available(&self) -> bool;
-    /// 批量任务提交入口（粒子/流体/布料/批量碰撞/批量 memfind）。
-    /// M4 实现；M0 返回 false 表示未就绪。
-    fn submit(&self, _tag: &'static str) -> bool {
-        false
-    }
-}
-
-/// CPU 回退占位：任何 GPU 路径都必须能在无 GPU 环境退化到与 CPU 一致的路径。
-pub struct CpuFallback;
-
-impl PhysGpuBackend for CpuFallback {
-    fn name(&self) -> &'static str {
-        "cpu-fallback"
-    }
-    fn available(&self) -> bool {
-        true
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fallback_always_available() {
-        assert!(CpuFallback.available());
-    }
-}
+pub mod solve_tier;
+pub use backend::{CpuFallback, PhysGpuBackend};
