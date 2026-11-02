@@ -157,7 +157,7 @@ pub fn pack_contact(out: &mut Vec<f32>, r: &ContactRow) {
 /// 返回 `(off, items)`；`off` 长度 `n_b + 1`。
 pub fn build_csr(ct: &[f32], n_b: usize) -> (Vec<u32>, Vec<u32>) {
     let mut counts = vec![0u32; n_b + 1];
-    for c in ct.chunks_exact(CT_WORDS) {
+    for c in ct.as_chunks::<CT_WORDS>().0 {
         for &idx in &c[..2] {
             let b = idx as usize;
             if b < n_b {
@@ -170,7 +170,7 @@ pub fn build_csr(ct: &[f32], n_b: usize) -> (Vec<u32>, Vec<u32>) {
     }
     let mut items = vec![0u32; counts[n_b] as usize];
     let mut cursor: Vec<usize> = counts[..n_b].iter().map(|&v| v as usize).collect();
-    for (ci, c) in ct.chunks_exact(CT_WORDS).enumerate() {
+    for (ci, c) in ct.as_chunks::<CT_WORDS>().0.iter().enumerate() {
         for &idx in &c[..2] {
             let b = idx as usize;
             if b < n_b {

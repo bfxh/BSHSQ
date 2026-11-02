@@ -200,8 +200,8 @@ mod tests {
     // glob 门对新文件零基线 => 显式导入（含测试模块）。
     use super::{SolveTierBackend, TierCtx};
     use crate::{BodySet, ImpulseSolver, PhysConfig, Vec3};
-    use vxl_phys_core::solve_tier::{self as st, SolveTierIn};
-    use vxl_phys_core::{Quat, SerialJobSystem, Shape};
+    use vxl_phys_core::solve_tier::{self as st};
+    use vxl_phys_core::SerialJobSystem;
     use vxl_phys_narrow::{ContactPoint, Manifold};
 
     /// 假后端：把速度表写成给定值（用来证明"非有限值整趟作废"这条锁真的会红）。

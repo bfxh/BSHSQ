@@ -94,7 +94,7 @@ fn bucket_awake(
 fn absorb_sleeping(
     bodies: &BodySet,
     parent: &mut [u32],
-    pool: &mut Vec<Island>,
+    pool: &mut [Island],
     root_slot: &HashMap<u32, usize>,
 ) {
     for i in 0..bodies.len() {
@@ -113,7 +113,7 @@ fn assign_manifolds(
     bodies: &BodySet,
     manifolds: &[Manifold],
     parent: &mut [u32],
-    pool: &mut Vec<Island>,
+    pool: &mut [Island],
     root_slot: &HashMap<u32, usize>,
 ) {
     for (mi, m) in manifolds.iter().enumerate() {
