@@ -13,7 +13,7 @@ pub struct World {
     /// 宽相（§2.3 主路径 = 增量 BVH；可用 `with_broadphase` 换网格等实现）。
     pub broad: Box<dyn BroadPhase>,
     pub narrow: crate::world_step::narrow_tier::NarrowSlot, // 宿主窄相 + 可选卡上档（§17.9）
-    pub solver: ImpulseSolver,
+    pub solver: crate::world_step::solve_tier::SolverSlot, // 宿主求解器 + 可选卡上档（PLAN-gpu §30）
     /// **关节约束族**（§2.5）：接触解算之后整帧求解一遍。
     pub joints: JointSet,
     pub fields: FieldRegistry,

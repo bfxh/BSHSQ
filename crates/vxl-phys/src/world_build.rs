@@ -31,7 +31,7 @@ impl World {
         Self {
             broad,
             narrow: DefaultNarrowPhase::new(skin).into(),
-            solver: ImpulseSolver::new(skin),
+            solver: ImpulseSolver::new(skin).into(),
             joints: JointSet::default(),
             config,
             bodies,

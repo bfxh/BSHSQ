@@ -21,7 +21,7 @@ pub mod narrow_tier;
 pub mod probe;
 pub mod schedule;
 pub mod shape;
-
+pub mod solve_tier;
 pub use aabb::{union_aabb, Aabb};
 pub use body::{BodyId, BodySet, BodyType};
 pub use config::{FrictionModel, PhysConfig, Preset};
