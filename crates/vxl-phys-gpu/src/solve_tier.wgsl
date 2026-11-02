@@ -99,13 +99,25 @@ fn vel_at(b: u32, r: vec3<f32>) -> vec3<f32> {
     return v + cross(w, r);
 }
 
+/// 零向量安全归一化（= 主机 `Vec3::normalize`：`len > 1e-12` 才除，否则给零向量）。
+/// ⚠️ 不能用内建 `normalize`：零长度给 NaN，而 `body_apply` 的 `j = n*dn + tf[0]*dt1 + tf[1]*dt2`
+/// 里 `NaN * 0.0` 仍是 NaN ⇒ 退化法向会把 NaN 灌进速度表，哪怕这一趟切向冲量是 0。
+/// 长度用逐轴展开（与主机 `length_squared().sqrt()` 同式），不用内建 `length`/`dot`。
+fn norm_or_zero(v: vec3<f32>) -> vec3<f32> {
+    let len = sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    if (len > 1e-12) {
+        return v * (1.0 / len);
+    }
+    return vec3<f32>(0.0, 0.0, 0.0);
+}
+
 /// 切向基（= 主机 `helpers::tangents`，含 `refr` 的选择与手性）。
 fn tangents(n: vec3<f32>) -> mat3x3<f32> {
     var refr = vec3<f32>(0.0, 1.0, 0.0);
     if (abs(n.y) >= 0.9) {
         refr = vec3<f32>(1.0, 0.0, 0.0);
     }
-    let t1 = normalize(cross(n, refr));
+    let t1 = norm_or_zero(cross(n, refr));
     return mat3x3<f32>(t1, cross(n, t1), n);
 }
 
