@@ -317,6 +317,20 @@ impl SolveTier {
                 inp.ct.len()
             ));
         }
+        // **上传边界**：三张表必须全为有限值。否则回读侧只能说"第 N 字非有限"，分不清
+        // 是主机表带进来的还是核里算出来的；这里能直接报出**哪张表的哪条记录**。
+        for (name, table, words) in [
+            ("体表 bd", inp.bd, BD_WORDS),
+            ("速度表 vel", inp.vel, VEL_WORDS),
+            ("接触表 ct", inp.ct, CT_WORDS),
+        ] {
+            if let Some(i) = table.iter().position(|v| !v.is_finite()) {
+                return Err(format!(
+                    "{name} 第 {i} 字（记录 {}）非有限 ⇒ 拒绝上传",
+                    i / words
+                ));
+            }
+        }
         let n_b = (inp.bd.len() / BD_WORDS) as u32;
         let n_c = (inp.ct.len() / CT_WORDS) as u32;
         if n_b > self.cap_bodies || n_c > self.cap_contacts {
