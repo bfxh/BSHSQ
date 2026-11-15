@@ -9,7 +9,7 @@
 - **没有任何 tag**；`Cargo.toml` 版本 `0.1.0`（workspace 根 + 各 crate）。
 - `.github/workflows/` 只有 `ci.yml`（成熟：SHA 固定 action、最小权限、成本分层、
   汇总门 `gates-summary`）——**没有 release 相关工作流**。
-- 许可证：`MIT`（见 [LICENSE](LICENSE)；署名与来源条款见 [NOTICE.md](NOTICE.md)）。
+- 许可证：`MIT OR Apache-2.0`（见 [LICENSE](LICENSE) 与 [LICENSE-APACHE](LICENSE-APACHE)；署名与来源条款见 [NOTICE.md](NOTICE.md)）。
 - **发布物是什么并不显然**：引擎是 workspace 内多个 crate；浏览器侧的 wasm 桥在
   **另一个仓库**（`physarena/wasm-bridge`，非 git）⇒ 本仓能发布的只有
   **tag + Release 说明 + 门禁产物**，除非另外决定"发布 crate 到 crates.io"。

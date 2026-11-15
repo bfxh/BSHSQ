@@ -28,7 +28,7 @@ ignore = [
 version = 2
 # 白名单**只列当前依赖树实际出现的许可**（cargo-deny 会对未出现的条目报
 # `license-not-encountered`）——即「新增许可类型必须显式开锁并写理由」：
-#   MIT  → 本仓自身（workspace.package.license）
+#   MIT / Apache-2.0  → 本仓自身（workspace.package.license）
 #   BSL-1.0           → xxhash-rust（唯一第三方依赖）
 # GPU 档（2026-09-23，wgpu 树引入；四条均为宽松/公共领域级，逐条标来源）：
 #   Zlib         → foldhash（← hashbrown）        OSI + FSF 双认可

@@ -165,7 +165,7 @@ RUSTFLAGS="--cfg loom" LOOM_MAX_PREEMPTIONS=3 cargo test -p vxl-phys-core --test
 
 ## 许可
 
-MIT（署名与来源条款见 [NOTICE.md](NOTICE.md)；依赖审计禁 GPL 传染）。
+MIT OR Apache-2.0（见 [LICENSE](LICENSE) 与 [LICENSE-APACHE](LICENSE-APACHE)；署名与来源条款见 [NOTICE.md](NOTICE.md)；依赖审计禁 GPL 传染）。
 
 ## 本机注意事项
 
